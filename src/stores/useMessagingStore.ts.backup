@@ -1,0 +1,903 @@
+import { create } from "zustand";
+import messagingService from "@/middleware/services/messaging.service";
+import { surveillanceService } from "@/middleware/services/service-factory";
+import { useAuthStore } from "./useAuthStore-v2";
+import {
+  presenceService,
+  Presence,
+} from "@/middleware/services/presence.service";
+
+// Inline types for messaging
+export interface ConversationWithUser {
+  id: string;
+  user1_id: string;
+  user2_id: string;
+  created_at: string;
+  updated_at: string;
+  other_user: {
+    id: string;
+    user_id: string;
+    username: string;
+    display_name: string;
+    avatar_url: string;
+  };
+  last_message: {
+    id: string;
+    conversation_id: string;
+    sender_id: string;
+    content: string;
+    media_url: string | undefined;
+    media_type: string;
+    created_at: string;
+    updated_at: string;
+    sender: {
+      id: string;
+      user_id: string;
+      username: string;
+      display_name: string;
+      avatar_url: string;
+    };
+    is_delivered: boolean;
+    is_seen: boolean;
+  };
+  unread_count: number;
+  is_online: boolean;
+  is_typing: boolean;
+}
+
+export interface MessageWithSender {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  media_url: string | undefined;
+  media_type: string;
+  created_at: string;
+  updated_at: string;
+  sender: {
+    id: string;
+    user_id: string;
+    username: string;
+    display_name: string;
+    avatar_url: string;
+  };
+  is_delivered: boolean;
+  is_seen: boolean;
+}
+
+export interface CreateMessageRequest {
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  media_url?: string;
+  media_type?: string;
+}
+
+export interface TypingUser {
+  conversation_id: string;
+  user_id: string;
+  is_typing: boolean;
+  speed?: string;
+  started_at: string;
+}
+
+export interface MessageEvent {
+  id: string;
+  message_id?: string;
+  conversation_id?: string;
+  user_id: string;
+  event_type: string;
+  data?: any;
+  created_at: string;
+}
+
+export interface DareRequest {
+  id: string;
+  conversation_id: string;
+  requester_id: string;
+  content: string;
+  created_at: string;
+}
+
+export interface DareResponse {
+  id: string;
+  request_id: string;
+  responder_id: string;
+  response: string;
+  created_at: string;
+}
+
+export interface MessageEvent {
+  id: string;
+  message_id?: string;
+  conversation_id?: string;
+  user_id: string;
+  event_type: string;
+  data?: any;
+  created_at: string;
+}
+
+export interface MessagingStore {
+  // State
+  conversations: ConversationWithUser[];
+  currentConversation: ConversationWithUser | null;
+  messages: MessageWithSender[];
+  loading: boolean;
+  error: string | null;
+  sendingMessage: boolean;
+  loadingMessages: boolean;
+  typingUsers: TypingUser[];
+  messageEvents: MessageEvent[];
+  dareRequests: DareRequest[];
+  dareResponses: DareResponse[];
+
+  // Computed values (now plain fields, derived via selectors)
+  unreadCount: number;
+  hasActiveConversation: boolean;
+  isTyping: boolean;
+  isConversationFrozen: boolean;
+
+  // Actions
+  loadConversations: (userId: string) => Promise<void>;
+  getOrCreateConversation: (
+    userId1: string,
+    userId2: string,
+  ) => Promise<string>;
+  loadMessages: (conversationId: string, userId: string) => Promise<void>;
+  sendMessage: (request: CreateMessageRequest) => Promise<void>;
+  markMessagesAsSeen: (conversationId: string, userId: string) => Promise<void>;
+  subscribeToConversation: (
+    conversationId: string,
+    callback: (payload: any) => void,
+  ) => void;
+  unsubscribeFromConversation: (conversationId: string) => void;
+  clearCurrentConversation: () => void;
+  clearError: () => void;
+  trackScreenshot: (messageId: string, userId: string) => Promise<void>;
+  trackAlmostSent: (
+    conversationId: string,
+    userId: string,
+    content: string,
+  ) => Promise<void>;
+  startTyping: (
+    conversationId: string,
+    userId: string,
+    speed: "slow" | "medium" | "fast",
+  ) => Promise<void>;
+  stopTyping: (conversationId: string, userId: string) => Promise<void>;
+  freezeConversation: (conversationId: string, userId: string) => Promise<void>;
+  unfreezeConversation: (
+    conversationId: string,
+    userId: string,
+  ) => Promise<void>;
+  deleteMessage: (messageId: string, userId: string) => Promise<void>;
+  initiateRandomChatDare: (userId: string, friendId: string) => Promise<void>;
+  respondToRandomChatDare: (
+    conversationIdOrUserId: string,
+    userIdOrDareId: string,
+    acceptOrResponse: boolean | string,
+  ) => Promise<void>;
+
+  // Real-time methods
+  subscribeToRealTimeConversations: (userId: string) => void;
+  unsubscribeFromRealTimeConversations: () => void;
+  subscribeToRealTimeMessages: (conversationId: string) => void;
+  unsubscribeFromRealTimeMessages: () => void;
+  subscribeToRealTimeEvents: (conversationId: string) => void;
+  unsubscribeFromRealTimeEvents: () => void;
+  sendRealTimeMessage: (
+    conversationId: string,
+    content: string,
+    mediaUrl?: string,
+    mediaType?: "TEXT" | "PHOTO" | "VIDEO",
+  ) => Promise<void>;
+  markMessageAsSeen: (messageId: string) => Promise<void>;
+  setTypingIndicator: (
+    conversationId: string,
+    isTyping: boolean,
+    speed?: "slow" | "normal" | "fast" | "furious",
+  ) => void;
+  subscribeToOnlineStatus: (userId: string) => void;
+  unsubscribeFromOnlineStatus: () => void;
+  setOnlineStatus: (isOnline: boolean) => void;
+  subscribeToFreezeStatus: (conversationId: string) => void;
+  unsubscribeFromFreezeStatus: () => void;
+  freezeChat: (conversationId: string) => void;
+  unfreezeChat: (conversationId: string) => void;
+  setCurrentConversation: (conversation: ConversationWithUser | null) => void;
+
+  // Additional tracking methods
+  trackChatSwitch: (
+    conversationId: string,
+    targetUserName?: string,
+  ) => Promise<void>;
+  trackOpenedNoReply: (conversationId: string) => Promise<void>;
+  trackLongUnsent: (conversationId: string, content: string) => Promise<void>;
+  trackMention: (
+    conversationId: string,
+    mentionedUsername: string,
+  ) => Promise<void>;
+  trackIgnoredMessage: (
+    conversationId: string,
+    targetUserName: string,
+  ) => Promise<void>;
+  trackSeenMessage: (
+    messageId: string,
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+  ) => void;
+  checkIgnoredMessage: (
+    messageId: string,
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+  ) => void;
+
+  // Additional state
+  seenMessages: Array<{
+    messageId: string;
+    conversationId: string;
+    seenAt: number;
+    senderId: string;
+    senderName: string;
+  }>;
+  friendDraft: string | null;
+  realTimeSubscriptions: Map<string, () => void>;
+  frozenBy: string | null;
+}
+
+// Helper to recompute derived fields from latest state slices
+function deriveComputedFields(
+  conversations: ConversationWithUser[],
+  currentConversation: ConversationWithUser | null,
+  typingUsers: TypingUser[],
+): Pick<
+  MessagingStore,
+  "unreadCount" | "hasActiveConversation" | "isTyping" | "isConversationFrozen"
+> {
+  const unreadCount = conversations.reduce(
+    (total, conv) => total + (conv.unread_count || 0),
+    0,
+  );
+
+  const hasActiveConversation = !!currentConversation;
+
+  // True when the OTHER user in the current conversation is typing
+  const isTyping = typingUsers.some(
+    (u) =>
+      u.conversation_id === currentConversation?.id &&
+      u.user_id === currentConversation?.other_user?.user_id &&
+      u.is_typing,
+  );
+
+  return {
+    unreadCount,
+    hasActiveConversation,
+    isTyping,
+    isConversationFrozen: false,
+  };
+}
+
+export const useMessagingStore = create<MessagingStore>((set, get) => ({
+  // Initial state
+  conversations: [],
+  currentConversation: null,
+  messages: [],
+  loading: false,
+  error: null,
+  sendingMessage: false,
+  loadingMessages: false,
+  typingUsers: [],
+  messageEvents: [],
+  dareRequests: [],
+  dareResponses: [],
+  seenMessages: [],
+  friendDraft: null,
+  realTimeSubscriptions: new Map(),
+  frozenBy: null,
+
+  // Computed initial values
+  unreadCount: 0,
+  hasActiveConversation: false,
+  isTyping: false,
+  isConversationFrozen: false,
+
+  // Actions
+  loadConversations: async (userId: string) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await messagingService.getConversations(userId);
+
+      if (response.success && response.conversations) {
+        // Transform conversations to match expected structure
+        const transformedConversations = response.conversations.map(
+          (conv: any) => ({
+            id: conv.id,
+            user1_id: conv.user1Id || userId,
+            user2_id: conv.user2Id || "",
+            created_at: conv.createdAt,
+            updated_at: conv.updatedAt,
+            other_user: {
+              id: conv.otherUser?.id || conv.otherUser?.userId || "",
+              user_id: conv.otherUser?.id || conv.otherUser?.userId || "",
+              username: conv.otherUser?.username || "unknown",
+              display_name:
+                conv.otherUser?.displayName ||
+                conv.otherUser?.username ||
+                "Unknown",
+              avatar_url: conv.otherUser?.avatarUrl || "",
+            },
+            last_message: conv.lastMessage || {
+              id: "",
+              conversation_id: conv.id,
+              sender_id: "",
+              content: "",
+              media_url: undefined,
+              media_type: "TEXT",
+              created_at: conv.updatedAt,
+              updated_at: conv.updatedAt,
+              sender: {
+                id: "",
+                user_id: "",
+                username: "",
+                display_name: "",
+                avatar_url: "",
+              },
+              is_delivered: false,
+              is_seen: false,
+            },
+            unread_count: conv.unreadCount || 0,
+            is_online: conv.isOnline || false,
+            is_typing: conv.isTyping || false,
+          }),
+        );
+
+        set((state) => ({
+          conversations: transformedConversations,
+          loading: false,
+          ...deriveComputedFields(
+            transformedConversations,
+            state.currentConversation,
+            state.typingUsers,
+          ),
+        }));
+      } else {
+        throw new Error(response.error || "Failed to load conversations");
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to load conversations";
+      set({ loading: false, error: errorMessage });
+    }
+  },
+
+  getOrCreateConversation: async (userId1: string, userId2: string) => {
+    try {
+      const response = await messagingService.getOrCreateConversation(
+        userId1,
+        userId2,
+      );
+
+      if (response.success && response.conversation) {
+        return response.conversation.id;
+      } else {
+        throw new Error(
+          response.error || "Failed to get or create conversation",
+        );
+      }
+    } catch (error) {
+      console.error("Error getting or creating conversation:", error);
+      throw error;
+    }
+  },
+
+  loadMessages: async (conversationId: string, userId: string) => {
+    set({ loadingMessages: true, error: null });
+    try {
+      const response = await messagingService.getMessages(
+        conversationId,
+        userId,
+      );
+
+      if (response.success && response.messages) {
+        // Transform messages to match expected structure
+        const transformedMessages = response.messages.map((msg: any) => ({
+          id: msg.id,
+          conversation_id: msg.conversationId,
+          sender_id: msg.senderId,
+          content: msg.content,
+          media_url: msg.mediaUrl,
+          media_type: msg.mediaType,
+          created_at: msg.createdAt,
+          updated_at: msg.updatedAt,
+          sender: {
+            id: msg.sender?.id || msg.sender?.userId || "",
+            user_id: msg.sender?.id || msg.sender?.userId || "",
+            username: msg.sender?.username || "unknown",
+            display_name:
+              msg.sender?.displayName || msg.sender?.username || "Unknown",
+            avatar_url: msg.sender?.avatarUrl || "",
+          },
+          is_delivered: msg.isDelivered || false,
+          is_seen: msg.isSeen || false,
+        }));
+
+        // Set current conversation
+        const { conversations } = get();
+        const currentConversation =
+          conversations.find((c) => c.id === conversationId) ?? null;
+
+        set((state) => ({
+          messages: transformedMessages,
+          loadingMessages: false,
+          currentConversation,
+          ...deriveComputedFields(
+            state.conversations,
+            currentConversation,
+            state.typingUsers,
+          ),
+        }));
+      } else {
+        throw new Error(response.error || "Failed to load messages");
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to load messages";
+      set({ loadingMessages: false, error: errorMessage });
+    }
+  },
+
+  sendMessage: async (request: CreateMessageRequest) => {
+    set({ sendingMessage: true, error: null });
+    try {
+      const response = await messagingService.sendMessage({
+        conversationId: request.conversation_id,
+        senderId: request.sender_id,
+        content: request.content,
+        mediaUrl: request.media_url,
+        mediaType: request.media_type as "TEXT" | "PHOTO" | "VIDEO",
+      });
+
+      if (!response.success) {
+        throw new Error(response.error || "Failed to send message");
+      }
+
+      set({ sendingMessage: false });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to send message";
+      set({ sendingMessage: false, error: errorMessage });
+    }
+  },
+
+  markMessagesAsSeen: async (conversationId: string, userId: string) => {
+    try {
+      set((state) => {
+        const conversations = state.conversations.map((conv) =>
+          conv.id === conversationId ? { ...conv, unread_count: 0 } : conv,
+        );
+        return {
+          messages: state.messages.map((msg) =>
+            msg.conversation_id === conversationId
+              ? { ...msg, is_seen: true, is_delivered: true }
+              : msg,
+          ),
+          conversations,
+          ...deriveComputedFields(
+            conversations,
+            state.currentConversation,
+            state.typingUsers,
+          ),
+        };
+      });
+    } catch (error) {
+      console.error("Error marking messages as seen:", error);
+    }
+  },
+
+  respondToRandomChatDare: async (
+    conversationIdOrUserId: string,
+    userIdOrDareId: string,
+    acceptOrResponse: boolean | string,
+  ) => {
+    try {
+      console.log(
+        `Random chat dare response: ${acceptOrResponse} — ${conversationIdOrUserId} / ${userIdOrDareId}`,
+      );
+    } catch (error) {
+      console.error("Error responding to random chat dare:", error);
+    }
+  },
+
+  subscribeToConversation: (
+    conversationId: string,
+    callback: (payload: any) => void,
+  ) => {
+    console.log(`Subscribed to conversation ${conversationId}`);
+  },
+
+  unsubscribeFromConversation: (conversationId: string) => {
+    console.log(`Unsubscribed from conversation ${conversationId}`);
+  },
+
+  clearCurrentConversation: () => {
+    set((state) => ({
+      currentConversation: null,
+      messages: [],
+      ...deriveComputedFields(state.conversations, null, state.typingUsers),
+    }));
+  },
+
+  clearError: () => {
+    set({ error: null });
+  },
+
+  trackScreenshot: async (messageId: string, userId: string) => {
+    try {
+      console.log(
+        `Screenshot tracked for message ${messageId} by user ${userId}`,
+      );
+      set((state) => ({
+        messageEvents: [
+          ...state.messageEvents,
+          {
+            id: `event-${Date.now()}`,
+            message_id: messageId,
+            user_id: userId,
+            event_type: "SCREENSHOT",
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }));
+    } catch (error) {
+      console.error("Error tracking screenshot:", error);
+    }
+  },
+
+  trackAlmostSent: async (
+    conversationId: string,
+    userId: string,
+    content: string,
+  ) => {
+    try {
+      console.log(
+        `Almost sent tracked for conversation ${conversationId} by user ${userId}`,
+      );
+      set((state) => ({
+        messageEvents: [
+          ...state.messageEvents,
+          {
+            id: `event-${Date.now()}`,
+            conversation_id: conversationId,
+            user_id: userId,
+            event_type: "ALMOST_SENT",
+            data: { content },
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }));
+    } catch (error) {
+      console.error("Error tracking almost sent:", error);
+    }
+  },
+
+  startTyping: async (
+    conversationId: string,
+    userId: string,
+    speed: "slow" | "medium" | "fast",
+  ) => {
+    try {
+      console.log(
+        `Typing started for conversation ${conversationId} by user ${userId} at speed ${speed}`,
+      );
+      set((state) => {
+        const typingUsers = [
+          ...state.typingUsers.filter((u) => u.user_id !== userId),
+          {
+            conversation_id: conversationId,
+            user_id: userId,
+            is_typing: true,
+            speed,
+            started_at: new Date().toISOString(),
+          },
+        ];
+        return {
+          typingUsers,
+          ...deriveComputedFields(
+            state.conversations,
+            state.currentConversation,
+            typingUsers,
+          ),
+        };
+      });
+    } catch (error) {
+      console.error("Error starting typing:", error);
+    }
+  },
+
+  stopTyping: async (conversationId: string, userId: string) => {
+    try {
+      console.log(
+        `Typing stopped for conversation ${conversationId} by user ${userId}`,
+      );
+      set((state) => {
+        const typingUsers = state.typingUsers.filter(
+          (u) =>
+            !(u.conversation_id === conversationId && u.user_id === userId),
+        );
+        return {
+          typingUsers,
+          ...deriveComputedFields(
+            state.conversations,
+            state.currentConversation,
+            typingUsers,
+          ),
+        };
+      });
+    } catch (error) {
+      console.error("Error stopping typing:", error);
+    }
+  },
+
+  freezeConversation: async (conversationId: string, userId: string) => {
+    try {
+      console.log(`Conversation ${conversationId} frozen by user ${userId}`);
+    } catch (error) {
+      console.error("Error freezing conversation:", error);
+    }
+  },
+
+  unfreezeConversation: async (conversationId: string, userId: string) => {
+    try {
+      console.log(`Conversation ${conversationId} unfrozen by user ${userId}`);
+    } catch (error) {
+      console.error("Error unfreezing conversation:", error);
+    }
+  },
+
+  deleteMessage: async (messageId: string, userId: string) => {
+    try {
+      console.log(`Message ${messageId} deleted by user ${userId}`);
+      set((state) => ({
+        messages: state.messages.filter((msg) => msg.id !== messageId),
+      }));
+    } catch (error) {
+      console.error("Error deleting message:", error);
+    }
+  },
+
+  initiateRandomChatDare: async (userId: string, friendId: string) => {
+    try {
+      console.log(`Random chat dare initiated by ${userId} to ${friendId}`);
+    } catch (error) {
+      console.error("Error initiating random chat dare:", error);
+    }
+  },
+
+  // Real-time methods (stubs for now since new service doesn't have these)
+  subscribeToRealTimeConversations: (userId: string) => {
+    console.log(
+      "subscribeToRealTimeConversations: Not implemented in new service",
+    );
+  },
+
+  unsubscribeFromRealTimeConversations: () => {
+    console.log("unsubscribeFromRealTimeConversations");
+  },
+
+  subscribeToRealTimeMessages: (conversationId: string) => {
+    console.log("subscribeToRealTimeMessages: Not implemented in new service");
+  },
+
+  unsubscribeFromRealTimeMessages: () => {
+    console.log("unsubscribeFromRealTimeMessages");
+  },
+
+  subscribeToRealTimeEvents: (conversationId: string) => {
+    console.log("subscribeToRealTimeEvents: Not implemented in new service");
+  },
+
+  unsubscribeFromRealTimeEvents: () => {
+    console.log("unsubscribeFromRealTimeEvents");
+  },
+
+  sendRealTimeMessage: async (
+    conversationId: string,
+    content: string,
+    _mediaUrl?: string,
+    _mediaType?: "TEXT" | "PHOTO" | "VIDEO",
+  ) => {
+    const { user } = useAuthStore.getState();
+    if (!user?.id) throw new Error("User not authenticated");
+
+    await get().sendMessage({
+      conversation_id: conversationId,
+      sender_id: user.id,
+      content,
+    });
+  },
+
+  markMessageAsSeen: async (messageId: string) => {
+    try {
+      const { user } = useAuthStore.getState();
+      if (!user?.id) throw new Error("User not authenticated");
+
+      const response = await messagingService.markMessageAsSeen(
+        messageId,
+        user.id,
+      );
+
+      if (response.success) {
+        set((state) => ({
+          messages: state.messages.map((msg) =>
+            msg.id === messageId ? { ...msg, is_seen: true } : msg,
+          ),
+        }));
+      }
+    } catch (error) {
+      console.error("Error marking message as seen:", error);
+    }
+  },
+
+  setTypingIndicator: (
+    conversationId: string,
+    isTyping: boolean,
+    speed?: "slow" | "normal" | "fast" | "furious",
+  ) => {
+    try {
+      const { user } = useAuthStore.getState();
+      if (!user?.id) return;
+
+      if (isTyping) {
+        get().startTyping(
+          conversationId,
+          user.id,
+          speed as "slow" | "medium" | "fast",
+        );
+      } else {
+        get().stopTyping(conversationId, user.id);
+      }
+    } catch (error) {
+      console.error("❌ Error setting typing indicator:", error);
+    }
+  },
+
+  subscribeToOnlineStatus: (userId: string) => {
+    console.log("subscribeToOnlineStatus: Not implemented in new service");
+  },
+
+  unsubscribeFromOnlineStatus: () => {
+    console.log("unsubscribeFromOnlineStatus");
+  },
+
+  setOnlineStatus: (isOnline: boolean) => {
+    console.log("setOnlineStatus: Not implemented in new service");
+  },
+
+  subscribeToFreezeStatus: (conversationId: string) => {
+    console.log("subscribeToFreezeStatus: Not implemented in new service");
+  },
+
+  unsubscribeFromFreezeStatus: () => {
+    console.log("unsubscribeFromFreezeStatus");
+  },
+
+  freezeChat: (conversationId: string) => {
+    const { user } = useAuthStore.getState();
+    if (!user?.id) return;
+    get().freezeConversation(conversationId, user.id);
+  },
+
+  unfreezeChat: (conversationId: string) => {
+    const { user } = useAuthStore.getState();
+    if (!user?.id) return;
+    get().unfreezeConversation(conversationId, user.id);
+  },
+
+  setCurrentConversation: (conversation: ConversationWithUser | null) => {
+    set((state) => ({
+      currentConversation: conversation,
+      ...deriveComputedFields(
+        state.conversations,
+        conversation,
+        state.typingUsers,
+      ),
+    }));
+  },
+
+  // Additional tracking methods
+  trackChatSwitch: async (conversationId: string, targetUserName?: string) => {
+    try {
+      const { user } = useAuthStore.getState();
+      if (!user?.id) return;
+      console.log("trackChatSwitch: Method not implemented in new service");
+
+// Real-time methods (stubs for now since new service doesn't have these)
+subscribeToRealTimeConversations: (userId: string) => {
+  console.log(
+    "subscribeToRealTimeConversations: Not implemented in new service",
+  );
+},
+
+unsubscribeFromRealTimeConversations: () => {
+  console.log("unsubscribeFromRealTimeConversations");
+},
+
+subscribeToRealTimeMessages: (conversationId: string) => {
+  console.log("subscribeToRealTimeMessages: Not implemented in new service");
+},
+
+unsubscribeFromRealTimeMessages: () => {
+  console.log("unsubscribeFromRealTimeMessages");
+},
+    }
+  },
+
+  trackSeenMessage: (
+    messageId: string,
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+  ) => {
+    const { seenMessages } = get();
+    const now = Date.now();
+
+    // Check if already tracked
+    if (seenMessages.some((m) => m.messageId === messageId)) return;
+
+    const seenMessage = {
+      messageId,
+      conversationId,
+      seenAt: now,
+      senderId,
+      senderName,
+    };
+
+    console.log("[@ignored] Tracking seen message:", seenMessage);
+    set({ seenMessages: [...seenMessages, seenMessage] });
+
+    // Start 5-minute timer to check if reply comes
+    setTimeout(
+      () => {
+        get().checkIgnoredMessage(
+          messageId,
+          conversationId,
+          senderId,
+          senderName,
+        );
+      },
+      5 * 60 * 1000,
+    ); // 5 minutes
+  },
+
+  checkIgnoredMessage: (
+    messageId: string,
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+  ) => {
+    const { seenMessages, messages } = get();
+    const seenMessage = seenMessages.find((m) => m.messageId === messageId);
+
+    if (!seenMessage) return;
+
+    // Check if there's a reply after the message was seen
+    const hasReply = messages.some(
+      (msg) =>
+        msg.sender_id === get().currentConversation?.other_user?.user_id &&
+        new Date(msg.created_at).getTime() > seenMessage.seenAt,
+    );
+
+    if (!hasReply) {
+      console.log("[@ignored] Message ignored, triggering event:", senderName);
+      get().trackIgnoredMessage(conversationId, senderName);
+
+      // Remove from seenMessages to prevent re-checking
+      const updatedSeenMessages = seenMessages.filter(
+        (m) => m.messageId !== messageId,
+      );
+      set({ seenMessages: updatedSeenMessages });
+    }
+  },
+}));

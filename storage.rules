@@ -1,0 +1,106 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ═════════════════════════════════════════════════════════════════
+    // HELPERS
+    // ═════════════════════════════════════════════════════════════════
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Max upload sizes (bytes)
+    function underMaxImage() { return request.resource.size < 10 * 1024 * 1024; }   // 10 MB
+    function underMaxMedia() { return request.resource.size < 100 * 1024 * 1024; }  // 100 MB
+
+    function isSafeImage() {
+      return request.resource.contentType != null
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')
+        // SECURITY FIX: Block SVG files (XSS risk)
+        && !request.resource.contentType.matches('image/svg+xml');
+    }
+
+    function isImageOrVideo() {
+      return request.resource.contentType != null
+        && (request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')
+            || request.resource.contentType.matches('video/(mp4|webm|quicktime)'))
+        // SECURITY FIX: Block SVG and dangerous file types
+        && !request.resource.contentType.matches('image/svg+xml')
+        && !request.resource.contentType.matches('(application|text)/');
+    }
+
+    // SECURITY FIX: Validate filename to prevent path traversal
+    // Allows timestamps and random prefixes in filenames
+    function isSafeFileName() {
+      // Match the full path pattern: folder/timestamp-random-filename.ext
+      return (request.resource.name.matches('^[a-zA-Z0-9_-]+/[a-zA-Z0-9]+/[0-9]+-[a-f0-9]+-[a-zA-Z0-9_-]+\\.(jpg|jpeg|png|webp|mp4|webm|mov)$')
+        || request.resource.name.matches('^[a-zA-Z0-9_-]+/[a-zA-Z0-9]+/[a-zA-Z0-9_-]+\\.(jpg|jpeg|png|webp|mp4|webm|mov)$'))
+        && !request.resource.name.matches('\\.\\.\\/')
+        && !request.resource.name.matches('^[.]');
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // OWNED FOLDERS — path: {folder}/{userId}/{file}
+    // The uploader's user id MUST match request.auth.uid, and writes are
+    // size / MIME-restricted.
+    // SECURITY FIX: Require authentication for reads to prevent unauthorized access.
+    // For production, consider using signed URLs via Cloud Functions instead of
+    // relying on Firebase Auth tokens for all requests.
+    // ═════════════════════════════════════════════════════════════════
+
+    match /avatars/{userId}/{fileName=**} {
+      // SECURITY: Avatars - allow signed-in users to read (profile pictures are public)
+      allow read: if isSignedIn();
+      allow write, create: if isOwner(userId) && isSafeImage() && underMaxImage() && isSafeFileName();
+      allow delete: if isOwner(userId);
+    }
+
+    match /feed-media/{userId}/{fileName=**} {
+      // SECURITY: Feed media - only owner can read to prevent unauthorized access
+      // Application layer handles friend-based access control via Firestore queries
+      allow read: if isOwner(userId);
+      allow write, create: if isOwner(userId) && isImageOrVideo() && underMaxMedia() && isSafeFileName();
+      allow delete: if isOwner(userId);
+    }
+
+    match /dare-proofs/{userId}/{fileName=**} {
+      // SECURITY: Dare proofs - only owner can read to prevent unauthorized access
+      // Application layer handles dare participant access control
+      allow read: if isOwner(userId);
+      allow write, create: if isOwner(userId) && isImageOrVideo() && underMaxMedia() && isSafeFileName();
+      allow delete: if isOwner(userId);
+    }
+
+    match /stories/{userId}/{fileName=**} {
+      // SECURITY: Stories - only owner can read to prevent unauthorized access
+      // Application layer handles story access control based on friendship
+      allow read: if isOwner(userId);
+      allow write, create: if isOwner(userId) && isImageOrVideo() && underMaxMedia() && isSafeFileName();
+      allow delete: if isOwner(userId);
+    }
+
+    match /messages/{userId}/{fileName=**} {
+      // SECURITY: Message media - only owner can read to prevent unauthorized access
+      // Application layer handles conversation participant access control
+      allow read: if isOwner(userId);
+      allow write, create: if isOwner(userId) && isImageOrVideo() && underMaxMedia() && isSafeFileName();
+      allow delete: if isOwner(userId);
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // DEFAULT DENY — anything outside the owned folders is blocked.
+    // This prevents attackers from uploading arbitrary files (malware,
+    // pirated content) into unlabelled paths.
+    // ═════════════════════════════════════════════════════════════════
+
+    match /{allPaths=**} {
+      allow read: if false;
+      allow write, create, delete: if false;
+    }
+  }
+}

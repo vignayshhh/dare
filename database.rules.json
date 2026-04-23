@@ -1,0 +1,81 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $userId"
+      }
+    },
+    "online_status": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $userId"
+      }
+    },
+    "typing": {
+      "$conversationId": {
+        ".read": "auth != null && (root.child('conversations_meta').child($conversationId).child('user1_id').val() === auth.uid || root.child('conversations_meta').child($conversationId).child('user2_id').val() === auth.uid)",
+        "$userId": {
+          ".write": "auth != null && auth.uid === $userId",
+          ".validate": "newData.val() === null || (newData.hasChildren(['is_typing']) && newData.childrenCount <= 3 && newData.child('is_typing').isBoolean() && (!newData.child('typing_speed').exists() || newData.child('typing_speed').isString()) && (!newData.child('last_seen').exists() || newData.child('last_seen').isString()))"
+        }
+      }
+    },
+    "drafts": {
+      "$conversationId": {
+        ".read": "auth != null && (root.child('conversations_meta').child($conversationId).child('user1_id').val() === auth.uid || root.child('conversations_meta').child($conversationId).child('user2_id').val() === auth.uid)",
+        "$userId": {
+          ".write": "auth != null && auth.uid === $userId",
+          ".validate": "newData.val() === null || (newData.hasChildren(['text', 'updated_at']) && newData.childrenCount <= 2 && newData.child('text').isString() && newData.child('text').val().length <= 5000 && newData.child('updated_at').isNumber())"
+        }
+      }
+    },
+    "frozen_chats": {
+      "$conversationId": {
+        ".read": "auth != null && (root.child('conversations_meta').child($conversationId).child('user1_id').val() === auth.uid || root.child('conversations_meta').child($conversationId).child('user2_id').val() === auth.uid)",
+        ".write": "auth != null && ((newData.child('is_frozen').val() === true && newData.child('frozen_by').val() === auth.uid) || (data.child('frozen_by').val() === auth.uid && newData.child('is_frozen').val() === false))",
+        ".validate": "newData.hasChildren(['is_frozen']) && newData.childrenCount <= 3 && newData.child('is_frozen').isBoolean() && (!newData.child('frozen_by').exists() || newData.child('frozen_by').isString()) && (!newData.child('frozen_at').exists() || newData.child('frozen_at').isString())"
+      }
+    },
+    "chat_switch_signals": {
+      "$conversationId": {
+        ".read": "auth != null && (root.child('conversations_meta').child($conversationId).child('user1_id').val() === auth.uid || root.child('conversations_meta').child($conversationId).child('user2_id').val() === auth.uid)",
+        "$signalId": {
+          ".write": "auth != null && auth.uid === newData.child('user_id').val()",
+          ".validate": "newData.hasChildren(['conversation_id', 'user_id', 'target_user_id', 'target_user_name', 'created_at']) && newData.childrenCount <= 6 && newData.child('conversation_id').val() === $conversationId && newData.child('user_id').val() === auth.uid && newData.child('target_user_id').isString() && newData.child('target_user_name').isString() && newData.child('target_user_name').val().length <= 120 && (!newData.child('recipient_user_id').exists() || newData.child('recipient_user_id').isString()) && newData.child('created_at').isNumber()"
+        }
+      }
+    },
+    "profile_viewers": {
+      "$targetUserId": {
+        ".read": "auth != null && auth.uid === $targetUserId",
+        "$viewerUserId": {
+          ".write": "auth != null && auth.uid === $viewerUserId",
+          ".validate": "newData.val() === null || (newData.hasChildren(['username', 'started_at', 'is_viewing']) && newData.childrenCount <= 5 && newData.child('username').isString() && newData.child('username').val().length <= 50 && (!newData.child('display_name').exists() || newData.child('display_name').isString()) && (!newData.child('avatar').exists() || newData.child('avatar').isString()) && newData.child('started_at').isNumber() && newData.child('is_viewing').isBoolean())"
+        }
+      }
+    },
+    "photo_viewers": {
+      "$targetUserId": {
+        ".read": "auth != null && auth.uid === $targetUserId",
+        "$viewerUserId": {
+          ".write": "auth != null && auth.uid === $viewerUserId",
+          ".validate": "newData.val() === null || (newData.hasChildren(['username', 'started_at', 'is_viewing']) && newData.childrenCount <= 5 && newData.child('username').isString() && newData.child('username').val().length <= 50 && (!newData.child('display_name').exists() || newData.child('display_name').isString()) && (!newData.child('avatar').exists() || newData.child('avatar').isString()) && newData.child('started_at').isNumber() && newData.child('is_viewing').isBoolean())"
+        }
+      }
+    },
+    "photo_views": {
+      "$targetUserId": {
+        ".read": "auth != null && auth.uid === $targetUserId",
+        "$viewerUserId": {
+          "$postId": {
+            ".write": "auth != null && auth.uid === $viewerUserId",
+            ".validate": "newData.hasChildren(['count', 'username', 'last_viewed']) && newData.childrenCount <= 3 && newData.child('count').isNumber() && newData.child('count').val() >= 1 && newData.child('count').val() <= 1000 && newData.child('username').isString() && newData.child('username').val().length <= 50 && newData.child('last_viewed').isNumber()"
+          }
+        }
+      }
+    }
+  }
+}

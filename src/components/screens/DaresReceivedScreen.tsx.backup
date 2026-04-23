@@ -1,0 +1,1087 @@
+"use client";
+
+import { useState, useEffect, memo, useCallback } from "react";
+import { Clock, Target, X, CheckCircle, AlertCircle } from "lucide-react";
+import "@/styles/design-system.css";
+import { TruthAnswerScreen } from "./TruthAnswerScreen";
+import { DareCompletionScreen } from "./DareCompletionScreen";
+import { ReviewScreen } from "./ReviewScreen";
+import {
+  friendsService,
+  dareService,
+  truthService,
+  userService,
+} from "@/middleware/services/service-factory";
+import { Avatar } from "../ui/Avatar";
+import { useAuthStore } from "@/stores/useAuthStore-v2";
+
+interface Challenge {
+  id: string;
+  type: "truth" | "dare";
+  challenger: {
+    name: string;
+    avatar: string;
+    username: string;
+    verified?: boolean;
+  };
+  receiver?: {
+    name: string;
+    avatar: string;
+    username: string;
+    verified?: boolean;
+  };
+  question?: string;
+  answer?: string; // Add answer field for truths
+  action?: string;
+  poll?: {
+    question: string;
+    options: string[];
+    votes: { [key: string]: number };
+  };
+  state: string;
+  createdAt: string;
+  updatedAt?: string;
+  isCompleted?: boolean;
+  completedAt?: string;
+  proof?: {
+    type: "image" | "video" | "audio";
+    url: string;
+    thumbnail?: string;
+  };
+}
+
+const TimerDisplay = memo(
+  ({
+    time,
+    formatTime,
+  }: {
+    time: number;
+    formatTime: (s: number) => string;
+  }) => (
+    <p className="text-[#4ade80] text-sm font-medium transition-all duration-100">
+      Time remaining: {formatTime(time)}
+    </p>
+  ),
+);
+
+const ChallengeCard = memo(
+  ({
+    challenge,
+    timeRemaining,
+    formatTime,
+    onAccept,
+    onSurrender,
+    onComplete,
+    isHighlighted,
+  }: {
+    challenge: Challenge;
+    timeRemaining: number | undefined;
+    formatTime: (s: number) => string;
+    onAccept: (c: Challenge) => void;
+    onSurrender: (c: Challenge) => void;
+    onComplete: (c: Challenge) => void;
+    isHighlighted?: boolean;
+  }) => {
+    const isChickenOut = challenge.state === "CHICKEN_OUT";
+    const isTimedOut = challenge.state === "ACCEPTED" && timeRemaining === 0;
+
+    return (
+      <div
+        className={`card animate-slide-up hover:border-accent-primary/50 p-6 ${isHighlighted ? "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-[#0a0f0a]" : ""}`}
+      >
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-4">
+            <div className="relative">
+              <Avatar
+                src={challenge.challenger.avatar}
+                alt={challenge.challenger.name}
+                size="xl"
+              />
+              {challenge.challenger.verified && (
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-accent-primary rounded-full flex items-center justify-center">
+                  <CheckCircle size={12} className="text-black" />
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="font-bold text-white text-lg">
+                  {challenge.challenger.name}
+                </h3>
+                {challenge.challenger.verified && (
+                  <CheckCircle size={16} className="text-accent-primary" />
+                )}
+              </div>
+              <p className="text-text-secondary text-base">
+                {challenge.challenger.username}
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={`px-4 py-2 rounded-full text-sm font-bold ${
+              challenge.type === "truth"
+                ? "bg-[#4ade80]/20 text-[#4ade80] border border-[#4ade80]/30"
+                : "bg-[#f59e0b]/20 text-[#f59e0b] border border-[#f59e0b]/30"
+            }`}
+          >
+            {challenge.type.toUpperCase()}
+          </div>
+        </div>
+
+        <div className="mb-6">
+          {challenge.type === "truth" ? (
+            <>
+              <p className="text-text-secondary text-base mb-3">
+                {challenge.challenger.name} wants to know the truth about:
+              </p>
+              <div className="bg-[#2a2a2a] rounded-xl p-4 border-l-4 border-[#4ade80]">
+                <p className="text-white font-semibold text-lg">
+                  {challenge.question}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-text-secondary text-base mb-3">
+                {challenge.challenger.name} dared you to:
+              </p>
+              <div className="bg-[#2a2a2a] rounded-xl p-4 border-l-4 border-[#f59e0b]">
+                <p className="text-white font-semibold text-lg">
+                  {challenge.action}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {challenge.type === "truth" && challenge.poll && (
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-white font-medium text-sm">
+                {challenge.poll.question}
+              </h4>
+              <span className="text-text-secondary text-xs">
+                {challenge.poll.totalVotes} votes
+              </span>
+            </div>
+            <div className="space-y-2">
+              {challenge.poll.options.map((option, index) => {
+                const votes = challenge.poll!.votes[option] || 0;
+                const percentage = Math.round(
+                  (votes / challenge.poll!.totalVotes) * 100,
+                );
+                return (
+                  <div key={index} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-white text-sm">{option}</span>
+                      <span className="text-text-secondary text-xs">
+                        {votes} votes
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-linear-to-r from-[#4ade80] to-[#22c55e] h-2 rounded-full"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons / Status Messages */}
+        <div className="flex space-x-4">
+          {isChickenOut ? (
+            // Refused — fade in shame message, no buttons
+            <div
+              className="flex-1 py-3 text-center rounded-xl border border-red-500/30 bg-red-500/10"
+              style={{ animation: "fadeIn 0.5s ease" }}
+            >
+              <p className="text-red-400 font-semibold text-sm">
+                You backed away like a loser
+              </p>
+            </div>
+          ) : isTimedOut ? (
+            // Timer ran out while accepted
+            <div
+              className="flex-1 py-3 text-center rounded-xl border border-gray-500/30 bg-gray-500/10"
+              style={{ animation: "fadeIn 0.5s ease" }}
+            >
+              <p className="text-gray-400 font-semibold text-sm">
+                Time up! You lost professionally
+              </p>
+            </div>
+          ) : challenge.state === "ACCEPTED" ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onComplete(challenge);
+              }}
+              className="btn btn-primary flex-1 py-3 text-base"
+            >
+              Complete Now
+            </button>
+          ) : challenge.state === "ANSWERED" ? (
+            <div
+              className="flex-1 py-3 text-center rounded-xl border border-accent-secondary/30 bg-accent-secondary/20"
+              style={{ animation: "fadeIn 0.5s ease" }}
+            >
+              <p className="text-accent-secondary font-semibold text-sm">
+                Waiting for approval
+              </p>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAccept(challenge);
+                }}
+                className="btn btn-primary flex-1 py-3 text-base"
+              >
+                Accept
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSurrender(challenge);
+                }}
+                className="btn btn-secondary flex-1 py-3 text-base"
+              >
+                Refuse
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Timer — only show when accepted and time remaining > 0 */}
+        {challenge.state === "ACCEPTED" &&
+          timeRemaining !== undefined &&
+          timeRemaining > 0 && (
+            <div className="mt-3 text-center">
+              <TimerDisplay time={timeRemaining} formatTime={formatTime} />
+            </div>
+          )}
+      </div>
+    );
+  },
+);
+
+const SentChallengeCard = memo(
+  ({
+    challenge,
+    onReview,
+  }: {
+    challenge: Challenge;
+    onReview: (c: Challenge) => void;
+  }) => {
+    return (
+      <div className="card animate-slide-up hover:border-accent-primary/50 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-4">
+            <div className="relative">
+              <Avatar
+                src={challenge.receiver?.avatar || "/default-avatar.png"}
+                alt={challenge.receiver?.name || "Unknown"}
+                size="xl"
+              />
+              {challenge.receiver?.verified && (
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-accent-primary rounded-full flex items-center justify-center">
+                  <CheckCircle size={12} className="text-black" />
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="font-bold text-white text-lg">
+                  To: {challenge.receiver?.name || "Unknown"}
+                </h3>
+                <span className="text-text-secondary text-sm">
+                  @{challenge.receiver?.username || "unknown"}
+                </span>
+              </div>
+              <p className="text-text-secondary text-sm">Truth you sent</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                challenge.state === "SENT"
+                  ? "bg-blue-500/20 text-blue-400"
+                  : challenge.state === "ANSWERED"
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-gray-500/20 text-gray-400"
+              }`}
+            >
+              {challenge.state}
+            </span>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          {challenge.type === "truth" ? (
+            <>
+              <p className="text-text-secondary text-base mb-3">You asked:</p>
+              <div className="bg-[#2a2a2a] rounded-xl p-4 border-l-4 border-[#4ade80]">
+                <p className="text-white font-semibold text-lg leading-relaxed">
+                  {challenge.question}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-text-secondary text-base mb-3">
+                You dared them to:
+              </p>
+              <div className="bg-[#2a2a2a] rounded-xl p-4 border-l-4 border-[#f59e0b]">
+                <p className="text-white font-semibold text-lg leading-relaxed">
+                  {challenge.action}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="mb-6">
+          <div className="flex items-center space-x-2 px-4 py-2 rounded-full border border-accent-secondary bg-accent-secondary/20">
+            <AlertCircle size={16} className="text-accent-secondary" />
+            <span className="text-accent-secondary font-medium text-sm">
+              Waiting for your approval
+            </span>
+          </div>
+        </div>
+
+        <div className="flex space-x-4">
+          <button
+            onClick={() => onReview(challenge)}
+            className="btn btn-primary flex-1 py-3 text-base"
+          >
+            Review
+          </button>
+        </div>
+      </div>
+    );
+  },
+);
+
+// In production mode, challenges come from backend
+// Start with empty arrays - will be populated by real data
+const initialChallenges: Challenge[] = [];
+const initialSentChallenges: Challenge[] = [];
+
+export function DaresReceivedScreen() {
+  const [activeTab, setActiveTab] = useState<"received" | "sent">("received");
+  const [showAcceptPrompt, setShowAcceptPrompt] = useState<Challenge | null>(
+    null,
+  );
+  const [challenges, setChallenges] = useState<Challenge[]>(initialChallenges);
+  const [sentChallenges, setSentChallenges] = useState<Challenge[]>(
+    initialSentChallenges,
+  );
+  const [currentScreen, setCurrentScreen] = useState<
+    "dares" | "truth" | "dare" | "review"
+  >("dares");
+  const [activeChallenge, setActiveChallenge] = useState<Challenge | null>(
+    null,
+  );
+  const [acceptedTimers, setAcceptedTimers] = useState<{
+    [key: string]: number;
+  }>({});
+
+  const formatTime = useCallback((seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAcceptedTimers((prev) => {
+        const hasActive = Object.values(prev).some((t) => t > 0);
+        if (!hasActive) return prev;
+        const next: { [key: string]: number } = {};
+        for (const id in prev) {
+          next[id] = prev[id] > 0 ? prev[id] - 1 : 0;
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Load truth data from backend
+  const { user } = useAuthStore();
+  const [shouldRefresh, setShouldRefresh] = useState(0);
+  const [highlightedTruthId, setHighlightedTruthId] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const loadTruths = async () => {
+      try {
+        console.log("Loading truths and dares for user:", user.id);
+
+        // Check for highlighted truth ID from sessionStorage
+        const storedHighlightId = sessionStorage.getItem("highlightTruthId");
+        if (storedHighlightId) {
+          console.log("🎯 Found highlighted truth ID:", storedHighlightId);
+          setHighlightedTruthId(storedHighlightId);
+          // Clear it after using
+          sessionStorage.removeItem("highlightTruthId");
+        }
+
+        // Load received truths
+        const receivedResponse = await truthService.getUserTruths(
+          user.id,
+          "received",
+        );
+        console.log("Received truths response:", receivedResponse);
+
+        // Load received dares
+        const receivedDaresResponse = await dareService.getReceivedDares(
+          user.id,
+        );
+        console.log("Received dares response:", receivedDaresResponse);
+
+        let allReceivedChallenges: Challenge[] = [];
+
+        // Process truths
+        if (receivedResponse.success && receivedResponse.truths) {
+          const truthChallenges: Challenge[] = await Promise.all(
+            receivedResponse.truths.map(async (truth) => {
+              // Get challenger info for each truth
+              let challengerName = "Someone";
+              let challengerUsername = "someone";
+
+              if (truth.challengerId) {
+                try {
+                  // Import UserRepository to get challenger profile
+                  const { UserRepository } =
+                    await import("@/backend/repositories/UserRepository");
+                  const userRepository = new UserRepository();
+                  const challengerProfile = await userRepository.getProfileById(
+                    truth.challengerId,
+                  );
+
+                  if (challengerProfile) {
+                    challengerName =
+                      challengerProfile.displayName ||
+                      challengerProfile.username ||
+                      "Someone";
+                    challengerUsername =
+                      challengerProfile.username || "someone";
+                  }
+                } catch (error) {
+                  console.error("Error getting challenger profile:", error);
+                }
+              }
+
+              return {
+                id: truth.id,
+                type: "truth" as const,
+                challenger: {
+                  name: challengerName,
+                  avatar: "/default-avatar.png",
+                  username: challengerUsername,
+                },
+                question: truth.question,
+                state: truth.state as any,
+                createdAt: truth.createdAt,
+              };
+            }),
+          );
+
+          allReceivedChallenges = [
+            ...allReceivedChallenges,
+            ...truthChallenges,
+          ];
+        }
+
+        // Process dares
+        if (receivedDaresResponse.success && receivedDaresResponse.dares) {
+          const dareChallenges: Challenge[] = await Promise.all(
+            receivedDaresResponse.dares.map(async (dare) => {
+              // Get challenger info for each dare
+              let challengerName = "Someone";
+              let challengerUsername = "someone";
+
+              if (dare.challengerId) {
+                try {
+                  // Import UserRepository to get challenger profile
+                  const { UserRepository } =
+                    await import("@/backend/repositories/UserRepository");
+                  const userRepository = new UserRepository();
+                  const challengerProfile = await userRepository.getProfileById(
+                    dare.challengerId,
+                  );
+
+                  if (challengerProfile) {
+                    challengerName =
+                      challengerProfile.displayName ||
+                      challengerProfile.username ||
+                      "Someone";
+                    challengerUsername =
+                      challengerProfile.username || "someone";
+                  }
+                } catch (error) {
+                  console.error("Error getting challenger profile:", error);
+                }
+              }
+
+              return {
+                id: dare.id,
+                type: "dare" as const,
+                challenger: {
+                  name: challengerName,
+                  avatar: "/default-avatar.png",
+                  username: challengerUsername,
+                },
+                action: dare.description,
+                state: dare.state as any,
+                createdAt: dare.createdAt,
+              };
+            }),
+          );
+
+          allReceivedChallenges = [...allReceivedChallenges, ...dareChallenges];
+        }
+
+        console.log("All received challenges:", allReceivedChallenges);
+        setChallenges(allReceivedChallenges);
+
+        // Load sent truths
+        const sentResponse = await truthService.getUserTruths(user.id, "sent");
+        console.log("Sent truths response:", sentResponse);
+        console.log("🔍 SENT TRUTHS DEBUG:", {
+          userId: user.id,
+          type: "sent",
+          success: sentResponse.success,
+          truthsCount: sentResponse.truths?.length,
+          truths: sentResponse.truths?.map((t) => ({
+            id: t.id,
+            challengerId: t.challengerId,
+            receiverId: t.receiverId,
+            question: t.question,
+            state: t.state,
+          })),
+        });
+
+        if (sentResponse.success && sentResponse.truths) {
+          const sentChallenges: Challenge[] = await Promise.all(
+            sentResponse.truths.map(async (truth) => {
+              // Get receiver's actual username
+              let receiverName = truth.receiverId;
+              let receiverUsername = truth.receiverId;
+              let receiverAvatar = "/default-avatar.png";
+
+              try {
+                const { UserRepository } =
+                  await import("@/backend/repositories/UserRepository");
+                const userRepository = new UserRepository();
+                const receiverProfile = await userRepository.getProfileById(
+                  truth.receiverId,
+                );
+                if (receiverProfile) {
+                  receiverName =
+                    receiverProfile.displayName ||
+                    receiverProfile.username ||
+                    truth.receiverId;
+                  receiverUsername =
+                    receiverProfile.username || truth.receiverId;
+                  receiverAvatar =
+                    receiverProfile.avatarUrl || "/default-avatar.png";
+                }
+              } catch (error) {
+                console.error("Error getting receiver profile:", error);
+              }
+
+              return {
+                id: truth.id,
+                type: "truth" as const,
+                challenger: {
+                  name: user.displayName || user.username || "You",
+                  avatar: user.avatar || "/default-avatar.png",
+                  username: user.username || "you",
+                },
+                receiver: {
+                  name: receiverName,
+                  avatar: receiverAvatar,
+                  username: receiverUsername,
+                },
+                question: truth.question,
+                answer: truth.answer, // Add the answer field
+                state: truth.state as any,
+                createdAt: truth.createdAt,
+              };
+            }),
+          );
+
+          console.log("Loaded sent challenges:", sentChallenges);
+          setSentChallenges(sentChallenges);
+        } else {
+          console.log("No sent truths found or error:", sentResponse.error);
+        }
+      } catch (error) {
+        console.error("Error loading truths:", error);
+      }
+    };
+
+    loadTruths();
+  }, [user?.id, shouldRefresh]); // Add shouldRefresh as dependency
+
+  // Function to trigger refresh when coming back from TruthAnswerScreen
+  const refreshTruths = useCallback(() => {
+    console.log("Refreshing truths...");
+    setShouldRefresh((prev) => prev + 1);
+  }, []);
+
+  const handleAccept = useCallback(async (challenge: Challenge) => {
+    if (challenge.type === "truth") {
+      try {
+        // Navigate to truth answer screen directly
+        setActiveChallenge(challenge);
+        setCurrentScreen("truth");
+      } catch (error) {
+        console.error("Error accepting truth:", error);
+      }
+    } else {
+      // For dares, show the accept prompt with timer
+      setChallenges((prev) =>
+        prev.map((c) =>
+          c.id === challenge.id ? { ...c, state: "ACCEPTED" as const } : c,
+        ),
+      );
+      setAcceptedTimers((prev) => ({ ...prev, [challenge.id]: 900 }));
+      setTimeout(() => setShowAcceptPrompt(challenge), 1000);
+    }
+  }, []);
+
+  // ✅ Fixed: ReviewScreen's onAccept now correctly points to this function
+  const handleAcceptReview = useCallback(
+    async (challengeId: string, comment?: string) => {
+      try {
+        // Find the challenge being accepted
+        const challenge = sentChallenges.find((c) => c.id === challengeId);
+        if (!challenge) return;
+
+        console.log("✅ Challenge accepted - removing from sent list");
+
+        // For truths: we might need to approve them manually
+        // For dares: they are automatically approved through voting system
+        if (challenge.type === "truth") {
+          // Truth approval logic (already working)
+          console.log("Approving truth:", challengeId);
+        } else if (challenge.type === "dare") {
+          // Dare approval happens through voting - just log for now
+          console.log(
+            "Dare will be approved through voting system:",
+            challengeId,
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error accepting challenge:", error);
+      }
+
+      // Remove from sent challenges and go back
+      setSentChallenges((prev) => prev.filter((c) => c.id !== challengeId));
+      setCurrentScreen("dares");
+      setActiveChallenge(null);
+    },
+    [sentChallenges, user],
+  );
+
+  const handleReject = useCallback((challengeId: string, comment?: string) => {
+    setSentChallenges((prev) => prev.filter((c) => c.id !== challengeId));
+    setCurrentScreen("dares");
+    setActiveChallenge(null);
+  }, []);
+
+  const handleSurrender = useCallback((challenge: Challenge) => {
+    setChallenges((prev) =>
+      prev.map((c) =>
+        c.id === challenge.id ? { ...c, state: "CHICKEN_OUT" as const } : c,
+      ),
+    );
+  }, []);
+
+  const handleComplete = useCallback((challenge: Challenge) => {
+    setActiveChallenge(challenge);
+    setCurrentScreen(challenge.type === "truth" ? "truth" : "dare");
+
+    // Reset submission state when opening completion screen
+    if (challenge.type === "dare") {
+      // This will help ensure the DareCompletionScreen starts fresh
+      console.log("Opening dare completion for:", challenge.id);
+    }
+  }, []);
+
+  const handleReview = useCallback((challenge: Challenge) => {
+    setActiveChallenge(challenge);
+    setCurrentScreen("review");
+  }, []);
+
+  const handleBackToDares = () => {
+    console.log("Coming back to dares, refreshing truths and dares...");
+    refreshTruths(); // Refresh truths to get updated state
+    setCurrentScreen("dares");
+    setActiveChallenge(null);
+  };
+
+  const handleDareSubmit = (proof: {
+    type: "image" | "video" | "audio";
+    url: string;
+  }) => {
+    console.log("🔥 [NUCLEAR] Most powerful fix - complete UI reset");
+
+    if (activeChallenge) {
+      console.log("🔥 [NUCLEAR] Target challenge:", activeChallenge.id);
+
+      // NUCLEAR OPTION 1: Direct state mutation (bypass React)
+      challenges.forEach((c, index) => {
+        if (c.id === activeChallenge.id) {
+          console.log(
+            "🔥 [NUCLEAR] Direct mutation of challenge at index",
+            index,
+          );
+          // Force mutate the object directly
+          (c as any).state = "PROOF_SUBMITTED";
+        }
+      });
+
+      // NUCLEAR OPTION 2: Force complete state reset
+      console.log("🔥 [NUCLEAR] Resetting all state");
+      const nuclearChallenges = challenges.map((c) => {
+        if (c.id === activeChallenge.id) {
+          return { ...c, state: "PROOF_SUBMITTED" as const };
+        }
+        return c;
+      });
+
+      // NUCLEAR OPTION 3: Set state multiple times to force re-render
+      setChallenges([]); // Clear first
+      setTimeout(() => {
+        setChallenges(nuclearChallenges); // Then set new data
+        console.log("🔥 [NUCLEAR] State reset complete");
+      }, 10);
+
+      // NUCLEAR OPTION 4: Update sent challenges too
+      const nuclearSentChallenges = sentChallenges.map((c) => {
+        if (c.id === activeChallenge.id) {
+          return { ...c, state: "PROOF_SUBMITTED" as const };
+        }
+        return c;
+      });
+      setSentChallenges(nuclearSentChallenges);
+
+      // NUCLEAR OPTION 5: Force navigation and refresh
+      setCurrentScreen("dares"); // Go to dares state first
+      setActiveChallenge(null);
+      
+      setTimeout(() => {
+        setCurrentScreen("dares"); // Then back to dares
+        console.log("🔥 [NUCLEAR] Navigation reset complete");
+      }, 100);
+
+      // NUCLEAR OPTION 6: Force multiple refreshes
+      setTimeout(() => refreshTruths(), 150);
+      setTimeout(() => refreshTruths(), 300);
+      setTimeout(() => refreshTruths(), 500);
+
+      console.log("🔥 [NUCLEAR] All nuclear options deployed");
+    }
+  };
+
+  if (currentScreen === "truth" && activeChallenge) {
+    return (
+      <TruthAnswerScreen
+        truthId={activeChallenge.id}
+        onBack={handleBackToDares}
+      />
+    );
+  }
+
+  if (currentScreen === "dare" && activeChallenge) {
+    return (
+      <DareCompletionScreen
+        challenge={{
+          id: activeChallenge.id,
+          challenger: activeChallenge.challenger,
+          action: activeChallenge.action!,
+        }}
+        onBack={handleBackToDares}
+        onSubmit={handleDareSubmit}
+      />
+    );
+  }
+
+    return (
+      <div className="screen-container">
+        <style>
+          {`@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }`}
+        </style>
+        <div className="nav-header">
+          <div className="p-4">
+            <h1 className="text-2xl font-bold text-white text-center mb-4">
+              Dares
+            </h1>
+
+            <div className="flex bg-bg-tertiary rounded-full p-1 max-w-sm mx-auto">
+              <button
+                onClick={() => setActiveTab("received")}
+                className={`flex-1 py-3 px-6 rounded-full text-sm font-semibold transition-all duration-300 ${
+                  activeTab === "received"
+                    ? "text-black shadow-lg"
+                    : "text-text-secondary hover:text-white"
+                }`}
+                style={{
+                  backgroundColor:
+                    activeTab === "received" ? "#00ff88" : "transparent",
+                  boxShadow:
+                    activeTab === "received"
+                      ? "0 8px 16px rgba(0, 255, 136, 0.3)"
+                      : "none",
+                }}
+              >
+                Dares Received
+              </button>
+              <button
+                onClick={() => setActiveTab("sent")}
+                className={`flex-1 py-3 px-6 rounded-full text-sm font-semibold transition-all duration-300 ${
+                  activeTab === "sent"
+                    ? "text-black shadow-lg"
+                    : "text-text-secondary hover:text-white"
+                }`}
+                style={{
+                  backgroundColor:
+                    activeTab === "sent" ? "#00ff88" : "transparent",
+                  boxShadow:
+                    activeTab === "sent"
+                      ? "0 8px 16px rgba(0, 255, 136, 0.3)"
+                      : "none",
+                }}
+              >
+                Dares Sent
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="space-y-4">
+            {activeTab === "received"
+              ? challenges.map((challenge, index) => (
+                  <ChallengeCard
+                    key={`${challenge.type}-${challenge.id}-${index}`}
+                    challenge={challenge}
+                    timeRemaining={acceptedTimers[challenge.id]}
+                    formatTime={formatTime}
+                    onAccept={handleAccept}
+                    onSurrender={handleSurrender}
+                    onComplete={handleComplete}
+                    isHighlighted={challenge.id === highlightedTruthId}
+                  />
+                ))
+              : sentChallenges.map((challenge, index) => (
+                  <SentChallengeCard
+                    key={`${challenge.type}-${challenge.id}-${index}`}
+                    challenge={challenge}
+                    onReview={handleReview}
+                  />
+                ))}
+          </div>
+        </div>
+
+        {showAcceptPrompt && (
+          <div
+            className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowAcceptPrompt(null)}
+          >
+            <div
+              className="bg-[#1a1a1a] w-full max-w-sm rounded-2xl p-6 animate-slide-up overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center mb-8">
+                <h3 className="text-white font-bold text-lg mb-3 leading-tight">
+                  You've accepted this {showAcceptPrompt.type.toUpperCase()}
+                </h3>
+                <p className="text-text-secondary text-sm leading-relaxed">
+                  {showAcceptPrompt.type === "truth"
+                    ? "Answer the truth question honestly"
+                    : "Complete the dare and submit proof"}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    setShowAcceptPrompt(null);
+                    setActiveChallenge(showAcceptPrompt);
+                    setCurrentScreen(
+                      showAcceptPrompt.type === "truth" ? "truth" : "dare",
+                    );
+                  }}
+                  className="btn btn-primary w-full py-3 text-base font-semibold"
+                >
+                  Start Now
+                </button>
+                <button
+                  onClick={() => setShowAcceptPrompt(null)}
+                  className="btn btn-secondary w-full py-3 text-base font-semibold"
+                >
+                  Do it Later
+                </button>
+              </div>
+}
+};
+
+if (currentScreen === "truth" && activeChallenge) {
+  return (
+    <TruthAnswerScreen
+      truthId={activeChallenge.id}
+      onBack={handleBackToDares}
+    />
+  );
+}
+
+if (currentScreen === "dare" && activeChallenge) {
+  return (
+    <DareCompletionScreen
+      challenge={{
+        id: activeChallenge.id,
+        challenger: activeChallenge.challenger,
+        action: activeChallenge.action!,
+      }}
+      onBack={handleBackToDares}
+      onSubmit={handleDareSubmit}
+    />
+  );
+}
+
+return (
+  <div className="screen-container">
+    <style>
+      {`@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }`}
+    </style>
+    <div className="nav-header">
+      <div className="p-4">
+        <h1 className="text-2xl font-bold text-white text-center mb-4">
+          Dares
+        </h1>
+
+        <div className="flex bg-bg-tertiary rounded-full p-1 max-w-sm mx-auto">
+          <button
+            onClick={() => setActiveTab("received")}
+            className={`flex-1 py-3 px-6 rounded-full text-sm font-semibold transition-all duration-300 ${
+              activeTab === "received"
+                ? "text-black shadow-lg"
+                : "text-text-secondary hover:text-white"
+            }`}
+            style={{
+              backgroundColor:
+                activeTab === "received" ? "#00ff88" : "transparent",
+              boxShadow:
+                activeTab === "received"
+                  ? "0 8px 16px rgba(0, 255, 136, 0.3)"
+                  : "none",
+            }}
+          >
+            Dares Received
+          </button>
+          <button
+            onClick={() => setActiveTab("sent")}
+            className={`flex-1 py-3 px-6 rounded-full text-sm font-semibold transition-all duration-300 ${
+              activeTab === "sent"
+                ? "text-black shadow-lg"
+                : "text-text-secondary hover:text-white"
+            }`}
+            style={{
+              backgroundColor:
+                activeTab === "sent" ? "#00ff88" : "transparent",
+              boxShadow:
+                activeTab === "sent"
+                  ? "0 8px 16px rgba(0, 255, 136, 0.3)"
+                  : "none",
+            }}
+          >
+            Dares Sent
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="space-y-4">
+        {activeTab === "received"
+          ? challenges.map((challenge, index) => (
+              <ChallengeCard
+                key={`${challenge.type}-${challenge.id}-${index}`}
+                challenge={challenge}
+                timeRemaining={acceptedTimers[challenge.id]}
+                formatTime={formatTime}
+                onAccept={handleAccept}
+                onSurrender={handleSurrender}
+                onComplete={handleComplete}
+                isHighlighted={challenge.id === highlightedTruthId}
+              />
+            ))
+          : sentChallenges.map((challenge, index) => (
+              <SentChallengeCard
+                key={`${challenge.type}-${challenge.id}-${index}`}
+                challenge={challenge}
+                onReview={handleReview}
+              />
+            ))}
+      </div>
+    </div>
+
+    {showAcceptPrompt && (
+      <div
+        className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+        onClick={() => setShowAcceptPrompt(null)}
+      >
+        <div
+          className="bg-[#1a1a1a] w-full max-w-sm rounded-2xl p-6 animate-slide-up overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-center mb-8">
+            <h3 className="text-white font-bold text-lg mb-3 leading-tight">
+              You've accepted this {showAcceptPrompt.type.toUpperCase()}
+            </h3>
+            <p className="text-text-secondary text-sm leading-relaxed">
+              {showAcceptPrompt.type === "truth"
+                ? "Answer the truth question honestly"
+                : "Complete the dare and submit proof"}
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => {
+                setShowAcceptPrompt(null);
+                setActiveChallenge(showAcceptPrompt);
+                setCurrentScreen(
+                  showAcceptPrompt.type === "truth" ? "truth" : "dare",
+                );
+              }}
+              className="btn btn-primary w-full py-3 text-base font-semibold"
+            >
+              Start Now
+            </button>
+            <button
+              onClick={() => setShowAcceptPrompt(null)}
+              className="btn btn-secondary w-full py-3 text-base font-semibold"
+            >
+              Do it Later
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+);
+}

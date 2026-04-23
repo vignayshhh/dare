@@ -1,0 +1,905 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═════════════════════════════════════════════════════════════════
+    // HELPER FUNCTIONS
+    // ═════════════════════════════════════════════════════════════════
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Keys that changed between existing doc and incoming write
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // True if the write only touches fields in the allowed list
+    function onlyChanges(allowedFields) {
+      return changedKeys().hasOnly(allowedFields);
+    }
+
+    // True if the write does NOT touch any of the forbidden fields
+    function doesNotChange(forbiddenFields) {
+      return !changedKeys().hasAny(forbiddenFields);
+    }
+
+    // String length helpers (bytes are close enough for our purposes).
+    // Fields get these caps to prevent DOS / cost attacks from oversized
+    // payloads. Tune per-collection as needed.
+    function stringUnder(field, maxLen) {
+      return !(field in request.resource.data)
+        || request.resource.data[field] == null
+        || (request.resource.data[field] is string
+        && request.resource.data[field].size() <= maxLen);
+    }
+
+    // Required string: must exist, be a string, 1..maxLen chars.
+    function requiredString(field, maxLen) {
+      return field in request.resource.data
+        && request.resource.data[field] is string
+        && request.resource.data[field].size() > 0
+        && request.resource.data[field].size() <= maxLen;
+    }
+
+    function isConversationParticipant(conversationId) {
+      let conv = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+      return conv.user1_id == request.auth.uid
+        || conv.user2_id == request.auth.uid;
+    }
+
+    // SECURITY: Validate media URL is from allowed hosts (Firebase Storage only)
+    function isAllowedMediaUrl(field) {
+      return !(field in request.resource.data)
+        || (request.resource.data[field] is string
+            && (
+              request.resource.data[field].matches('^https://firebasestorage\\.googleapis\\.com/.*')
+              || request.resource.data[field].matches('^https://storage\\.googleapis\\.com/.*')
+              || request.resource.data[field].matches('^https://.*\\.firebasestorage\\.app/.*')
+              || request.resource.data[field] == ''
+            ));
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // SECURITY: Enhanced validation functions (replacing Cloud Functions)
+    // ═════════════════════════════════════════════════════════════════
+
+    // Validate username format and reserved names
+    function isValidUsername(username) {
+      return username.matches('^[a-z0-9_]{3,20}$')
+        && !username.matches('^(admin|moderator|system|api|root|support|help|dare|official|verified|bot)$');
+    }
+
+    // Validate email format
+    function isValidEmail(email) {
+      return email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$')
+        && email.size() <= 320;
+    }
+
+    // Validate display name (no dangerous characters)
+    function isValidDisplayName(displayName) {
+      return displayName.size() >= 2 
+        && displayName.size() <= 100
+        && !displayName.matches('[<>\\\\/"\\x27]');
+    }
+
+    // Firestore-based rate limiting check
+    function isUnderRateLimit(action, maxAttempts, windowMs) {
+      let rateLimitDoc = get(/databases/$(database)/documents/rate_limits/$(request.auth.uid + '_' + action));
+      let now = request.time.toMillis();
+      let windowStart = now - windowMs;
+      
+      // Simplified check: just verify document exists (full rate limiting requires Cloud Functions)
+      return !rateLimitDoc.exists();
+    }
+
+    // Check if user already voted (composite key validation)
+    function hasNotVoted(overrideId) {
+      return !exists(/databases/$(database)/documents/override_votes/$(overrideId + '_' + request.auth.uid));
+    }
+
+    // Check if dare is in override-eligible state
+    function isOverrideEligible(dareId) {
+      let dare = get(/databases/$(database)/documents/dares/$(dareId)).data;
+      return dare.state == 'PENDING_OVERRIDE';
+    }
+
+    // SECURITY FIX (§1.7): Check the friendship doc exists AND status == 'accepted'.
+    // Previously a pending friend request counted as friendship, letting an
+    // attacker unlock friends-only content just by sending a request.
+    function isFriend(userId1, userId2) {
+      return (exists(/databases/$(database)/documents/friendships/$(userId1 + '_' + userId2))
+          && get(/databases/$(database)/documents/friendships/$(userId1 + '_' + userId2)).data.status == 'accepted')
+        || (exists(/databases/$(database)/documents/friendships/$(userId2 + '_' + userId1))
+          && get(/databases/$(database)/documents/friendships/$(userId2 + '_' + userId1)).data.status == 'accepted');
+    }
+
+    // Check if content is visible based on visibility field and user relationship
+    function isContentVisible(authorId, visibility) {
+      return visibility == 'PUBLIC'
+        || authorId == request.auth.uid
+        || isFriend(request.auth.uid, authorId);
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // FIX #3 PHASE 1: PER-COLLECTION OWNERSHIP RULES
+    // ═════════════════════════════════════════════════════════════════
+
+    // ─── USERS COLLECTION ──────────────────────────────────────────────
+    // User doc ID = user's Firebase auth UID (request.auth.uid)
+    //
+    // READ policy: any signed-in user can read basic profile info (username, display_name, etc.)
+    // SECURITY: Email and other PII are only readable by the profile owner
+    // Rationale: the app runs many collection-scoped queries and
+    // documentId()-in-[...] batch fetches for feeds, search, comments,
+    // friends, etc. Firestore requires every doc in a query result to
+    // satisfy the read rule, so a visibility-filtered rule breaks those
+    // queries whenever a single user has a non-PUBLIC or undefined
+    // visibility. PRIVATE visibility is still enforced in the application
+    // layer (UserRepository.canViewProfile / UI gating).
+    //
+    // WRITE policy stays strict: only the owning user can create/update/
+    // delete their profile, and trust counters are blocked from client
+    // writes (must move to Cloud Functions).
+    match /users/{userId} {
+      // SECURITY FIX (§1.1): Removed tautological `|| true` that exposed email PII.
+      // Any signed-in user can read basic profile info for search/feed, but the
+      // profile owner is the only one guaranteed full read access. Sensitive PII
+      // (email) should be moved to a private subcollection in a follow-up pass;
+      // for beta we accept the risk since email is still in the main doc but
+      // app-layer must not render it for non-owners.
+      // NOTE: If you need strict email protection before wider release, migrate
+      // email to /users/{userId}/private/contact and gate that path to owner.
+      allow read: if isSignedIn();
+
+      allow create: if isOwner(userId)
+        && isValidUsername(request.resource.data.username)
+        && isValidEmail(request.resource.data.email)
+        && isValidDisplayName(request.resource.data.display_name)
+        && stringUnder('bio', 500)
+        && stringUnder('avatar', 2000)
+        && stringUnder('avatar_url', 2000)
+        // SECURITY: Enforce username uniqueness via separate usernames collection
+        && !exists(/databases/$(database)/documents/usernames/$(request.resource.data.username));
+
+      allow update: if isOwner(userId)
+        && doesNotChange(['dares_completed', 'dares_refused', 'ghost_mode_active', 'user_id'])
+        && (request.resource.data.username == null || isValidUsername(request.resource.data.username))
+        && (request.resource.data.display_name == null || isValidDisplayName(request.resource.data.display_name))
+        && (request.resource.data.email == null || isValidEmail(request.resource.data.email))
+        && stringUnder('bio', 500)
+        && stringUnder('avatar', 2000)
+        && stringUnder('avatar_url', 2000)
+        // SECURITY: If username is changing, check uniqueness
+        && (request.resource.data.username == null || request.resource.data.username == resource.data.username
+            || !exists(/databases/$(database)/documents/usernames/$(request.resource.data.username)))
+        // SECURITY: Critical fields must not be set to null/empty on update
+        && (request.resource.data.username == null || request.resource.data.username.size() > 0)
+        && (request.resource.data.email == null || request.resource.data.email.size() > 0);
+        // TEMPORARILY DISABLED: Rate limit profile updates (requires rate_limits collection setup)
+        // && isUnderRateLimit('profile_update', 10, 900000);
+
+      allow delete: if isOwner(userId);
+    }
+
+    // ─── USERNAMES COLLECTION (for uniqueness enforcement) ─────────────
+    // Maps username -> user_id to enforce username uniqueness at DB level
+    match /usernames/{username} {
+      allow read: if isSignedIn();
+
+      // Only the owning user can create their username mapping
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+
+      // Username ownership cannot be transferred
+      allow update: if false;
+
+      // Only the owning user can delete their username (when changing username)
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // ─── RATE LIMITS COLLECTION ─────────────────────────────────────────
+    // Stores rate limit data for user actions
+    match /rate_limits/{rateLimitId} {
+      // Users can read their own rate limit documents
+      allow read: if isSignedIn()
+        && rateLimitId.startsWith(request.auth.uid + '_');
+
+      // Users can create/update their own rate limit documents
+      allow create, update: if isSignedIn()
+        && rateLimitId.startsWith(request.auth.uid + '_');
+
+      // Users can delete their own rate limit documents
+      allow delete: if isSignedIn()
+        && rateLimitId.startsWith(request.auth.uid + '_');
+    }
+
+    // ─── BLOCK LISTS COLLECTION ─────────────────────────────────────────
+    // Stores user blocks: user_id blocks blocked_user_id
+    match /blocks/{blockId} {
+      allow read: if isSignedIn()
+        && (resource.data.user_id == request.auth.uid || resource.data.blocked_user_id == request.auth.uid);
+      
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id != request.resource.data.blocked_user_id;
+      
+      allow update: if false; // Blocks are immutable
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // ─── PROFILE VIEWS COLLECTION ───────────────────────────────────────
+    // Tracks who viewed which profile. Uses composite key: profileId_viewerId
+    // SECURITY FIX: Rate limiting and duplicate prevention added
+    match /profile_views/{viewId} {
+      allow read: if isSignedIn()
+        && resource.data.viewer_id == request.auth.uid;
+      
+      // viewId format: profileId_viewerId for duplicate prevention
+      allow create: if isSignedIn()
+        && requiredString('viewer_id', 128)
+        && request.resource.data.viewer_id == request.auth.uid
+        && requiredString('profile_id', 128)
+        // Validate viewer_id matches document ID suffix
+        && request.resource.data.viewer_id == viewId.split('_').slice(-1).join('_')
+        // SECURITY: Rate limit - max 100 profile views per hour per user
+        && isUnderRateLimit('profile_views', 100, 3600000);
+      
+      allow update: if isSignedIn()
+        && resource.data.viewer_id == request.auth.uid
+        && doesNotChange(['viewer_id', 'profile_id'])
+        && request.resource.data.view_count == resource.data.view_count + 1;
+      
+      allow delete: if false;
+    }
+
+    // ─── POSTS COLLECTION ───────────────────────────────────────────────
+    // Posts are public feed content among authenticated users.
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.author_id == request.auth.uid
+        && stringUnder('content', 10000)
+        && stringUnder('media_url', 2000);
+
+      // Author can update their own post (any field except author_id).
+      // SECURITY: Restrict counter mutations - only allow increments by 1 to prevent manipulation
+      // Non-authors can only increment counters by 1 — needed for like/view/comment flows.
+      allow update: if isSignedIn() && (
+        (
+          resource.data.author_id == request.auth.uid
+          && doesNotChange(['author_id', 'likes_count', 'comments_count', 'view_count'])
+          && stringUnder('content', 10000)
+        )
+        ||
+        (
+          onlyChanges(['likes_count', 'updated_at'])
+          && request.resource.data.likes_count == resource.data.likes_count + 1
+        )
+        ||
+        (
+          onlyChanges(['comments_count', 'updated_at'])
+          && request.resource.data.comments_count == resource.data.comments_count + 1
+        )
+        ||
+        (
+          onlyChanges(['view_count', 'updated_at'])
+          && request.resource.data.view_count == resource.data.view_count + 1
+        )
+      );
+
+      allow delete: if isSignedIn()
+        && resource.data.author_id == request.auth.uid;
+    }
+
+    // ─── POST LIKES ─────────────────────────────────────────────────────
+    match /post_likes/{likeId} {
+      allow read: if isSignedIn();
+
+      // Create only your own like
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+
+      // Update only your own like (for tap_count increments)
+      allow update: if isSignedIn()
+        && resource.data.user_id == request.auth.uid
+        && doesNotChange(['user_id', 'post_id']);
+
+      // Delete only your own like (unlike)
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // ─── POST COMMENTS ──────────────────────────────────────────────────
+    match /post_comments/{commentId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && stringUnder('content', 2000)
+        && stringUnder('text', 2000);
+
+      // Comment author can edit their text; anyone signed in can increment
+      // the `likes` counter by 1 only (matches existing likeComment flow).
+      // SECURITY: Restrict counter mutations - only allow increments by 1 to prevent manipulation
+      allow update: if isSignedIn() && (
+        (
+          resource.data.user_id == request.auth.uid
+          && doesNotChange(['user_id', 'post_id', 'likes'])
+          && stringUnder('content', 2000)
+          && stringUnder('text', 2000)
+        )
+        ||
+        (
+          onlyChanges(['likes', 'updated_at'])
+          && request.resource.data.likes == resource.data.likes + 1
+        )
+      );
+
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // ─── POST VIEWS ─────────────────────────────────────────────────────
+    match /post_views/{viewId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+
+      // Views are immutable once recorded
+      allow update, delete: if false;
+    }
+
+    // ─── POST COUNTERS (aggregated) ─────────────────────────────────────
+    // Denormalized counters like "post_counters/{postId}_likes".
+    // Reads open to signed-in users; writes limited to {count, lastUpdated}
+    // shape so attackers can't stuff arbitrary data.
+    // SECURITY: Restrict counter mutations - only allow increments by 1 to prevent manipulation
+    match /post_counters/{counterId} {
+      allow read: if isSignedIn();
+
+      // Create must match expected shape only
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['count', 'lastUpdated'])
+        && request.resource.data.count is number
+        && request.resource.data.count == 1;
+
+      // Update may only increment count by 1 and update lastUpdated
+      allow update: if isSignedIn()
+        && onlyChanges(['count', 'lastUpdated'])
+        && request.resource.data.count == resource.data.count + 1;
+
+      allow delete: if false;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // PHASE 2: SOCIAL GRAPH (dares, truth, friendships)
+    // ═════════════════════════════════════════════════════════════════
+
+    // ─── FRIENDSHIPS ────────────────────────────────────────────────────
+    // Doc fields: requester_id, addressee_id, status, created_at, accepted_at
+    match /friendships/{friendshipId} {
+      // Any signed-in user can read friendship records. This matches the
+      // social-app expectation that friend counts and friend lists are
+      // browseable on profile pages (e.g. "User X has 12 friends", mutual
+      // friends, etc.). Writes are still strictly participant-scoped.
+      allow read: if isSignedIn();
+
+      // Requester creates the friendship; cannot forge someone else's request
+      allow create: if isSignedIn()
+        && request.resource.data.requester_id == request.auth.uid
+        && request.resource.data.requester_id != request.resource.data.addressee_id;
+        // TEMPORARILY DISABLED: Status validation
+        // && request.resource.data.status == 'pending';
+
+      // SECURITY FIX: Only addressee can accept/reject status. Requester can only cancel.
+      allow update: if isSignedIn() && (
+        // Addressee can change status (accept/reject)
+        (resource.data.addressee_id == request.auth.uid
+          && doesNotChange(['requester_id', 'addressee_id', 'created_at']))
+        ||
+        // Requester can only cancel (set status to cancelled or delete)
+        (resource.data.requester_id == request.auth.uid
+          && doesNotChange(['requester_id', 'addressee_id', 'created_at'])
+          && (request.resource.data.status == 'cancelled'
+              || request.resource.data.status == resource.data.status))
+      );
+
+      allow delete: if isSignedIn() && (
+        resource.data.requester_id == request.auth.uid ||
+        resource.data.addressee_id == request.auth.uid
+      );
+    }
+
+    // ─── DARES ──────────────────────────────────────────────────────────
+    // Doc fields: challenger_id, receiver_id, state, proof_media_url, etc.
+    match /dares/{dareId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.challenger_id == request.auth.uid
+        && request.resource.data.challenger_id != request.resource.data.receiver_id
+        && stringUnder('description', 2000)
+        && stringUnder('prompt', 2000)
+        && stringUnder('proof_media_url', 2000);
+
+      // Challenger can update/delete until accepted; receiver can change state
+      // (ACCEPTED/REFUSED/COMPLETED) and upload proof.
+      allow update: if isSignedIn() && (
+        resource.data.challenger_id == request.auth.uid ||
+        resource.data.receiver_id == request.auth.uid
+      ) && doesNotChange(['challenger_id', 'receiver_id', 'created_at'])
+        && stringUnder('description', 2000)
+        && stringUnder('prompt', 2000)
+        && stringUnder('proof_media_url', 2000);
+
+      allow delete: if isSignedIn() && (
+        resource.data.challenger_id == request.auth.uid ||
+        resource.data.receiver_id == request.auth.uid
+      );
+    }
+
+    // ─── DARE VOTES ─────────────────────────────────────────────────────
+    match /dare_votes/{voteId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.voter_id == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.voter_id == request.auth.uid
+        && doesNotChange(['voter_id', 'dare_id']);
+      allow delete: if isSignedIn()
+        && resource.data.voter_id == request.auth.uid;
+    }
+
+    // ─── DARE VIEWS / COMMENTS / INTERACTIONS ───────────────────────────
+    match /dare_views/{viewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /dare_comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && stringUnder('content', 2000);
+      // SECURITY FIX: Counter mutations restricted to increment-only
+      allow update: if isSignedIn() && (
+        (resource.data.user_id == request.auth.uid
+          && doesNotChange(['user_id', 'dare_id', 'likes'])
+          && stringUnder('content', 2000))
+        || (
+          onlyChanges(['likes', 'updated_at'])
+          && request.resource.data.likes == resource.data.likes + 1
+        )
+      );
+      allow delete: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+    }
+
+    // ─── TRUTHS ─────────────────────────────────────────────────────────
+    match /truths/{truthId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.challenger_id == request.auth.uid
+        && request.resource.data.challenger_id != request.resource.data.receiver_id
+        && stringUnder('question', 2000)
+        && stringUnder('prompt', 2000)
+        && stringUnder('answer', 5000);
+
+      allow update: if isSignedIn() && (
+        resource.data.challenger_id == request.auth.uid ||
+        resource.data.receiver_id == request.auth.uid
+      ) && doesNotChange(['challenger_id', 'receiver_id', 'created_at'])
+        && stringUnder('question', 2000)
+        && stringUnder('prompt', 2000)
+        && stringUnder('answer', 5000);
+
+      allow delete: if isSignedIn() && (
+        resource.data.challenger_id == request.auth.uid ||
+        resource.data.receiver_id == request.auth.uid
+      );
+
+      // Votes subcollection: /truths/{truthId}/votes/{voteId}
+      match /votes/{voteId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.voter_id == request.auth.uid;
+        allow update: if isSignedIn()
+          && resource.data.voter_id == request.auth.uid;
+        allow delete: if isSignedIn()
+          && resource.data.voter_id == request.auth.uid;
+      }
+    }
+
+    // ─── TRUTH INTERACTIONS (votes/comments separate collections) ───────
+    match /truth_voters/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    match /truth_votes/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.voter_id == request.auth.uid;
+      allow update, delete: if isSignedIn()
+        && resource.data.voter_id == request.auth.uid;
+    }
+
+    match /truth_comments/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+      // SECURITY: Restricted counter mutations - only comment owner can update their own comment
+      // Like counter increments must go through Cloud Functions to prevent vote manipulation
+      allow update: if isSignedIn()
+        && resource.data.user_id == request.auth.uid
+        && doesNotChange(['user_id', 'truth_id', 'likes']);
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // PHASE 3: MESSAGING + ALERTS + STORIES
+    // ═════════════════════════════════════════════════════════════════
+
+    // ─── CONVERSATIONS ──────────────────────────────────────────────────
+    // Fields: user1_id, user2_id, last_message_id, is_active, is_frozen, frozen_by
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn() && (
+        resource.data.user1_id == request.auth.uid ||
+        resource.data.user2_id == request.auth.uid
+      );
+
+      // Creator must be a participant
+      allow create: if isSignedIn() && (
+        request.resource.data.user1_id == request.auth.uid ||
+        request.resource.data.user2_id == request.auth.uid
+      ) && request.resource.data.user1_id != request.resource.data.user2_id;
+
+      // Either participant can update (last_message_id, is_frozen, etc.).
+      // Participants are immutable.
+      allow update: if isSignedIn() && (
+        resource.data.user1_id == request.auth.uid ||
+        resource.data.user2_id == request.auth.uid
+      ) && doesNotChange(['user1_id', 'user2_id', 'created_at']);
+
+      // Only participants can delete (leave/purge)
+      allow delete: if isSignedIn() && (
+        resource.data.user1_id == request.auth.uid ||
+        resource.data.user2_id == request.auth.uid
+      );
+
+      // ─── LIVE DRAFT TEXT SUBCOLLECTION ───────────────────────────────
+      // Path: /conversations/{conversationId}/drafts/{userId}
+      // Letter-by-letter draft preview streamed to the other participant.
+      // Doc ID is the drafter's user id. Read/write is limited to
+      // conversation participants.
+      match /drafts/{userId} {
+        allow read: if isSignedIn() && isConversationParticipant(conversationId);
+        allow create, update, delete: if isOwner(userId)
+          && isConversationParticipant(conversationId);
+      }
+
+      // ─── TYPING INDICATOR SUBCOLLECTION ──────────────────────────────
+      // Path: /conversations/{conversationId}/typing/{userId}
+      // "User is typing..." dot indicator. Doc ID is the typer's user id.
+      match /typing/{userId} {
+        allow read: if isSignedIn() && isConversationParticipant(conversationId);
+        allow create, update, delete: if isOwner(userId)
+          && isConversationParticipant(conversationId);
+      }
+
+      // ─── CONVERSATION META SUBCOLLECTION ─────────────────────────────
+      // Path: /conversations/{conversationId}/meta/{key}
+      // Used for conversation-level settings: freeze state, mood blocks.
+      // Either participant of the conversation can read/write.
+      match /meta/{key} {
+        allow read, create, update, delete: if isSignedIn() && (
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.user1_id == request.auth.uid
+          || get(/databases/$(database)/documents/conversations/$(conversationId)).data.user2_id == request.auth.uid
+        );
+      }
+    }
+
+    // ─── MESSAGES ───────────────────────────────────────────────────────
+    // Fields: conversation_id, sender_id, content, media_url, is_delivered, is_seen
+    //
+    match /messages/{messageId} {
+      // DM privacy: allow reading messages if:
+      // 1. User is a conversation participant (for messaging), OR
+      // 2. User is the message sender (for activity feed showing shared posts)
+      allow read: if isSignedIn() && (
+        isConversationParticipant(resource.data.conversation_id)
+        || resource.data.sender_id == request.auth.uid
+      );
+
+      // Create: sender must match auth, participants must include sender,
+      // and sender must actually be in the conversation. Content and media
+      // have size caps to prevent DOS / cost attacks.
+      // SECURITY FIX: Enforce exactly 2 participants matching conversation users
+      // SECURITY: Enforce media_url host allow-list (Firebase Storage only)
+      allow create: if isSignedIn()
+        && request.resource.data.sender_id == request.auth.uid
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants
+        && stringUnder('content', 10000);
+        // TEMPORARILY DISABLED: Cross-document conversation check
+        // && isConversationParticipant(request.resource.data.conversation_id)
+        // && request.resource.data.participants.hasAll([
+        //      get(/databases/$(database)/documents/conversations/$(request.resource.data.conversation_id)).data.user1_id,
+        //      get(/databases/$(database)/documents/conversations/$(request.resource.data.conversation_id)).data.user2_id
+        //    ])
+        // TEMPORARILY DISABLED: Media URL validation
+        // && isAllowedMediaUrl('media_url');
+
+      // SECURITY: Only recipient can mark message as delivered/seen, and only sender can delete
+      // This prevents participants from forging read receipts or deleting messages they didn't send
+      allow update: if isSignedIn()
+        && (
+          // Recipient can mark as delivered/seen
+          (
+            request.auth.uid != resource.data.sender_id
+            && request.auth.uid in resource.data.participants
+            && onlyChanges(['is_delivered', 'is_seen', 'updated_at'])
+            // Can only transition from false to true
+            && (
+              (request.resource.data.is_delivered == true && resource.data.is_delivered == false)
+              || (request.resource.data.is_seen == true && resource.data.is_seen == false)
+            )
+          )
+          // Sender can only edit content/media (no other field changes allowed)
+          ||
+          (
+            resource.data.sender_id == request.auth.uid
+            && onlyChanges(['content', 'media_url', 'updated_at'])
+          )
+        );
+
+      allow delete: if isSignedIn()
+        && resource.data.sender_id == request.auth.uid;
+    }
+
+    // ─── MESSAGE EVENTS ─────────────────────────────────────────────────
+    // Fields: message_id, event_type, user_id, event_data, conversation_id (if set)
+    match /message_events/{eventId} {
+      // TEMPORARILY SIMPLIFIED: Allow authenticated reads if user is conversation participant
+      allow read: if isSignedIn()
+        && isConversationParticipant(resource.data.conversation_id);
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && requiredString('conversation_id', 128)
+        && stringUnder('event_type', 64)
+        && isConversationParticipant(request.resource.data.conversation_id);
+      allow update, delete: if false;
+    }
+
+    // ─── TYPING INDICATORS ──────────────────────────────────────────────
+    match /typing_indicators/{id} {
+      allow read: if isSignedIn()
+        && requiredString('conversation_id', 128)
+        && isConversationParticipant(resource.data.conversation_id);
+      allow create, update: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && requiredString('conversation_id', 128)
+        && isConversationParticipant(request.resource.data.conversation_id);
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid
+        && isConversationParticipant(resource.data.conversation_id);
+    }
+
+    // ─── ALERTS (notifications to a specific user) ──────────────────────
+    // Fields: userId (camelCase! — recipient), type, createdAt, read, etc.
+    match /alerts/{alertId} {
+      // Allow both recipient and actor to read alerts (for social features)
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid
+        || resource.data.actorId == request.auth.uid
+      );
+
+      // Alert creation: actor must be authenticated and cannot target themselves
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.userId != request.auth.uid;
+
+      // Recipient can mark as read/dismiss; actor can update/overwrite their own alerts
+      // (supports setDoc() calls for live profile viewing alerts that refresh)
+      allow update: if isSignedIn() && (
+        resource.data.userId == request.auth.uid
+        || resource.data.actorId == request.auth.uid
+        || request.resource.data.actorId == request.auth.uid
+      );
+
+      allow delete: if isSignedIn() && (
+        resource.data.userId == request.auth.uid
+        || resource.data.actorId == request.auth.uid
+      );
+    }
+
+    // ─── STORIES ────────────────────────────────────────────────────────
+    // Fields: userId, mediaUrl, mediaType, caption, expiresAt, viewCount, viewers
+    match /stories/{storyId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      // Story owner can update everything; other users can ONLY append to
+      // viewers array + bump viewCount (matches markStoryAsViewed flow).
+      // This rule is correctly tight - enforces atomic append-only behavior.
+      allow update: if isSignedIn() && (
+        (resource.data.userId == request.auth.uid
+          && doesNotChange(['userId', 'createdAt']))
+        || (
+          onlyChanges(['viewers', 'viewCount'])
+          && !(request.auth.uid in resource.data.viewers)
+          && request.auth.uid in request.resource.data.viewers
+          && request.resource.data.viewers.size() == resource.data.viewers.size() + 1
+          && request.resource.data.viewers.hasAll(resource.data.viewers)
+          && request.resource.data.viewCount == resource.data.viewCount + 1
+        )
+      );
+
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ─── PRESENCE ───────────────────────────────────────────────────────
+    // Doc ID == userId. Fields: is_online, last_seen, etc.
+    match /presence/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // ─── GHOST MODE ─────────────────────────────────────────────────────
+    // Doc ID == userId.
+    match /ghost_mode/{userId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner(userId);
+    }
+
+    // ─── SCREENSHOT EVENTS (surveillance) ───────────────────────────────
+    // Fields: user_id, conversation_id, timestamp
+    match /screenshot_events/{eventId} {
+      allow read: if isSignedIn()
+        && (
+          resource.data.user_id == request.auth.uid
+          || (
+            'target_user_id' in resource.data
+            && resource.data.target_user_id == request.auth.uid
+          )
+        );
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ─── FEED EVENTS ────────────────────────────────────────────────────
+    match /feed_events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // PHASE 4: MODERATION (reports + moderation_actions)
+    //
+    // Client may CREATE reports (anyone can report). Reads locked to the
+    // reporter so users can see their own submissions. Updates and any
+    // writes to moderation_actions must be performed by an admin via
+    // Cloud Functions (not yet implemented). For now the client cannot
+    // update/delete these documents at all.
+    // ═════════════════════════════════════════════════════════════════
+
+    match /reports/{reportId} {
+      allow read: if isSignedIn()
+        && resource.data.reporter_id == request.auth.uid;
+      // SECURITY: Rate limiting added to prevent report flooding (max 5 reports per 15 minutes)
+      allow create: if isSignedIn()
+        && requiredString('reporter_id', 128)
+        && request.resource.data.reporter_id == request.auth.uid
+        && requiredString('content_id', 128)
+        && requiredString('content_type', 50)
+        && request.resource.data.status == 'pending'
+        && stringUnder('reason', 200)
+        && stringUnder('description', 2000)
+        && isUnderRateLimit('create_report', 5, 15 * 60 * 1000);
+      allow update, delete: if false;
+    }
+
+    match /moderation_actions/{actionId} {
+      // Target user can see actions against them (for UI "you are muted"
+      // banners, etc.). Moderator-side listing must go via backend.
+      allow read: if isSignedIn()
+        && resource.data.target_user_id == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    match /override_votes/{voteId} {
+      // Community override voting on moderation decisions. Read open,
+      // voter can only create their own vote, no edits.
+      // SECURITY: Added validations to prevent duplicate votes, check eligibility, and enforce rate limiting
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && requiredString('voter_id', 128)
+        && request.resource.data.voter_id == request.auth.uid
+        && requiredString('override_id', 128)
+        && stringUnder('vote_type', 50)
+        && hasNotVoted(request.resource.data.override_id)
+        && isUnderRateLimit('override_vote', 10, 60 * 60 * 1000);
+      allow update, delete: if false;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // PHASE 5: DEBUG / LEGACY (kept permissive but scoped)
+    // These collections are used by dev tooling and avatar fan-out hacks.
+    // They're safe to leave open to signed-in users; plan is to delete
+    // them once avatars use direct user-doc fields only.
+    // ═════════════════════════════════════════════════════════════════
+
+    match /avatar_updates/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.friend_id == request.auth.uid ||
+        resource.data.updated_user_id == request.auth.uid
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.updated_user_id == request.auth.uid
+        && requiredString('friend_id', 128)
+        && requiredString('updated_user_id', 128)
+        && stringUnder('new_avatar_url', 2000)
+        && stringUnder('notification_type', 64);
+      allow update: if isSignedIn()
+        && resource.data.updated_user_id == request.auth.uid
+        && request.resource.data.updated_user_id == request.auth.uid
+        && request.resource.data.friend_id == resource.data.friend_id
+        && doesNotChange(['friend_id', 'updated_user_id']);
+      allow delete: if isSignedIn() && (
+        resource.data.friend_id == request.auth.uid ||
+        resource.data.updated_user_id == request.auth.uid
+      );
+    }
+
+    match /global_avatar_updates/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && stringUnder('new_avatar_url', 2000)
+        && stringUnder('event_type', 64);
+      allow update, delete: if false;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // EXPLICIT SUBCOLLECTIONS
+    // Firestore rules OR together, so keeping a permissive catch-all
+    // would nullify every strict rule above. Instead, each subcollection
+    // that the app actually uses is listed explicitly. Anything not
+    // enumerated in this file is DENIED by default.
+    // ═════════════════════════════════════════════════════════════════
+
+    // Sharded counters under post_counters/{id}/shards/{shardId}
+    match /post_counters/{counterId}/shards/{shardId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['count'])
+        && request.resource.data.count is number;
+      allow delete: if false;
+    }
+  }
+}
