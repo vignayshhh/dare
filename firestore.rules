@@ -184,8 +184,8 @@ service cloud.firestore {
              'user_id', 'email', 'is_banned', 'banned_at', 'banned_by',
              'muted_until'
            ])
-        && (request.resource.data.username == null || isValidUsername(request.resource.data.username))
-        && (request.resource.data.display_name == null || isValidDisplayName(request.resource.data.display_name))
+        && (!changedKeys().hasAny(['username']) || request.resource.data.username == null || isValidUsername(request.resource.data.username))
+        && (!changedKeys().hasAny(['display_name']) || request.resource.data.display_name == null || isValidDisplayName(request.resource.data.display_name))
         && stringUnder('bio', 500)
         && stringUnder('avatar', 2000)
         && stringUnder('avatar_url', 2000)
