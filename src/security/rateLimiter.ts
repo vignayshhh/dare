@@ -5,6 +5,7 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
+  increment,
 } from "firebase/firestore";
 import { auth } from "@/backend/lib/firebase";
 
@@ -14,7 +15,8 @@ import { auth } from "@/backend/lib/firebase";
  */
 
 interface RateLimitData {
-  attempts: number[];
+  count: number;
+  window_start: { toMillis: () => number } | null;
   last_updated: Date;
   user_id: string;
 }
@@ -52,49 +54,53 @@ export async function checkRateLimit(
   try {
     const snap = await getDoc(rateLimitRef);
 
-    if (snap.exists()) {
-      const data = snap.data() as RateLimitData;
-
-      // Clean old entries (attempts outside the time window)
-      const recentAttempts = (data.attempts || []).filter(
-        (t: number) => t > windowStart,
-      );
-
-      if (recentAttempts.length >= maxAttempts) {
-        const oldestAttempt = Math.min(...recentAttempts);
-        const retryAfter = Math.ceil((oldestAttempt + windowMs - now) / 1000);
-        throw new Error(
-          `Rate limit exceeded. Please try again in ${retryAfter} seconds.`,
-        );
-      }
-
-      // Add new attempt
-      recentAttempts.push(now);
-      await updateDoc(rateLimitRef, {
-        attempts: recentAttempts,
-        last_updated: serverTimestamp(),
-      });
-    } else {
-      // First attempt - create new rate limit document
+    if (!snap.exists()) {
+      // First attempt — create document with count=1 (matches Firestore rule: count == 1)
       await setDoc(rateLimitRef, {
-        attempts: [now],
+        count: 1,
+        window_start: serverTimestamp(),
         last_updated: serverTimestamp(),
-        user_id: userId,
+        user_id: userId || rateLimitId,
       });
+      return;
     }
+
+    const data = snap.data() as RateLimitData;
+    const windowStartMs = data.window_start?.toMillis?.() ?? windowStart;
+
+    // Window expired — reset to a new window (rule allows: count==1 && new window_start)
+    if (windowStartMs < windowStart) {
+      await setDoc(rateLimitRef, {
+        count: 1,
+        window_start: serverTimestamp(),
+        last_updated: serverTimestamp(),
+        user_id: userId || rateLimitId,
+      });
+      return;
+    }
+
+    const currentCount = data.count || 0;
+
+    // Limit exceeded
+    if (currentCount >= maxAttempts) {
+      const retryAfter = Math.ceil((windowStartMs + windowMs - now) / 1000);
+      throw new Error(
+        `Rate limit exceeded. Please try again in ${retryAfter} seconds.`,
+      );
+    }
+
+    // Increment counter by 1 (matches Firestore rule: count == resource.data.count + 1)
+    await updateDoc(rateLimitRef, {
+      count: increment(1),
+      last_updated: serverTimestamp(),
+    });
   } catch (error: any) {
-    if (error.message.includes("Rate limit exceeded")) {
+    if (error.message?.includes("Rate limit exceeded")) {
       throw error; // Re-throw rate limit errors
     }
     console.error("Rate limit check failed:", error);
-    // Fail closed in production - block if rate limit service is down
-    // Fail open in development only for testing
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "Rate limit service unavailable. Please try again later.",
-      );
-    }
-    // Fail open in development
+    // Fail open so a Firestore permission hiccup never blocks legitimate users.
+    // Firestore rules enforce a second layer of rate limiting server-side.
   }
 }
 
@@ -142,14 +148,12 @@ export async function getRateLimitStatus(
     const snap = await getDoc(rateLimitRef);
     if (snap.exists()) {
       const data = snap.data() as RateLimitData;
-      const recentAttempts = (data.attempts || []).filter(
-        (t: number) => t > windowStart,
-      );
-      const remaining = Math.max(0, maxAttempts - recentAttempts.length);
+      const windowStartMs = data.window_start?.toMillis?.() ?? windowStart;
 
-      if (recentAttempts.length > 0) {
-        const oldestAttempt = Math.min(...recentAttempts);
-        const resetAt = oldestAttempt + windowMs;
+      if (windowStartMs >= windowStart) {
+        const currentCount = data.count || 0;
+        const remaining = Math.max(0, maxAttempts - currentCount);
+        const resetAt = windowStartMs + windowMs;
         return { remaining, resetAt };
       }
     }
