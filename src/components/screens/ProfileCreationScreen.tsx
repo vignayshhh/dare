@@ -13,7 +13,7 @@ import { useAuthStore } from "../../stores/useAuthStore-v2";
 
 interface ProfileData {
   bio: string;
-  avatar: string | null;
+  avatar: File | null;
   is18Plus: boolean;
   privacyMode: "public" | "friends" | "private";
   notifications: {
@@ -30,13 +30,14 @@ export function ProfileCreationScreen({
   onComplete: (profileData: ProfileData) => void;
   onBack: () => void;
 }) {
-  const { user, updateProfile, completeProfileCreation } = useAuthStore();
+  const { user, updateProfile, uploadAvatar, completeProfileCreation } =
+    useAuthStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [profileData, setProfileData] = useState<ProfileData>({
     bio: "",
     avatar: null,
-    is18Plus: false,
+    is18Plus: user?.is_18_plus ?? true,
     privacyMode: "public",
     notifications: {
       challenges: true,
@@ -58,39 +59,28 @@ export function ProfileCreationScreen({
       reader.onloadend = () => {
         const result = reader.result as string;
         setAvatarPreview(result);
-        setProfileData((prev) => ({ ...prev, avatar: result }));
+        setProfileData((prev) => ({ ...prev, avatar: file }));
       };
       reader.readAsDataURL(file);
     }
   };
 
   const validateStep = (step: number): boolean => {
-    console.log("🔍 VALIDATING STEP:", step, {
-      profileData,
-    });
+    if (step === 1) {
+      return profileData.bio.length <= 200;
+    }
 
-    console.log(
-      "🔍 STEP VALIDATION RESULT:",
-      step,
-      "ALWAYS VALID - NO RESTRICTIONS",
-    );
+    if (step === 2) {
+      return profileData.is18Plus;
+    }
+
     return true;
   };
 
   const handleNext = async () => {
-    console.log("🔍 NEXT BUTTON CLICKED:", {
-      currentStep,
-      totalSteps,
-      canProceed: currentStep < totalSteps,
-      validation: validateStep(currentStep),
-      profileData,
-    });
-
     if (currentStep < totalSteps) {
-      console.log("🔍 MOVING TO STEP:", currentStep + 1);
       setCurrentStep((prev) => prev + 1);
     } else {
-      console.log("🔍 COMPLETING PROFILE CREATION");
       await handleComplete();
     }
   };
@@ -98,26 +88,36 @@ export function ProfileCreationScreen({
   const handleComplete = async () => {
     setIsLoading(true);
     try {
-      // Update existing user profile with additional data
-      const updates = {
+      if (profileData.avatar) {
+        const avatarResult = await uploadAvatar(profileData.avatar);
+        if (!avatarResult.success) {
+          throw new Error(avatarResult.error || "Failed to upload avatar");
+        }
+      }
+
+      const updates: {
+        bio: string;
+        visibility: "PUBLIC" | "PRIVATE";
+        is_18_plus: boolean;
+        notificationPreferences: ProfileData["notifications"];
+      } = {
         bio: profileData.bio,
-        avatar: profileData.avatar || undefined,
+        visibility:
+          profileData.privacyMode === "public" ? "PUBLIC" : "PRIVATE",
+        is_18_plus: profileData.is18Plus,
+        notificationPreferences: profileData.notifications,
       };
 
-      console.log("🔍 UPDATING USER PROFILE:", updates);
       const result = await updateProfile(updates);
 
       if (result.success) {
-        console.log("✅ PROFILE UPDATED SUCCESSFULLY");
-        // Mark profile creation as completed
         await completeProfileCreation();
         onComplete(profileData);
       } else {
-        console.error("❌ PROFILE UPDATE FAILED:", result.error);
         alert(result.error || "Failed to update profile");
       }
     } catch (error) {
-      console.error("❌ PROFILE CREATION ERROR:", error);
+      console.error("Profile creation error:", error);
       alert("Failed to update profile");
     } finally {
       setIsLoading(false);
@@ -225,7 +225,6 @@ export function ProfileCreationScreen({
                     type="checkbox"
                     checked={profileData.is18Plus}
                     onChange={(e) => {
-                      console.log("🔍 AGE CHECKBOX CHANGED:", e.target.checked);
                       setProfileData((prev) => ({
                         ...prev,
                         is18Plus: e.target.checked,
@@ -420,7 +419,7 @@ export function ProfileCreationScreen({
 
               <div className="text-center">
                 <p className="text-[#94a3b8] text-sm">
-                  You're all ready to start daring!
+                  You&apos;re all ready to start daring!
                 </p>
               </div>
             </div>

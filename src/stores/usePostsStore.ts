@@ -127,6 +127,9 @@ const updatePostInCollections = (
   ),
 });
 
+const isOptimisticComment = (commentId: string) =>
+  commentId.startsWith("temp-comment-");
+
 const getCurrentUserDisplay = () => {
   const current = authService.getCurrentUser();
 
@@ -337,7 +340,7 @@ export const usePostsStore = create<PostsStore>()(
 
           console.log("🎉 Post created and persisted:", newPost.id);
         } catch (error) {
-          console.error("❌ Error in createPost:", error);
+          console.error("Error in createPost:", error);
           const errorMessage =
             error instanceof Error ? error.message : "Failed to create post";
           set({ loading: false, error: errorMessage });
@@ -584,9 +587,6 @@ export const usePostsStore = create<PostsStore>()(
           void _userId;
           const current = getCurrentUserDisplay();
 
-          await optimizedFeedService.likePostOptimized(postId, current.userId);
-
-          // Compute new tap count BEFORE state update for surveillance
           const post = [...get().posts, ...get().userPosts].find(
             (p) => p.id === postId,
           );
@@ -617,6 +617,10 @@ export const usePostsStore = create<PostsStore>()(
               };
             }),
           );
+
+          optimizedFeedService.updateLikeCache(current.userId, postId, true);
+
+          await optimizedFeedService.likePostOptimized(postId, current.userId);
 
           // Fire-and-forget: create social like alert + track repeated likes for sus
           if (post?.author?.id && post.author.id !== current.userId) {
@@ -660,14 +664,58 @@ export const usePostsStore = create<PostsStore>()(
               });
           }
         } catch (error) {
-          console.error("❌ Error in addLike:", error);
+          const current = getCurrentUserDisplay();
+          const post = [...get().posts, ...get().userPosts].find(
+            (p) => p.id === postId,
+          );
+          const currentTapCount =
+            post?.likesByUser[current.userId]?.tapCount ?? 0;
+          const nextTapCount = Math.max(currentTapCount - 1, 0);
+
+          set((state) =>
+            updatePostInCollections(state, postId, (post) => {
+              const nextLikesByUser = { ...post.likesByUser };
+
+              if (nextTapCount > 0) {
+                nextLikesByUser[current.userId] = {
+                  ...(nextLikesByUser[current.userId] || {
+                    userId: current.userId,
+                    name: current.name,
+                    username: current.username,
+                    avatar: current.avatar || "",
+                  }),
+                  tapCount: nextTapCount,
+                };
+              } else {
+                delete nextLikesByUser[current.userId];
+              }
+
+              return {
+                ...post,
+                likesByUser: nextLikesByUser,
+                likes_count:
+                  currentTapCount > 0 && nextTapCount === 0
+                    ? Math.max((post.likes_count || 0) - 1, 0)
+                    : Math.max(post.likes_count || 0, 0),
+              };
+            }),
+          );
+
+          optimizedFeedService.updateLikeCache(
+            current.userId,
+            postId,
+            nextTapCount > 0,
+          );
+          console.error("Error in addLike:", error);
         }
       },
 
       removeLike: async (postId: string, userId: string) => {
-        try {
-          await optimizedFeedService.unlikePostOptimized(postId, userId);
+        const previousLike = [...get().posts, ...get().userPosts].find(
+          (p) => p.id === postId,
+        )?.likesByUser[userId];
 
+        try {
           set((state) =>
             updatePostInCollections(state, postId, (post) => {
               const newLikesByUser = { ...post.likesByUser };
@@ -679,8 +727,25 @@ export const usePostsStore = create<PostsStore>()(
               };
             }),
           );
+
+          optimizedFeedService.updateLikeCache(userId, postId, false);
+
+          await optimizedFeedService.unlikePostOptimized(postId, userId);
         } catch (error) {
-          console.error("❌ Error in removeLike:", error);
+          if (previousLike) {
+            set((state) =>
+              updatePostInCollections(state, postId, (post) => ({
+                ...post,
+                likesByUser: {
+                  ...post.likesByUser,
+                  [userId]: previousLike,
+                },
+                likes_count: (post.likes_count || 0) + 1,
+              })),
+            );
+            optimizedFeedService.updateLikeCache(userId, postId, true);
+          }
+          console.error("Error in removeLike:", error);
         }
       },
 
@@ -701,16 +766,33 @@ export const usePostsStore = create<PostsStore>()(
       },
 
       addComment: async (postId: string, comment) => {
+        const tempCommentId = `temp-comment-${Date.now()}`;
+        const optimisticComment = {
+          id: tempCommentId,
+          userId: comment.userId,
+          name: comment.name,
+          username: comment.username,
+          avatar: comment.avatar,
+          text: comment.text,
+          createdAt: new Date().toISOString(),
+          likes: 0,
+          parentId: comment.parentId || null,
+          likedByCurrentUser: false,
+        };
         try {
           console.log("🔍 Adding comment with parentId:", comment.parentId);
 
-          // Unsubscribe from real-time comments temporarily to prevent overwrites
-          const { commentUnsubscribes } = get();
-          if (commentUnsubscribes[postId]) {
-            commentUnsubscribes[postId]();
-            const { [postId]: _, ...rest } = commentUnsubscribes;
-            set({ commentUnsubscribes: rest });
-          }
+          set((state) =>
+            updatePostInCollections(state, postId, (post) => {
+              const nextComments = [...post.comments, optimisticComment];
+
+              return {
+                ...post,
+                comments: nextComments,
+                comments_count: nextComments.length,
+              };
+            }),
+          );
 
           const { commentService } =
             await import("@/middleware/services/comment.service");
@@ -739,18 +821,25 @@ export const usePostsStore = create<PostsStore>()(
           console.log("🔍 New comment to add:", newComment);
 
           set((state) =>
-            updatePostInCollections(state, postId, (post) => ({
-              ...post,
-              comments: [...post.comments, newComment],
-              comments_count: post.comments_count + 1,
-            })),
-          );
+            updatePostInCollections(state, postId, (post) => {
+              const replacedComments = post.comments.map((existingComment) =>
+                existingComment.id === tempCommentId
+                  ? newComment
+                  : existingComment,
+              );
+              const nextComments = replacedComments.some(
+                (existingComment) => existingComment.id === newComment.id,
+              )
+                ? replacedComments
+                : [...replacedComments, newComment];
 
-          // Re-subscribe to comments after a short delay to ensure Firestore sync
-          setTimeout(() => {
-            const { subscribeToPostComments } = get();
-            subscribeToPostComments(postId);
-          }, 500);
+              return {
+                ...post,
+                comments: nextComments,
+                comments_count: nextComments.length,
+              };
+            }),
+          );
 
           // Fire alert for post author (don't notify yourself)
           try {
@@ -846,6 +935,19 @@ export const usePostsStore = create<PostsStore>()(
             console.error("Failed to send comment alert:", alertError);
           }
         } catch (error) {
+          set((state) =>
+            updatePostInCollections(state, postId, (post) => {
+              const nextComments = post.comments.filter(
+                (existingComment) => existingComment.id !== tempCommentId,
+              );
+
+              return {
+                ...post,
+                comments: nextComments,
+                comments_count: nextComments.length,
+              };
+            }),
+          );
           console.error("\u274c Error adding comment:", error);
           throw error;
         }
@@ -911,14 +1013,11 @@ export const usePostsStore = create<PostsStore>()(
         // Unsubscribe from all like listeners
         Object.values(likeUnsubscribes).forEach((unsubscribe) => unsubscribe());
 
-        // Clear all caches
-        optimizedFeedService.clearAllCaches();
-
+        // Clear subscription references but KEEP posts in memory.
+        // Posts are shown instantly when the user returns to the feed.
+        // Data is only truly wiped on logout via clearPersistedData.
         set({
-          posts: [],
-          userPosts: [],
           feedBootstrapping: true,
-          lastSyncedAt: null,
           error: null,
           feedUnsubscribe: null,
           userPostsUnsubscribe: null,
@@ -1157,12 +1256,30 @@ export const usePostsStore = create<PostsStore>()(
                 }));
 
                 set((state) =>
-                  updatePostInCollections(state, postId, (post) => ({
-                    ...post,
-                    comments: frontendComments,
-                    comments_count: frontendComments.length,
-                    commentsLoading: false,
-                  })),
+                  updatePostInCollections(state, postId, (post) => {
+                    const pendingOptimisticComments = post.comments.filter(
+                      (existingComment) =>
+                        isOptimisticComment(existingComment.id) &&
+                        !frontendComments.some(
+                          (syncedComment) =>
+                            syncedComment.userId === existingComment.userId &&
+                            syncedComment.text === existingComment.text &&
+                            (syncedComment.parentId || null) ===
+                              (existingComment.parentId || null),
+                        ),
+                    );
+                    const nextComments = [
+                      ...frontendComments,
+                      ...pendingOptimisticComments,
+                    ];
+
+                    return {
+                      ...post,
+                      comments: nextComments,
+                      comments_count: nextComments.length,
+                      commentsLoading: false,
+                    };
+                  }),
                 );
               },
             );
@@ -1216,12 +1333,28 @@ export const usePostsStore = create<PostsStore>()(
                 });
 
                 set((state) =>
-                  updatePostInCollections(state, postId, (post) => ({
-                    ...post,
-                    likesByUser,
-                    likes_count: Object.keys(likesByUser).length,
-                    likesLoading: false,
-                  })),
+                  updatePostInCollections(state, postId, (post) => {
+                    const currentUser = authService.getCurrentUser();
+                    const currentUserId = currentUser?.id;
+                    const optimisticCurrentUserLike = currentUserId
+                      ? post.likesByUser[currentUserId]
+                      : undefined;
+
+                    if (
+                      currentUserId &&
+                      optimisticCurrentUserLike?.tapCount &&
+                      !likesByUser[currentUserId]
+                    ) {
+                      likesByUser[currentUserId] = optimisticCurrentUserLike;
+                    }
+
+                    return {
+                      ...post,
+                      likesByUser,
+                      likes_count: Object.keys(likesByUser).length,
+                      likesLoading: false,
+                    };
+                  }),
                 );
               },
             );

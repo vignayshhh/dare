@@ -56,15 +56,46 @@ function buildCommentTree(comments: CommentItem[]) {
 
   console.log("🔍 Unique comments:", uniqueComments);
 
+  // First pass: collect all parent IDs
+  const parentIds = new Set<string>();
   for (const c of uniqueComments) {
-    console.log("🔍 Processing comment:", c.id, "parentId:", c.parentId);
     if (c.parentId) {
+      parentIds.add(c.parentId);
+    }
+  }
+
+  // Second pass: categorize comments
+  for (const c of uniqueComments) {
+    console.log(
+      "🔍 Processing comment:",
+      c.id,
+      "parentId:",
+      c.parentId,
+      "isParent:",
+      parentIds.has(c.id),
+    );
+
+    // A comment is a reply if it has a parentId AND that parentId exists in the comments
+    // A comment is top-level if it has no parentId OR if it's a parent that others reply to
+    if (c.parentId && !parentIds.has(c.id)) {
+      // This is a true reply (has parentId and is not a parent itself)
       if (!repliesMap[c.parentId]) repliesMap[c.parentId] = [];
       repliesMap[c.parentId].push(c);
-      console.log("🔍 Added reply to parent:", c.parentId);
+      console.log(
+        "🔍 Added reply to parent:",
+        c.parentId,
+        "Total replies for this parent:",
+        repliesMap[c.parentId].length,
+      );
     } else {
+      // This is a top-level comment (no parentId OR is a parent that others reply to)
       topLevel.push(c);
-      console.log("🔍 Added top-level comment:", c.id);
+      console.log(
+        "🔍 Added top-level comment:",
+        c.id,
+        "reason:",
+        c.parentId ? "is a parent" : "no parentId",
+      );
     }
   }
 
@@ -78,6 +109,13 @@ function buildCommentTree(comments: CommentItem[]) {
     repliesMap[key].sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    console.log(
+      "🔍 Parent",
+      key,
+      "has",
+      repliesMap[key].length,
+      "replies after sorting",
     );
   }
 
@@ -98,8 +136,19 @@ function buildCommentTree(comments: CommentItem[]) {
   }
 
   console.log("🔍 Final tree structure:");
-  console.log("🔍 Top-level comments:", topLevel);
-  console.log("🔍 Replies map:", repliesMap);
+  console.log(
+    "🔍 Top-level comments:",
+    topLevel.map((c) => ({ id: c.id, parentId: c.parentId })),
+  );
+  console.log(
+    "🔍 Replies map:",
+    Object.fromEntries(
+      Object.entries(repliesMap).map(([key, replies]) => [
+        key,
+        replies.map((r) => ({ id: r.id, parentId: r.parentId })),
+      ]),
+    ),
+  );
 
   return { topLevel, repliesMap };
 }
@@ -123,8 +172,15 @@ function SingleComment({
   onNavigateToProfile?: (userId: string) => void;
   animationDelay: number;
 }) {
-  const [showReplies, setShowReplies] = useState(false);
+  const [showReplies, setShowReplies] = useState(true);
   const replyCount = replies?.length ?? 0;
+
+  console.log("🔍 SingleComment rendering:", {
+    commentId: comment.id,
+    isReply,
+    replyCount,
+    replies: replies?.map((r) => ({ id: r.id, text: r.text })),
+  });
 
   return (
     <div

@@ -736,7 +736,7 @@ service cloud.firestore {
              'TRUTH_RECEIVED', 'TRUTH_ANSWERED', 'TRUTH_REFUSED', 'TRUTH_COMPLETED',
              'MESSAGE_RECEIVED',
              'POST_LIKE', 'POST_LIKED', 'POST_COMMENT', 'COMMENT_RECEIVED', 'COMMENT_REPLY', 'COMMENT_LIKE',
-             'STORY_VIEW',
+             'STORY_VIEW', 'STORY_REACTION', 'STORY_REPLY',
              'PROFILE_VIEW',
              'SUS_REPEATED_LIKES', 'SUS_PROFILE_VIEWING', 'SUS_PHOTO_VIEWS',
              'SUS_MENTION_TALKING', 'SUS_CLOSE_FRIEND_ACTIVITY',
@@ -865,6 +865,43 @@ service cloud.firestore {
     // Read is open to all signed-in users so MessagingScreen can detect if
     // a conversation partner is online / chatting elsewhere (chat-switch
     // feature). Only the owning user may write their own presence doc.
+    match /story_reactions/{reactionId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && requiredString('storyId', 128)
+        && requiredString('userId', 128)
+        && request.resource.data.type in ['like', 'hate']
+        && request.resource.data.keys().hasOnly([
+             'storyId', 'userId', 'type', 'createdAt'
+           ]);
+
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.storyId == resource.data.storyId
+        && request.resource.data.type in ['like', 'hate']
+        && request.resource.data.keys().hasOnly([
+             'storyId', 'userId', 'type', 'createdAt'
+           ]);
+
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    match /story_reaction_stats/{storyId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isSignedIn()
+        && request.resource.data.storyId == storyId
+        && request.resource.data.keys().hasOnly([
+             'storyId', 'likeCount', 'hateCount'
+           ]);
+
+      allow delete: if false;
+    }
+
     match /presence/{userId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isOwner(userId);

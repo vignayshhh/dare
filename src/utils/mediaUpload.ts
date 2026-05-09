@@ -233,7 +233,11 @@ const makeStoragePath = (
         : "dare-proofs";
 
   // SECURITY FIX: Use crypto.randomUUID() instead of Math.random() for cryptographically secure random values
-  const randomSuffix = crypto.randomUUID().split("-")[0];
+  // Fallback for browsers that don't support crypto.randomUUID() (e.g., older mobile browsers)
+  const randomSuffix =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().split("-")[0]
+      : Math.random().toString(36).substring(2, 10);
   return `${folder}/${userId}/${Date.now()}-${randomSuffix}-${fileName}`;
 };
 

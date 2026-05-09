@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, AtSign, Camera, Image, Music, Send, Video, X } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  ArrowLeft,
+  X,
+  Image as ImageIcon,
+  Video,
+  Music,
+  Send,
+  Plus,
+  Camera,
+  AtSign,
+} from "lucide-react";
+import "@/styles/design-system.css";
+import { Avatar } from "../ui/Avatar";
 import { usePostsStore } from "../../stores/usePostsStore";
 import { useAuthStore } from "@/stores/useAuthStore-v2";
 import {
@@ -148,14 +160,15 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
 
       await createPost({
         content: caption.trim(),
-        media: selectedMedia && uploadedMedia
-          ? {
-              type: selectedMedia.type,
-              url: uploadedMedia.url,
-              thumbnail: selectedMedia.thumbnail,
-              duration: selectedMedia.duration,
-            }
-          : undefined,
+        media:
+          selectedMedia && uploadedMedia
+            ? {
+                type: selectedMedia.type,
+                url: uploadedMedia.url,
+                thumbnail: selectedMedia.thumbnail,
+                duration: selectedMedia.duration,
+              }
+            : undefined,
         taggedFriends: selectedFriends,
       });
 
@@ -206,7 +219,9 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
             >
               <Camera size={24} />
               <span>
-                {isPreparingMedia ? "Preparing media..." : "Choose from Gallery"}
+                {isPreparingMedia
+                  ? "Preparing media..."
+                  : "Choose from Gallery"}
               </span>
             </button>
           </div>
@@ -231,8 +246,10 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
                     className="w-full h-[32rem] object-cover"
                   />
                   <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 flex items-center space-x-1">
-                    <Image size={14} className="text-white" />
-                    <span className="text-white text-xs font-medium">PHOTO</span>
+                    <ImageIcon size={14} className="text-white" />
+                    <span className="text-white text-xs font-medium">
+                      PHOTO
+                    </span>
                   </div>
                 </div>
               ) : selectedMedia.type === "video" ? (
@@ -249,7 +266,9 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
                   </div>
                   <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 flex items-center space-x-1">
                     <Video size={14} className="text-white" />
-                    <span className="text-white text-xs font-medium">VIDEO</span>
+                    <span className="text-white text-xs font-medium">
+                      VIDEO
+                    </span>
                   </div>
                   {selectedMedia.duration && (
                     <div className="absolute bottom-4 left-4 bg-black/80 backdrop-blur-sm rounded px-2 py-1">
@@ -265,11 +284,15 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
                     <div className="w-24 h-24 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-2xl flex items-center justify-center mb-4 shadow-lg">
                       <Music size={44} className="text-black" />
                     </div>
-                    <p className="text-white font-semibold text-lg">Audio File</p>
+                    <p className="text-white font-semibold text-lg">
+                      Audio File
+                    </p>
                   </div>
                   <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 flex items-center space-x-1">
                     <Music size={14} className="text-white" />
-                    <span className="text-white text-xs font-medium">AUDIO</span>
+                    <span className="text-white text-xs font-medium">
+                      AUDIO
+                    </span>
                   </div>
                 </div>
               )}
@@ -279,7 +302,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
                   <div className="flex items-center space-x-3">
                     <div className="w-12 h-12 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-xl flex items-center justify-center shadow-lg">
                       {selectedMedia.type === "image" ? (
-                        <Image size={24} className="text-black" />
+                        <ImageIcon size={24} className="text-black" />
                       ) : selectedMedia.type === "video" ? (
                         <Video size={24} className="text-black" />
                       ) : (
@@ -343,10 +366,11 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
                     onClick={() => selectFriend(friend)}
                     className="w-full p-3 flex items-center space-x-3 hover:bg-[#2a2a2a] transition-colors border-b border-[#2a2a2a] last:border-b-0"
                   >
-                    <img
+                    <Avatar
                       src={friend.avatar}
                       alt={friend.name}
-                      className="w-8 h-8 rounded-full object-cover"
+                      size="sm"
+                      username={friend.username}
                     />
                     <div className="flex-1 text-left">
                       <p className="text-white font-medium text-sm">
@@ -369,10 +393,11 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
                   key={friend.id}
                   className="bg-[#4ade80]/20 border border-[#4ade80]/30 rounded-full px-3 py-1 flex items-center space-x-2"
                 >
-                  <img
+                  <Avatar
                     src={friend.avatar}
                     alt={friend.name}
-                    className="w-5 h-5 rounded-full object-cover"
+                    size="xs"
+                    username={friend.username}
                   />
                   <span className="text-white text-sm">{friend.name}</span>
                   <button
@@ -397,9 +422,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
           {isBusy ? (
             <>
               <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-              <span>
-                {isUploadingMedia ? "Uploading..." : "Preparing..."}
-              </span>
+              <span>{isUploadingMedia ? "Uploading..." : "Preparing..."}</span>
             </>
           ) : (
             <>

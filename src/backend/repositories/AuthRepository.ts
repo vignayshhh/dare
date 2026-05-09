@@ -35,9 +35,28 @@ export class AuthRepository implements IAuthRepository {
       }
 
       const data = userDoc.data();
+
+      // SECURITY FIX (§1.1): `email` is no longer stored on the public
+      // user doc. Read it from the owner-only private subcollection
+      // (/users/{uid}/private/contact) when the caller is the owner; for
+      // other users, email is intentionally undefined.
+      let email: string | undefined = data.email;
+      const currentUid = auth.currentUser?.uid;
+      if (!email && currentUid === userId) {
+        try {
+          const privSnap = await getDoc(
+            doc(db, "users", userId, "private", "contact"),
+          );
+          if (privSnap.exists()) email = privSnap.data()?.email;
+          if (!email) email = auth.currentUser?.email ?? undefined;
+        } catch {
+          /* private subcollection unreadable for non-owner — ignore */
+        }
+      }
+
       return {
         userId: data.user_id,
-        email: data.email,
+        email: email ?? "",
         username: data.username,
         nickname: data.nickname,
         displayName: data.display_name,
@@ -150,8 +169,9 @@ export class AuthRepository implements IAuthRepository {
       await sendSignInLinkToEmail(auth, request.email, actionCodeSettings);
       // SECURITY: Removed localStorage storage for email
 
-      // SECURITY: Store minimal data in sessionStorage instead of localStorage
-      // SessionStorage is cleared when tab closes, reducing XSS exposure window
+      // SECURITY FIX: Minimize sensitive data in sessionStorage
+      // Only store minimal, non-sensitive data. Email is provided by user on callback.
+      // SessionStorage is cleared when tab closes, reducing XSS exposure window.
       const minimalPendingData = {
         username: request.username,
         displayName: request.displayName,
@@ -277,22 +297,17 @@ export class AuthRepository implements IAuthRepository {
           const user = await this.getUserProfile(firebaseUser.uid);
           callback(user);
         } catch (error) {
-          console.error("Error getting user profile:", error);
-
-          const defaultUserData: SignUpRequest = {
-            email: firebaseUser.email || "",
-            username: firebaseUser.email?.split("@")[0] || "user",
-            nickname: firebaseUser.displayName || "Anonymous",
-            displayName: firebaseUser.displayName || "Anonymous",
-            is18Plus: false, // SECURITY: Must be explicitly set to true via consent screen
-            consentAccepted: false, // SECURITY: Must be explicitly accepted
-          };
-
-          const user = await this.createUserProfile(
-            defaultUserData,
-            firebaseUser.uid,
+          // SECURITY FIX (§2.2): Do NOT silently auto-create a user profile
+          // with is18Plus:false / consentAccepted:false for auth identities
+          // that have never completed signup. Doing so bypasses the age and
+          // consent gates that the signup form enforces. Instead we return
+          // a null profile so the UI routes the user through the proper
+          // consent/profile-creation flow (`profile-creation` screen).
+          console.error(
+            "AuthRepository: user has no profile yet, routing to signup flow",
+            error,
           );
-          callback(user);
+          callback(null);
         }
       } else {
         callback(null);

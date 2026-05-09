@@ -166,14 +166,21 @@ export const useTruthInteractionStore = create<TruthInteractionState>(
           parentId,
         );
 
-        // Fire alerts for replies
-        if (newComment && parentId) {
+        // Fire alerts for replies and truth post participants
+        if (newComment) {
           try {
             const comments = get().comments[truthId] || [];
-            const parentComment = comments.find((c) => c.id === parentId);
+            const parentComment = parentId
+              ? comments.find((c) => c.id === parentId)
+              : null;
+            const { alertService } =
+              await import("@/middleware/services/service-factory");
+            const { useContentStore } = await import("./useContentStore");
+            const truthPost = useContentStore
+              .getState()
+              .truthPosts.find((truth) => truth.id === truthId);
+
             if (parentComment && parentComment.userId !== userId) {
-              const { alertService } =
-                await import("@/middleware/services/service-factory");
               await alertService.createAlert({
                 userId: parentComment.userId,
                 type: "COMMENT_REPLY",
@@ -187,11 +194,45 @@ export const useTruthInteractionStore = create<TruthInteractionState>(
                   truthId,
                   commentId: newComment.id,
                   parentCommentId: parentId,
+                  commentText: text,
                 },
               });
             }
+
+            const participantIds = [
+              truthPost?.challengerId,
+              truthPost?.receiverId,
+            ].filter(
+              (participantId): participantId is string =>
+                !!participantId && participantId !== userId,
+            );
+
+            const uniqueParticipantIds = [...new Set(participantIds)].filter(
+              (participantId) => participantId !== parentComment?.userId,
+            );
+
+            await Promise.all(
+              uniqueParticipantIds.map((participantId) =>
+                alertService.createAlert({
+                  userId: participantId,
+                  type: "COMMENT_RECEIVED",
+                  entityId: truthId,
+                  actorId: userId,
+                  actorName: displayName,
+                  actorUsername: username,
+                  actorAvatar: avatarUrl,
+                  message: `@${username.replace(/^@/, "")} commented on your truth post`,
+                  metadata: {
+                    truthId,
+                    commentId: newComment.id,
+                    parentCommentId: parentId || null,
+                    commentText: text,
+                  },
+                }),
+              ),
+            );
           } catch (alertError) {
-            console.error("Failed to send comment reply alert:", alertError);
+            console.error("Failed to send truth comment alert:", alertError);
           }
         }
 

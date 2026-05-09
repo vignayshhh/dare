@@ -168,7 +168,7 @@ export const useAlertStore = create<AlertState>((set, get) => ({
             alertsRef,
             where("userId", "==", userId),
             orderBy("createdAt", "desc"),
-            limit(15), // Limit to most recent 15 alerts for performance
+            limit(50), // Keep enough recent alerts to cover both Social and Sus tabs
           );
 
           unsubscribe = onSnapshot(

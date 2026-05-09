@@ -290,6 +290,78 @@ export const useDareInteractionStore = create<DareInteractionState>(
           text,
           parentId,
         );
+
+        if (comment) {
+          try {
+            const comments = get().comments[dareId] || [];
+            const parentComment = parentId
+              ? comments.find(
+                  (existingComment) => existingComment.id === parentId,
+                )
+              : null;
+            const { alertService } =
+              await import("@/middleware/services/service-factory");
+            const { useContentStore } = await import("./useContentStore");
+            const darePost = useContentStore
+              .getState()
+              .darePosts.find((dare) => dare.id === dareId);
+
+            if (parentComment && parentComment.userId !== userId) {
+              await alertService.createAlert({
+                userId: parentComment.userId,
+                type: "COMMENT_REPLY",
+                entityId: dareId,
+                actorId: userId,
+                actorName: displayName,
+                actorUsername: username,
+                actorAvatar: avatarUrl,
+                message: `@${username.replace(/^@/, "")} replied to your comment`,
+                metadata: {
+                  dareId,
+                  commentId: comment.id,
+                  parentCommentId: parentId,
+                  commentText: text,
+                },
+              });
+            }
+
+            const participantIds = [
+              darePost?.challengerId,
+              darePost?.receiverId,
+            ].filter(
+              (participantId): participantId is string =>
+                !!participantId && participantId !== userId,
+            );
+
+            const uniqueParticipantIds = [...new Set(participantIds)].filter(
+              (participantId) => participantId !== parentComment?.userId,
+            );
+
+            await Promise.all(
+              uniqueParticipantIds.map((participantId) =>
+                alertService.createAlert({
+                  userId: participantId,
+                  type: "COMMENT_RECEIVED",
+                  entityId: dareId,
+                  actorId: userId,
+                  actorName: displayName,
+                  actorUsername: username,
+                  actorAvatar: avatarUrl,
+                  message: `@${username.replace(/^@/, "")} commented on your dare post`,
+                  metadata: {
+                    dareId,
+                    commentId: comment.id,
+                    parentCommentId: parentId || null,
+                    commentText: text,
+                  },
+                }),
+              ),
+            );
+          } catch (alertError) {
+            console.error("Failed to send dare comment alert:", alertError);
+          }
+        }
+
         return comment;
       } catch (error) {
         console.error("❌ addComment error:", error);

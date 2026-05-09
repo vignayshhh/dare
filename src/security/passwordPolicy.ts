@@ -1,5 +1,15 @@
 import { db } from "@/backend/lib/firebase";
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  serverTimestamp,
+} from "firebase/firestore";
 
 interface PasswordPolicy {
   minLength: number;
@@ -25,18 +35,33 @@ interface PasswordHistory {
 
 interface PasswordStrength {
   score: number;
-  level: 'weak' | 'fair' | 'good' | 'strong' | 'very-strong';
+  level: "weak" | "fair" | "good" | "strong" | "very-strong";
   feedback: string[];
   suggestions: string[];
 }
 
 /**
  * Password Policy Enforcement Service
- * Enforces strong password policies and tracks password history
+ *
+ * ⚠️ SECURITY NOTICE (§2.4): The app currently signs users in with email
+ * link + Google OAuth. It does NOT handle password authentication, so
+ * this module's history / hashing paths are largely dead code. It is
+ * kept only for its `validatePassword` / `calculateStrength` string
+ * policy checks.
+ *
+ * DO NOT wire `hashPassword` / `isPasswordInHistory` into a real login
+ * flow: client-side SHA-256 (even salted) is the wrong primitive for
+ * credential storage. Any real password path must:
+ *   - Hash on the SERVER with bcrypt / scrypt / Argon2id.
+ *   - Never trust a client-provided hash.
+ *
+ * To reduce accidental damage, `hashPassword` below now salts with the
+ * user id so two users with the same password do not collide in
+ * Firestore.
  */
 class PasswordPolicyService {
   private readonly HISTORY_COLLECTION = "password_history";
-  
+
   private readonly DEFAULT_POLICY: PasswordPolicy = {
     minLength: 8,
     requireUppercase: true,
@@ -50,10 +75,25 @@ class PasswordPolicyService {
   };
 
   private readonly COMMON_PASSWORDS = [
-    'password', '123456', '12345678', 'qwerty', 'abc123',
-    'password123', 'admin', 'welcome', 'monkey', 'letmein',
-    'dragon', 'master', 'hello', 'football', 'shadow',
-    'sunshine', 'princess', 'password1', '123456789',
+    "password",
+    "123456",
+    "12345678",
+    "qwerty",
+    "abc123",
+    "password123",
+    "admin",
+    "welcome",
+    "monkey",
+    "letmein",
+    "dragon",
+    "master",
+    "hello",
+    "football",
+    "shadow",
+    "sunshine",
+    "princess",
+    "password1",
+    "123456789",
   ];
 
   /**
@@ -66,7 +106,10 @@ class PasswordPolicyService {
   /**
    * Validate password against policy
    */
-  validatePassword(password: string, userInfo?: { email?: string; username?: string }): { valid: boolean; errors: string[] } {
+  validatePassword(
+    password: string,
+    userInfo?: { email?: string; username?: string },
+  ): { valid: boolean; errors: string[] } {
     const policy = this.getPolicy();
     const errors: string[] = [];
 
@@ -77,22 +120,25 @@ class PasswordPolicyService {
 
     // Check uppercase
     if (policy.requireUppercase && !/[A-Z]/.test(password)) {
-      errors.push('Password must contain at least one uppercase letter');
+      errors.push("Password must contain at least one uppercase letter");
     }
 
     // Check lowercase
     if (policy.requireLowercase && !/[a-z]/.test(password)) {
-      errors.push('Password must contain at least one lowercase letter');
+      errors.push("Password must contain at least one lowercase letter");
     }
 
     // Check numbers
     if (policy.requireNumbers && !/\d/.test(password)) {
-      errors.push('Password must contain at least one number');
+      errors.push("Password must contain at least one number");
     }
 
     // Check special characters
-    if (policy.requireSpecialChars && !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
-      errors.push('Password must contain at least one special character');
+    if (
+      policy.requireSpecialChars &&
+      !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
+    ) {
+      errors.push("Password must contain at least one special character");
     }
 
     // Check common passwords
@@ -100,7 +146,7 @@ class PasswordPolicyService {
       const lowerPassword = password.toLowerCase();
       for (const commonPwd of this.COMMON_PASSWORDS) {
         if (lowerPassword.includes(commonPwd)) {
-          errors.push('Password contains a common pattern');
+          errors.push("Password contains a common pattern");
           break;
         }
       }
@@ -109,11 +155,17 @@ class PasswordPolicyService {
     // Check personal information
     if (policy.preventPersonalInfo && userInfo) {
       const lowerPassword = password.toLowerCase();
-      if (userInfo.email && lowerPassword.includes(userInfo.email.split('@')[0].toLowerCase())) {
-        errors.push('Password should not contain your email');
+      if (
+        userInfo.email &&
+        lowerPassword.includes(userInfo.email.split("@")[0].toLowerCase())
+      ) {
+        errors.push("Password should not contain your email");
       }
-      if (userInfo.username && lowerPassword.includes(userInfo.username.toLowerCase())) {
-        errors.push('Password should not contain your username');
+      if (
+        userInfo.username &&
+        lowerPassword.includes(userInfo.username.toLowerCase())
+      ) {
+        errors.push("Password should not contain your username");
       }
     }
 
@@ -143,7 +195,7 @@ class PasswordPolicyService {
     if (/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) score += 15;
 
     // Complexity
-    const uniqueChars = new Set(password.split('')).size;
+    const uniqueChars = new Set(password.split("")).size;
     if (uniqueChars >= password.length * 0.7) score += 10;
 
     // Patterns
@@ -154,49 +206,64 @@ class PasswordPolicyService {
     score = Math.min(100, score);
 
     // Determine level
-    let level: PasswordStrength['level'];
-    if (score < 30) level = 'weak';
-    else if (score < 50) level = 'fair';
-    else if (score < 70) level = 'good';
-    else if (score < 90) level = 'strong';
-    else level = 'very-strong';
+    let level: PasswordStrength["level"];
+    if (score < 30) level = "weak";
+    else if (score < 50) level = "fair";
+    else if (score < 70) level = "good";
+    else if (score < 90) level = "strong";
+    else level = "very-strong";
 
     // Generate feedback
-    if (password.length < 8) feedback.push('Password is too short');
-    if (!/[a-z]/.test(password)) feedback.push('Add lowercase letters');
-    if (!/[A-Z]/.test(password)) feedback.push('Add uppercase letters');
-    if (!/\d/.test(password)) feedback.push('Add numbers');
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) feedback.push('Add special characters');
-    if (/(.)\1{2,}/.test(password)) feedback.push('Avoid repeated characters');
+    if (password.length < 8) feedback.push("Password is too short");
+    if (!/[a-z]/.test(password)) feedback.push("Add lowercase letters");
+    if (!/[A-Z]/.test(password)) feedback.push("Add uppercase letters");
+    if (!/\d/.test(password)) feedback.push("Add numbers");
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password))
+      feedback.push("Add special characters");
+    if (/(.)\1{2,}/.test(password)) feedback.push("Avoid repeated characters");
 
     // Generate suggestions
     if (score < 50) {
-      suggestions.push('Use a passphrase with multiple words');
-      suggestions.push('Mix letters, numbers, and symbols');
+      suggestions.push("Use a passphrase with multiple words");
+      suggestions.push("Mix letters, numbers, and symbols");
     }
     if (score < 70) {
-      suggestions.push('Make it longer for better security');
+      suggestions.push("Make it longer for better security");
     }
 
     return { score, level, feedback, suggestions };
   }
 
   /**
-   * Hash password (client-side only for comparison, real hashing should be server-side)
-   * Note: This is a simple hash for demonstration - use bcrypt/scrypt in production
+   * Hash password — SECURITY FIX (§2.4): salt with the user id so identical
+   * passwords across accounts don't collide, and iterate SHA-256 to slow
+   * down brute-force slightly. This is still NOT a substitute for
+   * server-side bcrypt/scrypt/Argon2id. See class-level notice.
    */
-  private async hashPassword(password: string): Promise<string> {
+  private async hashPassword(
+    password: string,
+    userId: string,
+  ): Promise<string> {
     const encoder = new TextEncoder();
-    const data = encoder.encode(password);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    let data = encoder.encode(`${userId}|${password}`);
+    // Light iteration to slow naive brute force. Real work factor must
+    // live on the server.
+    for (let i = 0; i < 10000; i++) {
+      const buf = await crypto.subtle.digest("SHA-256", data);
+      data = new Uint8Array(buf);
+    }
+    return Array.from(data as Uint8Array)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
   }
 
   /**
    * Check if password is in user's history
    */
-  async isPasswordInHistory(userId: string, password: string): Promise<boolean> {
+  async isPasswordInHistory(
+    userId: string,
+    password: string,
+  ): Promise<boolean> {
     try {
       const historyRef = doc(db, this.HISTORY_COLLECTION, userId);
       const historyDoc = await getDoc(historyRef);
@@ -206,9 +273,9 @@ class PasswordPolicyService {
       }
 
       const history = historyDoc.data() as PasswordHistory;
-      const passwordHash = await this.hashPassword(password);
+      const passwordHash = await this.hashPassword(password, userId);
 
-      return history.passwords.some(p => p.hash === passwordHash);
+      return history.passwords.some((p) => p.hash === passwordHash);
     } catch (error) {
       console.error("Error checking password history:", error);
       return false;
@@ -223,7 +290,7 @@ class PasswordPolicyService {
       const historyRef = doc(db, this.HISTORY_COLLECTION, userId);
       const historyDoc = await getDoc(historyRef);
 
-      const passwordHash = await this.hashPassword(password);
+      const passwordHash = await this.hashPassword(password, userId);
       const policy = this.getPolicy();
       const now = Date.now();
 
@@ -263,7 +330,9 @@ class PasswordPolicyService {
   /**
    * Check if password change is required
    */
-  async isPasswordChangeRequired(userId: string): Promise<{ required: boolean; reason?: string }> {
+  async isPasswordChangeRequired(
+    userId: string,
+  ): Promise<{ required: boolean; reason?: string }> {
     try {
       const historyRef = doc(db, this.HISTORY_COLLECTION, userId);
       const historyDoc = await getDoc(historyRef);
@@ -277,14 +346,15 @@ class PasswordPolicyService {
 
       // Check if explicitly required
       if (history.requiresChange) {
-        return { required: true, reason: 'Password change requested by admin' };
+        return { required: true, reason: "Password change requested by admin" };
       }
 
       // Check if password has expired
       if (policy.expiryDays > 0 && history.lastChanged) {
-        const expiryTime = history.lastChanged + (policy.expiryDays * 24 * 60 * 60 * 1000);
+        const expiryTime =
+          history.lastChanged + policy.expiryDays * 24 * 60 * 60 * 1000;
         if (Date.now() > expiryTime) {
-          return { required: true, reason: 'Password has expired' };
+          return { required: true, reason: "Password has expired" };
         }
       }
 
@@ -325,7 +395,9 @@ class PasswordPolicyService {
   /**
    * Get password history for user
    */
-  async getPasswordHistory(userId: string): Promise<{ lastChanged: number; changeCount: number }> {
+  async getPasswordHistory(
+    userId: string,
+  ): Promise<{ lastChanged: number; changeCount: number }> {
     try {
       const historyRef = doc(db, this.HISTORY_COLLECTION, userId);
       const historyDoc = await getDoc(historyRef);

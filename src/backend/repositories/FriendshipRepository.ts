@@ -3,7 +3,6 @@ import {
   getDoc,
   setDoc,
   updateDoc,
-  addDoc,
   collection,
   query,
   where,
@@ -22,6 +21,10 @@ import {
 } from "@/backend/domain/interfaces/IFriendshipRepository";
 
 export class FriendshipRepository implements IFriendshipRepository {
+  private getCanonicalFriendshipId(user1Id: string, user2Id: string): string {
+    return [user1Id, user2Id].sort().join("_");
+  }
+
   async createFriendship(
     request: CreateFriendshipRequest,
   ): Promise<Friendship> {
@@ -35,7 +38,13 @@ export class FriendshipRepository implements IFriendshipRepository {
         throw new Error("Friendship already exists");
       }
 
-      const friendshipRef = await addDoc(collection(db, "friendships"), {
+      const friendshipId = this.getCanonicalFriendshipId(
+        request.requesterId,
+        request.addresseeId,
+      );
+      const friendshipRef = doc(db, "friendships", friendshipId);
+
+      await setDoc(friendshipRef, {
         requester_id: request.requesterId,
         addressee_id: request.addresseeId,
         status: "pending",
@@ -84,7 +93,23 @@ export class FriendshipRepository implements IFriendshipRepository {
     try {
       console.log("🔄 getFriendshipBetweenUsers called:", { user1Id, user2Id });
 
-      // Fix the query - use separate queries and combine results
+      const canonicalFriendshipId = this.getCanonicalFriendshipId(
+        user1Id,
+        user2Id,
+      );
+      const canonicalFriendship = await this.getFriendshipById(
+        canonicalFriendshipId,
+      );
+
+      if (canonicalFriendship) {
+        console.log(
+          "🔄 Found canonical friendship with doc ID:",
+          canonicalFriendshipId,
+        );
+        return canonicalFriendship;
+      }
+
+      // Fallback for legacy friendships created before deterministic IDs.
       const friendshipQuery1 = query(
         collection(db, "friendships"),
         where("requester_id", "==", user1Id),

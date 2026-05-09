@@ -2,20 +2,12 @@ import { db } from "@/backend/lib/firebase";
 import {
   doc,
   getDoc,
-  setDoc,
-  updateDoc,
   collection,
   query,
   where,
   getDocs,
-  deleteDoc,
-  orderBy,
-  limit,
-  startAfter,
+  documentId,
   Timestamp,
-  increment,
-  onSnapshot,
-  Unsubscribe,
 } from "firebase/firestore";
 import {
   IStoryRepository,
@@ -26,6 +18,7 @@ import {
 } from "../../backend/domain/interfaces/IStoryRepository";
 import { StoryRepository } from "../../backend/repositories/StoryRepository";
 import { userService, UserProfile } from "./user.service";
+import { storyReactionService } from "./story-reaction.service";
 import { getDefaultAvatarUrl } from "@/utils/placeholderImages";
 
 export interface StoryDTO {
@@ -53,8 +46,26 @@ export interface CreateStoryDTO {
   caption?: string;
 }
 
+export interface StoryAudienceEntry {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+}
+
+export interface StoryAudienceDTO {
+  viewers: StoryAudienceEntry[];
+  likes: StoryAudienceEntry[];
+  hates: StoryAudienceEntry[];
+}
+
 class StoryService {
   private storyRepository: StoryRepository;
+  private audienceCache = new Map<
+    string,
+    { data: StoryAudienceDTO; expiresAt: number }
+  >();
+  private readonly audienceCacheTtlMs = 60 * 1000;
 
   constructor() {
     this.storyRepository = new StoryRepository();
@@ -198,17 +209,84 @@ class StoryService {
   async deleteStory(storyId: string): Promise<void> {
     try {
       await this.storyRepository.deleteStory(storyId);
+      this.audienceCache.delete(storyId);
     } catch (error) {
       console.error("Error deleting story:", error);
       throw error;
     }
   }
 
-  async cleanupExpiredStories(): Promise<void> {
+  async cleanupExpiredStories(userId: string): Promise<void> {
     try {
-      await this.storyRepository.deleteExpiredStories();
+      await this.storyRepository.deleteExpiredStories(userId);
     } catch (error) {
       console.error("Error cleaning up expired stories:", error);
+    }
+  }
+
+  async getStoryAudience(storyId: string): Promise<StoryAudienceDTO> {
+    const cached = this.audienceCache.get(storyId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    try {
+      const [story, reactions] = await Promise.all([
+        this.storyRepository.getStoryById(storyId),
+        storyReactionService.getStoryReactions(storyId),
+      ]);
+
+      if (!story) {
+        return { viewers: [], likes: [], hates: [] };
+      }
+
+      const likeUserIds = reactions
+        .filter((reaction) => reaction.type === "like")
+        .map((reaction) => reaction.userId);
+      const hateUserIds = reactions
+        .filter((reaction) => reaction.type === "hate")
+        .map((reaction) => reaction.userId);
+      const allUserIds = [
+        ...new Set([...story.viewers, ...likeUserIds, ...hateUserIds]),
+      ];
+
+      const profilesById = await this.getProfilesByIdsBatch(allUserIds);
+
+      const toEntry = (userId: string): StoryAudienceEntry | null => {
+        const profile = profilesById.get(userId);
+        if (!profile) return null;
+
+        return {
+          userId,
+          username: profile.username.startsWith("@")
+            ? profile.username
+            : `@${profile.username}`,
+          displayName: profile.display_name || profile.username,
+          avatar: profile.avatar_url || getDefaultAvatarUrl(userId),
+        };
+      };
+
+      const audience: StoryAudienceDTO = {
+        viewers: story.viewers
+          .map((userId) => toEntry(userId))
+          .filter((entry): entry is StoryAudienceEntry => Boolean(entry)),
+        likes: [...new Set(likeUserIds)]
+          .map((userId) => toEntry(userId))
+          .filter((entry): entry is StoryAudienceEntry => Boolean(entry)),
+        hates: [...new Set(hateUserIds)]
+          .map((userId) => toEntry(userId))
+          .filter((entry): entry is StoryAudienceEntry => Boolean(entry)),
+      };
+
+      this.audienceCache.set(storyId, {
+        data: audience,
+        expiresAt: Date.now() + this.audienceCacheTtlMs,
+      });
+
+      return audience;
+    } catch (error) {
+      console.error("Error fetching story audience:", error);
+      return { viewers: [], likes: [], hates: [] };
     }
   }
 
@@ -286,6 +364,45 @@ class StoryService {
     }
 
     console.log("🔍 getAuthorProfiles - Final profiles array:", profiles);
+    return profiles;
+  }
+
+  private async getProfilesByIdsBatch(
+    userIds: string[],
+  ): Promise<Map<string, UserProfile | null>> {
+    const uniqueUserIds = [...new Set(userIds)].filter(Boolean);
+    const profiles = new Map<string, UserProfile | null>();
+
+    if (uniqueUserIds.length === 0) {
+      return profiles;
+    }
+
+    const chunks: string[][] = [];
+    for (let index = 0; index < uniqueUserIds.length; index += 10) {
+      chunks.push(uniqueUserIds.slice(index, index + 10));
+    }
+
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        const usersRef = collection(db, "users");
+        const usersQuery = query(usersRef, where(documentId(), "in", chunk));
+        const snapshot = await getDocs(usersQuery);
+
+        snapshot.forEach((userDoc) => {
+          profiles.set(userDoc.id, {
+            id: userDoc.id,
+            ...userDoc.data(),
+          } as UserProfile);
+        });
+
+        chunk.forEach((userId) => {
+          if (!profiles.has(userId)) {
+            profiles.set(userId, null);
+          }
+        });
+      }),
+    );
+
     return profiles;
   }
 

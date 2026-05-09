@@ -4,6 +4,7 @@ import {
   type MessageEvent,
 } from "../../stores/useMessagingStore";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
+import { useGhostModeStore } from "../../stores/useGhostModeStore";
 import { Avatar } from "../ui/Avatar";
 import { useProfileDataStore } from "../../stores/profileDataStore";
 import {
@@ -131,31 +132,31 @@ const getMentionLabel = (text: string) => {
   );
 };
 
-const getIgnoredLabel = (text: string, isCurrentUserIgnorer?: boolean) => {
-  if (isCurrentUserIgnorer) {
-    // For the user who ignored the message
-    const m = text.match(/^(.*?)\s+ignored\s+(.*?)\s+message$/i);
-    return m ? (
+const getIgnoredLabel = (text: string) => {
+  const currentUserIgnored = text.match(/^You\s+ignored\s+(.+?)'s\s+message$/i);
+  if (currentUserIgnored) {
+    return (
       <span>
         <span style={{ color: "#888" }}>You ignored </span>
-        <span style={{ color: "#ff6b6b", fontWeight: 700 }}>{m[2]}</span>
+        <span style={{ color: "#ff6b6b", fontWeight: 700 }}>
+          {currentUserIgnored[1]}
+        </span>
         <span style={{ color: "#888" }}>'s message</span>
       </span>
-    ) : (
-      <span style={{ color: "#888" }}>{text}</span>
-    );
-  } else {
-    // For the user who was ignored
-    const m = text.match(/^(.*?)\s+ignored\s+your\s+message$/i);
-    return m ? (
-      <span>
-        <span style={{ color: "#ff6b6b", fontWeight: 700 }}>{m[1]}</span>
-        <span style={{ color: "#888" }}> ignored your message</span>
-      </span>
-    ) : (
-      <span style={{ color: "#888" }}>{text}</span>
     );
   }
+
+  const otherUserIgnored = text.match(/^(.+?)\s+ignored\s+your\s+message$/i);
+  return otherUserIgnored ? (
+    <span>
+      <span style={{ color: "#ff6b6b", fontWeight: 700 }}>
+        {otherUserIgnored[1]}
+      </span>
+      <span style={{ color: "#888" }}> ignored your message</span>
+    </span>
+  ) : (
+    <span style={{ color: "#888" }}>{text}</span>
+  );
 };
 
 const EV_CFG: Record<
@@ -182,11 +183,62 @@ const EV_CFG: Record<
   ignored: {
     icon: "🫥",
     accent: "#ff6b6b",
-    label: (text: string) => getIgnoredLabel(text, true),
+    label: (text: string) => getIgnoredLabel(text),
   },
 };
 
 // ─── SysLine ──────────────────────────────────────────────────────────────────
+
+function getMoodTheme(mood: string) {
+  if (mood === "angry") {
+    return {
+      accent: "#ff6b5f",
+      accentSoft: "rgba(255,107,95,0.24)",
+      accentGlow: "rgba(255,107,95,0.42)",
+      panel:
+        "linear-gradient(180deg, rgba(58,18,18,0.96) 0%, rgba(18,10,10,0.98) 100%)",
+      label: "Heat Rising",
+    };
+  }
+  if (mood === "crying") {
+    return {
+      accent: "#69b7ff",
+      accentSoft: "rgba(105,183,255,0.24)",
+      accentGlow: "rgba(105,183,255,0.4)",
+      panel:
+        "linear-gradient(180deg, rgba(16,35,58,0.96) 0%, rgba(9,16,28,0.98) 100%)",
+      label: "Soft Silence",
+    };
+  }
+  if (mood === "irritated") {
+    return {
+      accent: "#ffb347",
+      accentSoft: "rgba(255,179,71,0.24)",
+      accentGlow: "rgba(255,179,71,0.4)",
+      panel:
+        "linear-gradient(180deg, rgba(56,34,10,0.96) 0%, rgba(22,15,9,0.98) 100%)",
+      label: "Tension High",
+    };
+  }
+  if (mood === "depressed") {
+    return {
+      accent: "#9aa4b8",
+      accentSoft: "rgba(154,164,184,0.22)",
+      accentGlow: "rgba(154,164,184,0.34)",
+      panel:
+        "linear-gradient(180deg, rgba(24,28,38,0.96) 0%, rgba(12,14,18,0.98) 100%)",
+      label: "Low Tide",
+    };
+  }
+  return {
+    accent: "#3df57f",
+    accentSoft: "rgba(61,245,127,0.18)",
+    accentGlow: "rgba(61,245,127,0.3)",
+    panel:
+      "linear-gradient(180deg, rgba(22,30,26,0.96) 0%, rgba(12,16,14,0.98) 100%)",
+    label: "Mood Active",
+  };
+}
 
 function SysLine({
   type,
@@ -287,6 +339,7 @@ function SysLine({
           <span style={{ color: "#888" }}> unsent</span>
         </span>
       );
+    if (type === "ignored") return getIgnoredLabel(text);
     return <span style={{ color: "#777" }}>{text}</span>;
   })();
 
@@ -352,7 +405,6 @@ function SysLine({
         <span style={{ color: "#555", fontSize: 12 }}>{text}</span>
       </div>
     );
-
   return (
     <div
       style={{
@@ -441,115 +493,244 @@ function Bubble({
         style={{
           display: "flex",
           justifyContent: own ? "flex-end" : "flex-start",
+          alignItems: "flex-start",
+          gap: 0,
         }}
       >
-        <div
-          style={{
-            maxWidth: "82%",
-            padding: "18px 20px",
-            fontSize: 17,
-            lineHeight: 1.6,
-            wordBreak: "break-word",
-            borderRadius: 22,
-            ...(own
-              ? {
-                  background: "transparent",
-                  color: "#3df57f",
-                  border: "1.5px solid #3df57f55",
-                  boxShadow:
-                    "0 0 28px rgba(61,245,127,0.12), inset 0 0 20px rgba(61,245,127,0.04)",
-                }
-              : { background: "#191919", color: "#fff", border: "none" }),
-          }}
-        >
-          {msg.sharedPost ? (
-            <button
-              onClick={() =>
-                onOpenSharedPost?.(
-                  msg.sharedPost!.authorId,
-                  msg.sharedPost!.postId,
-                )
-              }
+        {own ? (
+          <>
+            <div
               style={{
-                background: "transparent",
+                maxWidth: "82%",
+                padding: "12px 16px",
+                fontSize: 17,
+                lineHeight: 1.5,
+                wordBreak: "break-word",
+                borderRadius: 18,
+                borderTopRightRadius: 4,
+                background: "rgba(61,245,127,0.08)",
+                color: "#3df57f",
                 border: "none",
-                padding: 0,
-                margin: 0,
-                width: "100%",
-                textAlign: "left",
-                cursor: "pointer",
-                color: "inherit",
+                boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
               }}
             >
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  opacity: 0.75,
-                  marginBottom: 10,
-                }}
-              >
-                {msg.text}
-              </div>
-              <div
-                style={{
-                  borderRadius: 18,
-                  overflow: "hidden",
-                  border: own
-                    ? "1px solid rgba(61,245,127,0.2)"
-                    : "1px solid rgba(255,255,255,0.08)",
-                  background: own ? "rgba(61,245,127,0.06)" : "#101010",
-                }}
-              >
-                {msg.sharedPost.media?.url ? (
-                  <img
-                    src={
-                      msg.sharedPost.media.thumbnail || msg.sharedPost.media.url
-                    }
-                    alt="Shared post"
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      height: 180,
-                      objectFit: "cover",
-                    }}
-                  />
-                ) : null}
-                <div style={{ padding: "12px 14px 14px" }}>
-                  <div
-                    style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}
-                  >
-                    {msg.sharedPost.authorName}
-                  </div>
+              {msg.sharedPost ? (
+                <button
+                  onClick={() =>
+                    onOpenSharedPost?.(
+                      msg.sharedPost!.authorId,
+                      msg.sharedPost!.postId,
+                    )
+                  }
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    margin: 0,
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    color: "inherit",
+                  }}
+                >
                   <div
                     style={{
                       fontSize: 12,
-                      opacity: 0.7,
-                      marginBottom: msg.sharedPost.content ? 8 : 0,
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      opacity: 0.75,
+                      marginBottom: 10,
                     }}
                   >
-                    @{msg.sharedPost.authorUsername.replace(/^@/, "")}
+                    {msg.text}
                   </div>
-                  {msg.sharedPost.content ? (
-                    <div
-                      style={{
-                        fontSize: 14,
-                        lineHeight: 1.5,
-                        color: own ? "#d7ffe6" : "#d1d5db",
-                      }}
-                    >
-                      {msg.sharedPost.content}
+                  <div
+                    style={{
+                      borderRadius: 18,
+                      overflow: "hidden",
+                      border: "1px solid rgba(61,245,127,0.2)",
+                      background: "rgba(61,245,127,0.06)",
+                    }}
+                  >
+                    {msg.sharedPost.media?.url ? (
+                      <img
+                        src={
+                          msg.sharedPost.media.thumbnail ||
+                          msg.sharedPost.media.url
+                        }
+                        alt="Shared post"
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          height: 180,
+                          objectFit: "cover",
+                        }}
+                      />
+                    ) : null}
+                    <div style={{ padding: "12px 14px 14px" }}>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          marginBottom: 4,
+                        }}
+                      >
+                        {msg.sharedPost.authorName}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          opacity: 0.7,
+                          marginBottom: msg.sharedPost.content ? 8 : 0,
+                        }}
+                      >
+                        @{msg.sharedPost.authorUsername.replace(/^@/, "")}
+                      </div>
+                      {msg.sharedPost.content ? (
+                        <div
+                          style={{
+                            fontSize: 14,
+                            lineHeight: 1.5,
+                            color: "#d7ffe6",
+                          }}
+                        >
+                          {msg.sharedPost.content}
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            </button>
-          ) : (
-            msg.text
-          )}
-        </div>
+                  </div>
+                </button>
+              ) : (
+                msg.text
+              )}
+            </div>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              style={{ flexShrink: 0, marginTop: 4 }}
+            >
+              <path d="M 0 0 L 12 0 L 0 10 Z" fill="rgba(61,245,127,0.08)" />
+            </svg>
+          </>
+        ) : (
+          <>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              style={{ flexShrink: 0, marginTop: 4 }}
+            >
+              <path d="M 12 0 L 0 0 L 12 10 Z" fill="#191919" />
+            </svg>
+            <div
+              style={{
+                maxWidth: "82%",
+                padding: "12px 16px",
+                fontSize: 17,
+                lineHeight: 1.5,
+                wordBreak: "break-word",
+                borderRadius: 18,
+                borderTopLeftRadius: 4,
+                background: "#191919",
+                color: "#fff",
+                border: "none",
+              }}
+            >
+              {msg.sharedPost ? (
+                <button
+                  onClick={() =>
+                    onOpenSharedPost?.(
+                      msg.sharedPost!.authorId,
+                      msg.sharedPost!.postId,
+                    )
+                  }
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    margin: 0,
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    color: "inherit",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      opacity: 0.75,
+                      marginBottom: 10,
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                  <div
+                    style={{
+                      borderRadius: 18,
+                      overflow: "hidden",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "#101010",
+                    }}
+                  >
+                    {msg.sharedPost.media?.url ? (
+                      <img
+                        src={
+                          msg.sharedPost.media.thumbnail ||
+                          msg.sharedPost.media.url
+                        }
+                        alt="Shared post"
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          height: 180,
+                          objectFit: "cover",
+                        }}
+                      />
+                    ) : null}
+                    <div style={{ padding: "12px 14px 14px" }}>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          marginBottom: 4,
+                        }}
+                      >
+                        {msg.sharedPost.authorName}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          opacity: 0.7,
+                          marginBottom: msg.sharedPost.content ? 8 : 0,
+                        }}
+                      >
+                        @{msg.sharedPost.authorUsername.replace(/^@/, "")}
+                      </div>
+                      {msg.sharedPost.content ? (
+                        <div
+                          style={{
+                            fontSize: 14,
+                            lineHeight: 1.5,
+                            color: "#d1d5db",
+                          }}
+                        >
+                          {msg.sharedPost.content}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </button>
+              ) : (
+                msg.text
+              )}
+            </div>
+          </>
+        )}
       </div>
       {showStatus && (
         <div
@@ -648,10 +829,10 @@ export default function MessagingScreen({
     clearIgnoredTracking,
     markMessageAsSeen,
     clearError,
+    clearMessages,
   } = useMessagingStore();
 
   const [input, setInput] = useState("");
-  const [ghost, setGhost] = useState(false);
   const [status, setStatus] = useState<Status>("seen");
   const [menuOpen, setMenuOpen] = useState(false);
   const [hasOpenedChat, setHasOpenedChat] = useState(false);
@@ -664,6 +845,7 @@ export default function MessagingScreen({
     isActive: boolean;
   } | null>(null);
   const [moodBlockModalOpen, setMoodBlockModalOpen] = useState(false);
+  const [moodBlockModalVisible, setMoodBlockModalVisible] = useState(false);
   const [currentMoodBlock, setCurrentMoodBlock] = useState<{
     mood: "angry" | "crying" | "irritated" | "depressed";
     initiatedBy: string;
@@ -671,10 +853,15 @@ export default function MessagingScreen({
     startTime: number;
     endTime: number;
   } | null>(null);
+  const [currentMoodBlockVisible, setCurrentMoodBlockVisible] = useState(false);
   const [progressBarWidth, setProgressBarWidth] = useState(100);
+  const activeMoodTheme = getMoodTheme(currentMoodBlock?.mood ?? "");
 
   const [localFrozenBy, setLocalFrozenBy] = useState<string | null>(null);
-  const [friendOnline, setFriendOnline] = useState(false);
+  const [_firestoreOnline, setFirestoreOnline] = useState(false);
+  const [_rtdbOnline, setRtdbOnline] = useState(false);
+  const [friendGhostMode, setFriendGhostMode] = useState(false);
+  const friendOnline = _firestoreOnline || _rtdbOnline;
   const [friendTyping, setFriendTyping] = useState(false);
   const [liveDraft, setLiveDraft] = useState<string | null>(null);
 
@@ -690,6 +877,7 @@ export default function MessagingScreen({
       : 800,
   );
   const [vpOffsetTop, setVpOffsetTop] = useState(0);
+  const ghost = useGhostModeStore((s) => s.isActive);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const longTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -699,6 +887,7 @@ export default function MessagingScreen({
   const ghostRef = useRef(false);
   const isTypingRef = useRef(false);
   const lastPresenceSwitchRef = useRef<string>("");
+  const mutualChatEstablishedRef = useRef(false);
   const frozenRef = useRef(frozen);
   const convRef = useRef(currentConversation);
   const userIdRef = useRef(user?.id);
@@ -724,6 +913,12 @@ export default function MessagingScreen({
         currentConversation.other_user?.id,
     );
   }, [currentConversation?.id, onConversationActiveChange]);
+
+  useEffect(() => {
+    mutualChatEstablishedRef.current = false;
+    lastPresenceSwitchRef.current = "";
+    setLivePresenceSwitchTarget(null);
+  }, [currentConversation?.id]);
 
   useEffect(() => {
     const uid = user?.id;
@@ -1004,7 +1199,8 @@ export default function MessagingScreen({
       currentConversation?.other_user?.user_id ||
       currentConversation?.other_user?.id;
     if (!friendId) {
-      setFriendOnline(false);
+      setFirestoreOnline(false);
+      setFriendGhostMode(false);
       setLivePresenceSwitchTarget(null);
       lastPresenceSwitchRef.current = "";
       return;
@@ -1013,11 +1209,34 @@ export default function MessagingScreen({
     const unsub = onSnapshot(doc(db, "presence", friendId), (snap) => {
       if (snap.exists()) {
         const d = snap.data();
-        setFriendOnline(d?.online === true || d?.status === "online");
+        setFirestoreOnline(d?.online === true || d?.status === "online");
+        const ghostExpiryRaw =
+          d?.ghost_mode_expires_at?.toDate?.()?.toISOString?.() ||
+          d?.ghost_mode_expires_at ||
+          null;
+        const ghostExpiryMs = ghostExpiryRaw
+          ? new Date(ghostExpiryRaw).getTime()
+          : 0;
+        setFriendGhostMode(
+          d?.ghost_mode === true &&
+            Number.isFinite(ghostExpiryMs) &&
+            ghostExpiryMs > Date.now(),
+        );
         const targetUserId = String(d?.current_chat_user_id || "");
         const targetUserName = String(d?.current_chat_user_name || "");
         const currentUserId = String(user?.id || "");
+        const friendIsActivelyInThisConversation =
+          !!targetUserId && !!currentUserId && targetUserId === currentUserId;
+
+        if (friendIsActivelyInThisConversation) {
+          mutualChatEstablishedRef.current = true;
+          lastPresenceSwitchRef.current = "";
+          setLivePresenceSwitchTarget(null);
+          return;
+        }
+
         if (
+          mutualChatEstablishedRef.current &&
           targetUserId &&
           currentUserId &&
           targetUserId !== currentUserId &&
@@ -1034,15 +1253,12 @@ export default function MessagingScreen({
           }
         } else {
           lastPresenceSwitchRef.current = "";
-          setLivePresenceSwitchTarget((prev) =>
-            prev ? { ...prev, isActive: false } : null,
-          );
+          setLivePresenceSwitchTarget(null);
         }
       } else {
-        setFriendOnline(false);
-        setLivePresenceSwitchTarget((prev) =>
-          prev ? { ...prev, isActive: false } : null,
-        );
+        setFirestoreOnline(false);
+        setFriendGhostMode(false);
+        setLivePresenceSwitchTarget(null);
         lastPresenceSwitchRef.current = "";
       }
     });
@@ -1053,10 +1269,32 @@ export default function MessagingScreen({
     user?.id,
   ]);
 
-  // ── Friend typing listener ────────────────────────────────────────────────
+  // ── Friend RTDB online status ────────────────────────────────────────────
+  useEffect(() => {
+    const friendId =
+      currentConversation?.other_user?.user_id ||
+      currentConversation?.other_user?.id;
+    if (!friendId) {
+      setRtdbOnline(false);
+      return;
+    }
+    const unsub = messagingService.subscribeToUsersOnlineStatus(
+      [friendId],
+      (onlineIds) => {
+        setRtdbOnline(onlineIds.includes(friendId));
+      },
+    );
+    return () => unsub();
+  }, [
+    currentConversation?.other_user?.user_id,
+    currentConversation?.other_user?.id,
+  ]);
+
   useEffect(() => {
     const convId = currentConversation?.id;
-    const friendId = currentConversation?.other_user?.user_id;
+    const friendId =
+      currentConversation?.other_user?.user_id ||
+      currentConversation?.other_user?.id;
     if (!convId || !friendId) {
       setFriendTyping(false);
       return;
@@ -1071,9 +1309,12 @@ export default function MessagingScreen({
       },
     );
     return () => unsub();
-  }, [currentConversation?.id, currentConversation?.other_user?.user_id]);
+  }, [
+    currentConversation?.id,
+    currentConversation?.other_user?.user_id,
+    currentConversation?.other_user?.id,
+  ]);
 
-  // ── Friend draft listener ─────────────────────────────────────────────────
   useEffect(() => {
     const convId = currentConversation?.id;
     const friendId = currentConversation?.other_user?.user_id;
@@ -1172,21 +1413,22 @@ export default function MessagingScreen({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, messageEvents, livePresenceSwitchTarget]);
 
-  // ── Seen tracking ─────────────────────────────────────────────────────────
+  // ── Seen tracking (only the most recent incoming message) ────────────────
   useEffect(() => {
     if (!currentConversation || !user?.id) return;
     const otherUserId = currentConversation.other_user?.user_id;
     if (!otherUserId) return;
-    messages
-      .filter((msg) => msg.senderId === otherUserId && !msg.isOwn)
-      .forEach((msg) =>
-        trackSeenMessage(
-          msg.id,
-          currentConversation.id,
-          msg.senderId,
-          msg.senderName,
-        ),
-      );
+    const incoming = messages.filter(
+      (msg) => msg.senderId === otherUserId && !msg.isOwn,
+    );
+    if (incoming.length === 0) return;
+    const latest = incoming[incoming.length - 1];
+    trackSeenMessage(
+      latest.id,
+      currentConversation.id,
+      latest.senderId,
+      latest.senderName,
+    );
   }, [messages, currentConversation, user?.id, trackSeenMessage]);
 
   useEffect(() => {
@@ -1272,9 +1514,16 @@ export default function MessagingScreen({
   // ── Progress bar ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentMoodBlock) {
+      setCurrentMoodBlockVisible(false);
       setProgressBarWidth(100);
       return;
     }
+
+    setCurrentMoodBlockVisible(false);
+    const frame = requestAnimationFrame(() => {
+      setCurrentMoodBlockVisible(true);
+    });
+
     const updateProgress = () => {
       const elapsed = Date.now() - currentMoodBlock.startTime;
       const total = currentMoodBlock.endTime - currentMoodBlock.startTime;
@@ -1285,8 +1534,25 @@ export default function MessagingScreen({
     };
     updateProgress();
     const interval = setInterval(updateProgress, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearInterval(interval);
+    };
   }, [currentMoodBlock]);
+
+  useEffect(() => {
+    if (!moodBlockModalOpen) {
+      setMoodBlockModalVisible(false);
+      return;
+    }
+
+    setMoodBlockModalVisible(false);
+    const frame = requestAnimationFrame(() => {
+      setMoodBlockModalVisible(true);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [moodBlockModalOpen]);
 
   // ── Freeze actions ────────────────────────────────────────────────────────
   const doFreeze = async () => {
@@ -1634,6 +1900,27 @@ export default function MessagingScreen({
       },
       frozen,
     ],
+    [
+      "Clear chat",
+      "",
+      () => {
+        setMenuOpen(false);
+        if (currentConversation?.id) {
+          if (
+            confirm("Are you sure you want to clear all messages in this chat?")
+          ) {
+            console.log(
+              "Clearing chat for conversation:",
+              currentConversation.id,
+            );
+            clearMessages(currentConversation.id)
+              .then(() => console.log("Chat cleared successfully"))
+              .catch((error) => console.error("Error clearing chat:", error));
+          }
+        }
+      },
+      false,
+    ],
   ];
 
   const moodEmoji = (mood: string) => {
@@ -1681,6 +1968,23 @@ export default function MessagingScreen({
           0%{opacity:0;transform:translateY(20px)}
           100%{opacity:1;transform:translateY(0)}
         }
+        @keyframes moodBackdropIn{
+          0%{opacity:0}
+          100%{opacity:1}
+        }
+        @keyframes moodOrbPulse{
+          0%,100%{transform:scale(1);opacity:0.9}
+          50%{transform:scale(1.08);opacity:1}
+        }
+        @keyframes moodSheen{
+          0%{transform:translateX(-120%) skewX(-18deg);opacity:0}
+          20%{opacity:0.22}
+          100%{transform:translateX(180%) skewX(-18deg);opacity:0}
+        }
+        @keyframes moodProgressGlow{
+          0%,100%{filter:brightness(1)}
+          50%{filter:brightness(1.18)}
+        }
         *{box-sizing:border-box}
         input,textarea{outline:none;}
         input::placeholder,textarea::placeholder{color:#2a2a2a}
@@ -1712,19 +2016,16 @@ export default function MessagingScreen({
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span
                 onClick={() => {
-                  if (!currentMoodBlock) {
-                    clearRealtimeTypingSignals();
-                    onBack?.();
-                  }
+                  clearRealtimeTypingSignals();
+                  onBack?.();
                 }}
                 style={{
                   fontSize: 26,
-                  color: currentMoodBlock ? "#333" : "#666",
-                  cursor: currentMoodBlock ? "not-allowed" : "pointer",
+                  color: "#666",
+                  cursor: "pointer",
                   lineHeight: 1,
                   paddingRight: 2,
                   userSelect: "none",
-                  opacity: currentMoodBlock ? 0.3 : 1,
                 }}
               >
                 {"<"}
@@ -1734,6 +2035,9 @@ export default function MessagingScreen({
                   src={friendInfo.avatar}
                   alt={friendInfo.name}
                   size="lg"
+                  userId={currentConversation?.other_user?.user_id}
+                  username={currentConversation?.other_user?.username}
+                  forceGhostMode={friendGhostMode}
                   showStatus={false}
                 />
                 <div
@@ -1940,7 +2244,7 @@ export default function MessagingScreen({
           flex: 1,
           overflowY: "auto",
           paddingTop: 24,
-          paddingBottom: 12,
+          paddingBottom: currentMoodBlock ? 172 : 12,
         }}
         onClick={() => setMenuOpen(false)}
       >
@@ -2102,14 +2406,20 @@ export default function MessagingScreen({
             )}
           </>
         )}
-        <div style={{ height: 1 }} />
       </div>
 
       {/* ── INPUT ──────────────────────────────────────────────────────────── */}
       <div
-        style={{ flexShrink: 0, padding: "8px 14px 14px", background: "#000" }}
+        style={{
+          flexShrink: 0,
+          padding: "8px 14px 20px",
+          background: "#000",
+          boxShadow: "inset 0 -8px 0 #000",
+        }}
       >
-        {frozen ? (
+        {currentMoodBlock ? (
+          <div style={{ height: 8 }} />
+        ) : frozen ? (
           <div
             style={{
               textAlign: "center",
@@ -2203,29 +2513,23 @@ export default function MessagingScreen({
                   writeDraft("");
                 }}
                 disabled={!!currentMoodBlock}
-                placeholder={
-                  currentMoodBlock
-                    ? "Chat is blocked..."
-                    : ghost
-                      ? "Ghost mode active..."
-                      : "Message..."
-                }
+                placeholder={ghost ? "Ghost mode active..." : "Message..."}
                 style={{
                   flex: 1,
                   background: "transparent",
                   border: "none",
-                  color: currentMoodBlock ? "#666" : "#fff",
+                  color: "#fff",
                   fontSize: 17,
                   lineHeight: 1.4,
-                  caretColor: currentMoodBlock ? "transparent" : "#3df57f",
+                  caretColor: "#3df57f",
                   resize: "none",
                   outline: "none",
                   fontFamily: "inherit",
                   minHeight: 24,
                   maxHeight: 120,
                   paddingTop: 1,
-                  opacity: currentMoodBlock ? 0.5 : 1,
-                  cursor: currentMoodBlock ? "not-allowed" : "text",
+                  opacity: 1,
+                  cursor: "text",
                 }}
                 rows={1}
               />
@@ -2233,7 +2537,7 @@ export default function MessagingScreen({
 
             <button
               onClick={send}
-              disabled={!input.trim() || !!currentMoodBlock}
+              disabled={!input.trim()}
               style={{
                 width: 44,
                 height: 44,
@@ -2242,19 +2546,28 @@ export default function MessagingScreen({
                 flexShrink: 0,
                 cursor: input.trim() ? "pointer" : "default",
                 background: input.trim() ? "#3df57f" : "#111",
-                boxShadow: input.trim()
-                  ? "0 0 20px rgba(61,245,127,0.4)"
-                  : "none",
+                boxShadow: "none",
                 transition: "all 0.2s",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 17,
                 color: "#000",
                 marginBottom: 2,
               }}
             >
-              →
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
             </button>
           </div>
         )}
@@ -2273,6 +2586,8 @@ export default function MessagingScreen({
               background: "rgba(0,0,0,0.85)",
               backdropFilter: "blur(20px)",
               zIndex: 200,
+              opacity: moodBlockModalVisible ? 1 : 0,
+              transition: "opacity 0.22s ease-out",
             }}
             onClick={() => setMoodBlockModalOpen(false)}
           />
@@ -2281,7 +2596,6 @@ export default function MessagingScreen({
               position: "fixed",
               top: "50%",
               left: "50%",
-              transform: "translate(-50%, -50%)",
               background: "#1a1a1a",
               borderRadius: 24,
               padding: "28px 24px",
@@ -2292,6 +2606,13 @@ export default function MessagingScreen({
               overflowY: "auto",
               boxShadow: "0 25px 50px rgba(0,0,0,0.6)",
               border: "1px solid rgba(255,255,255,0.1)",
+              transformOrigin: "center center",
+              opacity: moodBlockModalVisible ? 1 : 0,
+              transform: moodBlockModalVisible
+                ? "translate(-50%, -50%) scale(1)"
+                : "translate(-50%, calc(-50% + 18px)) scale(0.92)",
+              transition:
+                "opacity 0.24s ease-out, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1)",
             }}
           >
             <div
@@ -2422,146 +2743,193 @@ export default function MessagingScreen({
         <>
           <div
             style={{
-              position: "fixed",
-              bottom: 30,
-              left: 15,
-              fontSize: 48,
-              opacity: 0,
-              animation: "fadeInCrying 1s ease-in-out 0.5s forwards",
-              zIndex: 301,
-            }}
-          >
-            {moodEmoji(currentMoodBlock.mood)}
-          </div>
-
-          <div
-            style={{
-              position: "fixed",
-              bottom: 0,
-              left: 0,
-              right: 0,
-              background:
-                "linear-gradient(to top, rgba(26,26,26,0.98), rgba(26,26,26,0.95))",
-              borderTop: "1px solid rgba(255,255,255,0.1)",
-              padding: "16px 20px 24px",
-              zIndex: 300,
-              backdropFilter: "blur(20px)",
-              boxShadow: "0 -10px 30px rgba(0,0,0,0.5)",
-              opacity: 0,
-              animation: "fadeInCard 0.5s ease-in-out 1.5s forwards",
+              position: "absolute",
+              bottom: 18,
+              left: 12,
+              right: 12,
+              zIndex: 40,
+              opacity: currentMoodBlockVisible ? 1 : 0,
+              transform: currentMoodBlockVisible
+                ? "translateY(0) scale(1)"
+                : "translateY(36px) scale(0.96)",
+              transition:
+                "opacity 0.36s ease-out, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)",
             }}
           >
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-                marginBottom: 12,
+                position: "absolute",
+                inset: "-18px 10% 22px",
+                borderRadius: 32,
+                background: `radial-gradient(circle, ${activeMoodTheme.accentGlow} 0%, transparent 72%)`,
+                filter: "blur(26px)",
+                opacity: currentMoodBlockVisible ? 1 : 0,
+                transition: "opacity 0.55s ease-out 0.08s",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                overflow: "hidden",
+                background: activeMoodTheme.panel,
+                border: `1px solid ${activeMoodTheme.accentSoft}`,
+                borderRadius: 28,
+                padding: "18px 18px 16px",
+                backdropFilter: "blur(22px)",
+                boxShadow: `0 24px 60px rgba(0,0,0,0.46), 0 0 0 1px ${activeMoodTheme.accentSoft}, inset 0 1px 0 rgba(255,255,255,0.08)`,
               }}
             >
               <div
                 style={{
-                  fontSize: 28,
-                  width: 50,
-                  height: 50,
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  background: "rgba(255,255,255,0.05)",
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  animation: "pulse 2s infinite",
+                  gap: 14,
+                  marginBottom: 14,
                 }}
               >
-                {moodEmoji(currentMoodBlock.mood)}
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 16,
-                    fontWeight: 600,
-                    color: "#fff",
-                    marginBottom: 4,
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {currentMoodBlock.initiatedByName} is {currentMoodBlock.mood}
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    color: "#888",
+                    fontSize: 36,
+                    width: 68,
+                    height: 68,
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
+                    justifyContent: "center",
+                    background: `radial-gradient(circle at 30% 30%, rgba(255,255,255,0.24), ${activeMoodTheme.accentSoft} 45%, rgba(0,0,0,0.14) 100%)`,
+                    borderRadius: 22,
+                    flexShrink: 0,
+                    color: "#fff",
+                    boxShadow: `0 10px 30px ${activeMoodTheme.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+                    animation: "moodOrbPulse 2.8s ease-in-out infinite",
                   }}
                 >
-                  <span>Chat blocked</span>
-                  <span style={{ color: "#666" }}>·</span>
-                  <MoodBlockTimer endTime={currentMoodBlock.endTime} />
+                  {moodEmoji(currentMoodBlock.mood)}
                 </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 10px",
+                      marginBottom: 10,
+                      borderRadius: 999,
+                      background: "rgba(255,255,255,0.05)",
+                      border: `1px solid ${activeMoodTheme.accentSoft}`,
+                      color: activeMoodTheme.accent,
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: "0.16em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: "50%",
+                        background: activeMoodTheme.accent,
+                        boxShadow: `0 0 12px ${activeMoodTheme.accentGlow}`,
+                      }}
+                    />
+                    {activeMoodTheme.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 19,
+                      fontWeight: 800,
+                      color: "#fff",
+                      marginBottom: 6,
+                      textTransform: "capitalize",
+                      letterSpacing: "-0.02em",
+                      textShadow: "0 6px 22px rgba(0,0,0,0.34)",
+                    }}
+                  >
+                    {currentMoodBlock.initiatedByName} is{" "}
+                    {currentMoodBlock.mood}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "rgba(255,255,255,0.64)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <span>⏳ Please wait...</span>
+                    <span style={{ color: "#666" }}>·</span>
+                    <MoodBlockTimer endTime={currentMoodBlock.endTime} />
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (currentConversation?.id) {
+                      const db = getFirestore();
+                      deleteDoc(
+                        doc(
+                          db,
+                          "conversations",
+                          currentConversation.id,
+                          "meta",
+                          "moodBlock",
+                        ),
+                      ).catch(() => {});
+                    }
+                    setCurrentMoodBlock(null);
+                  }}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "rgba(255,255,255,0.05)",
+                    border: `1px solid ${activeMoodTheme.accentSoft}`,
+                    borderRadius: 999,
+                    padding: "10px 15px",
+                    color: activeMoodTheme.accent,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                    WebkitTapHighlightColor: "transparent",
+                    flexShrink: 0,
+                  }}
+                  onTouchStart={(e) => {
+                    e.currentTarget.style.background =
+                      activeMoodTheme.accentSoft;
+                    e.currentTarget.style.transform = "scale(0.96)";
+                  }}
+                  onTouchEnd={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                    e.currentTarget.style.transform = "scale(1)";
+                  }}
+                >
+                  Skip
+                </button>
               </div>
 
-              <button
-                onClick={() => {
-                  if (currentConversation?.id) {
-                    const db = getFirestore();
-                    deleteDoc(
-                      doc(
-                        db,
-                        "conversations",
-                        currentConversation.id,
-                        "meta",
-                        "moodBlock",
-                      ),
-                    ).catch(() => {});
-                  }
-                  setCurrentMoodBlock(null);
-                }}
-                style={{
-                  background: "rgba(61,245,127,0.1)",
-                  border: "1px solid rgba(61,245,127,0.3)",
-                  borderRadius: 20,
-                  padding: "8px 16px",
-                  color: "#3df57f",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  transition: "all 0.2s ease",
-                  WebkitTapHighlightColor: "transparent",
-                  flexShrink: 0,
-                }}
-                onTouchStart={(e) => {
-                  e.currentTarget.style.background = "rgba(61,245,127,0.2)";
-                  e.currentTarget.style.transform = "scale(0.95)";
-                }}
-                onTouchEnd={(e) => {
-                  e.currentTarget.style.background = "rgba(61,245,127,0.1)";
-                  e.currentTarget.style.transform = "scale(1)";
-                }}
-              >
-                Skip
-              </button>
-            </div>
-
-            <div
-              style={{
-                height: 3,
-                background: "rgba(255,255,255,0.1)",
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
               <div
                 style={{
-                  height: "100%",
-                  background: "linear-gradient(90deg, #3df57f, #2dd47f)",
-                  borderRadius: 2,
-                  transition: "width 1s linear",
-                  width: `${progressBarWidth}%`,
+                  height: 6,
+                  background: "rgba(255,255,255,0.08)",
+                  borderRadius: 999,
+                  overflow: "hidden",
+                  boxShadow: "inset 0 1px 2px rgba(0,0,0,0.35)",
                 }}
-              />
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    background: `linear-gradient(90deg, ${activeMoodTheme.accent}, rgba(255,255,255,0.92))`,
+                    borderRadius: 999,
+                    transition: "width 1s linear",
+                    width: `${progressBarWidth}%`,
+                    animation: "moodProgressGlow 2.2s ease-in-out infinite",
+                    boxShadow: `0 0 16px ${activeMoodTheme.accentGlow}`,
+                  }}
+                />
+              </div>
             </div>
           </div>
         </>

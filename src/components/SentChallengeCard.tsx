@@ -1,8 +1,11 @@
 import React from "react";
+import { Avatar } from "./ui/Avatar";
 
 interface Challenge {
   id: string;
   type: "truth" | "dare";
+  challengerId?: string;
+  receiverId?: string;
   challenger: {
     name: string;
     avatar: string;
@@ -25,8 +28,12 @@ interface SentChallengeCardProps {
   onReview: (challenge: Challenge) => void;
 }
 
-export default function SentChallengeCard({ challenge, onReview }: SentChallengeCardProps) {
-  const isCompleted = challenge.state === "ANSWERED" || challenge.state === "PROOF_SUBMITTED";
+export default function SentChallengeCard({
+  challenge,
+  onReview,
+}: SentChallengeCardProps) {
+  const isCompleted =
+    challenge.state === "ANSWERED" || challenge.state === "PROOF_SUBMITTED";
   const isPending = challenge.state === "SENT";
 
   return (
@@ -37,15 +44,20 @@ export default function SentChallengeCard({ challenge, onReview }: SentChallenge
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full bg-bg-tertiary flex items-center justify-center">
-            <span className="text-white font-semibold text-sm">
-              {challenge.challenger.name.charAt(0).toUpperCase()}
-            </span>
-          </div>
+          <Avatar
+            src={challenge.challenger.avatar}
+            alt={challenge.challenger.name}
+            size="md"
+            username={challenge.challenger.username}
+            userId={challenge.challengerId}
+          />
           <div>
-            <p className="text-white font-semibold">{challenge.challenger.name}</p>
+            <p className="text-white font-semibold">
+              {challenge.challenger.name}
+            </p>
             <p className="text-text-secondary text-sm">
-              {challenge.type === "truth" ? "Truth" : "Dare"} to {challenge.receiver?.name}
+              {challenge.type === "truth" ? "Truth" : "Dare"} to{" "}
+              {challenge.receiver?.name}
             </p>
           </div>
         </div>

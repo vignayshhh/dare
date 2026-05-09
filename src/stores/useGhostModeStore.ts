@@ -28,6 +28,17 @@ interface GhostModeState {
     dareId: string,
     durationMinutes?: number,
   ) => Promise<void>;
+  applyOptimisticGhostMode: (
+    dareId: string,
+    approvedAt: string | Date | { toDate?: () => Date; seconds?: number },
+    durationMinutes?: number,
+  ) => void;
+  reconcileGhostModeBackend: (
+    userId: string,
+    dareId: string,
+    approvedAt: string | Date | { toDate?: () => Date; seconds?: number },
+    durationMinutes?: number,
+  ) => Promise<void>;
   deactivateGhostMode: (userId: string) => Promise<void>;
   subscribeToGhostMode: (userId: string) => () => void;
   startTimer: () => void;
@@ -36,6 +47,41 @@ interface GhostModeState {
 }
 
 let timerInterval: NodeJS.Timeout | null = null;
+
+function resolveDateInput(
+  value: string | Date | { toDate?: () => Date; seconds?: number },
+): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof value.toDate === "function"
+  ) {
+    const parsed = value.toDate();
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "seconds" in value &&
+    typeof value.seconds === "number"
+  ) {
+    const parsed = new Date(value.seconds * 1000);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  return null;
+}
 
 export const useGhostModeStore = create<GhostModeState>((set, get) => ({
   // Initial state
@@ -129,6 +175,95 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
     }
   },
 
+  applyOptimisticGhostMode: (
+    dareId: string,
+    approvedAt: string | Date | { toDate?: () => Date; seconds?: number },
+    durationMinutes = 15,
+  ) => {
+    const activatedAt = resolveDateInput(approvedAt);
+    if (!activatedAt) {
+      return;
+    }
+
+    const expiresAt = new Date(
+      activatedAt.getTime() + durationMinutes * 60 * 1000,
+    );
+    const remainingSeconds = Math.max(
+      0,
+      Math.floor((expiresAt.getTime() - Date.now()) / 1000),
+    );
+
+    if (remainingSeconds <= 0) {
+      set({
+        isActive: false,
+        remainingSeconds: 0,
+        formattedTime: "00:00",
+        dareId: undefined,
+        activatedAt: undefined,
+        expiresAt: undefined,
+        loading: false,
+      });
+      get().stopTimer();
+      return;
+    }
+
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = remainingSeconds % 60;
+
+    set({
+      isActive: true,
+      remainingSeconds,
+      formattedTime: `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
+      dareId,
+      activatedAt: activatedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      loading: false,
+      error: null,
+    });
+
+    get().startTimer();
+  },
+
+  reconcileGhostModeBackend: async (
+    userId: string,
+    dareId: string,
+    approvedAt: string | Date | { toDate?: () => Date; seconds?: number },
+    durationMinutes = 15,
+  ) => {
+    const activatedAt = resolveDateInput(approvedAt);
+    if (!activatedAt) return;
+
+    const expiresAt = new Date(
+      activatedAt.getTime() + durationMinutes * 60 * 1000,
+    );
+
+    if (expiresAt.getTime() <= Date.now()) {
+      return;
+    }
+
+    try {
+      const backendStatus = await ghostModeService.getGhostModeStatus(userId);
+      if (
+        backendStatus.isActive &&
+        backendStatus.dareId === dareId &&
+        backendStatus.expiresAt &&
+        new Date(backendStatus.expiresAt).getTime() >= expiresAt.getTime() - 1000
+      ) {
+        return;
+      }
+
+      await ghostModeService.activateGhostMode({
+        userId,
+        dareId,
+        durationMinutes,
+        activatedAt,
+        expiresAt,
+      });
+    } catch (error) {
+      console.error("Error reconciling ghost mode backend:", error);
+    }
+  },
+
   // Deactivate ghost mode
   deactivateGhostMode: async (userId: string) => {
     set({ loading: true, error: null });
@@ -168,46 +303,40 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
     return ghostModeService.subscribeToGhostMode(
       userId,
       (status: GhostModeStatus) => {
-        const { isActive } = get();
+        if (status.isActive && status.expiresAt) {
+          const remainingSeconds = Math.max(
+            0,
+            Math.floor(
+              (new Date(status.expiresAt).getTime() - new Date().getTime()) /
+                1000,
+            ),
+          );
+          const minutes = Math.floor(remainingSeconds / 60);
+          const seconds = remainingSeconds % 60;
 
-        // Only update if status actually changed
-        if (status.isActive !== isActive) {
-          if (status.isActive) {
-            // Ghost mode activated
-            const remainingSeconds = Math.max(
-              0,
-              Math.floor(
-                (new Date(status.expiresAt!).getTime() - new Date().getTime()) /
-                  1000,
-              ),
-            );
-            const minutes = Math.floor(remainingSeconds / 60);
-            const seconds = remainingSeconds % 60;
+          set({
+            isActive: true,
+            remainingSeconds,
+            formattedTime: `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
+            dareId: status.dareId,
+            activatedAt: status.activatedAt,
+            expiresAt: status.expiresAt,
+          });
 
-            set({
-              isActive: true,
-              remainingSeconds,
-              formattedTime: `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
-              dareId: status.dareId,
-              activatedAt: status.activatedAt,
-              expiresAt: status.expiresAt,
-            });
-
-            get().startTimer();
-          } else {
-            // Ghost mode deactivated
-            set({
-              isActive: false,
-              remainingSeconds: 0,
-              formattedTime: "00:00",
-              dareId: undefined,
-              activatedAt: undefined,
-              expiresAt: undefined,
-            });
-
-            get().stopTimer();
-          }
+          get().startTimer();
+          return;
         }
+
+        set({
+          isActive: false,
+          remainingSeconds: 0,
+          formattedTime: "00:00",
+          dareId: undefined,
+          activatedAt: undefined,
+          expiresAt: undefined,
+        });
+
+        get().stopTimer();
       },
     );
   },
@@ -220,11 +349,16 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
     }
 
     timerInterval = setInterval(() => {
-      const { remainingSeconds } = get();
+      const { dareId, expiresAt, remainingSeconds } = get();
+      const resolvedRemainingSeconds = expiresAt
+        ? Math.max(
+            0,
+            Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
+          )
+        : remainingSeconds;
 
-      if (remainingSeconds <= 0) {
+      if (resolvedRemainingSeconds <= 0) {
         // Timer expired - deactivate ghost mode in backend
-        const { dareId } = get();
         const userId = useAuthStore.getState().user?.id;
 
         if (userId && dareId) {
@@ -251,13 +385,11 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
         return;
       }
 
-      // Decrement timer
-      const newRemainingSeconds = remainingSeconds - 1;
-      const minutes = Math.floor(newRemainingSeconds / 60);
-      const seconds = newRemainingSeconds % 60;
+      const minutes = Math.floor(resolvedRemainingSeconds / 60);
+      const seconds = resolvedRemainingSeconds % 60;
 
       set({
-        remainingSeconds: newRemainingSeconds,
+        remainingSeconds: resolvedRemainingSeconds,
         formattedTime: `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
       });
     }, 1000);

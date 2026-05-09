@@ -459,11 +459,12 @@ export function ProfileEditScreen({ onBack }: ProfileEditScreenProps) {
                   userId={user?.id}
                 />
                 {isUploadingAvatar && (
-                  <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center pointer-events-none">
+                  <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-                <div className="absolute bottom-0 right-0 bg-[#4ade80] rounded-full p-1.5 border-2 border-black pointer-events-none">
+                {/* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointer-events-none blocking touch */}
+                <div className="absolute bottom-0 right-0 bg-[#4ade80] rounded-full p-1.5 border-2 border-black">
                   <Camera size={12} className="text-black" />
                 </div>
               </div>

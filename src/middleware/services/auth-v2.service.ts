@@ -4,12 +4,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
-  query,
-  where,
-  getDocs,
   serverTimestamp,
-  collection,
-  limit,
   Timestamp,
 } from "firebase/firestore";
 import {
@@ -21,7 +16,6 @@ import {
   browserLocalPersistence,
   updateProfile as firebaseUpdateProfile,
   type User as FirebaseUser,
-  deleteUser,
 } from "firebase/auth";
 import { avatarService } from "./avatar.service";
 import {
@@ -62,6 +56,7 @@ export interface AuthUser {
   hasCompletedProfileCreation?: boolean; // Track if user has completed profile creation
   is_18_plus?: boolean; // Track if user has verified they are 18+
   consent_accepted?: boolean; // Track if user has accepted terms of service
+  notificationPreferences?: NotificationPreferences;
 }
 
 export interface AuthResponse {
@@ -83,6 +78,17 @@ export interface UpdateUserData {
   username?: string;
   bio?: string;
   avatar?: string;
+  visibility?: "PUBLIC" | "PRIVATE";
+  hasCompletedProfileCreation?: boolean;
+  is_18_plus?: boolean;
+  consent_accepted?: boolean;
+  notificationPreferences?: NotificationPreferences;
+}
+
+export interface NotificationPreferences {
+  challenges: boolean;
+  messages: boolean;
+  friendRequests: boolean;
 }
 
 const RESERVED_USERNAMES = new Set([
@@ -106,14 +112,41 @@ export interface ActivityUpdate {
 
 class AuthService {
   private static instance: AuthService;
+  private static readonly USER_CACHE_KEY = "dare_auth_user_cache";
   private subscribers: Set<(user: AuthUser | null) => void> = new Set();
   private currentUser: AuthUser | null = null;
+  private initializationPromise: Promise<void> | null = null;
 
   private constructor() {
     if (AuthService.instance) {
       return AuthService.instance;
     }
     AuthService.instance = this;
+    // Restore cached user synchronously so callers see the user immediately
+    this.currentUser = this.restoreFromCache();
+  }
+
+  private saveToCache(user: AuthUser | null): void {
+    if (typeof window === "undefined") return;
+    try {
+      if (user) {
+        localStorage.setItem(AuthService.USER_CACHE_KEY, JSON.stringify(user));
+      } else {
+        localStorage.removeItem(AuthService.USER_CACHE_KEY);
+      }
+    } catch {
+      // localStorage unavailable (private browsing, storage full, etc.)
+    }
+  }
+
+  private restoreFromCache(): AuthUser | null {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem(AuthService.USER_CACHE_KEY);
+      return raw ? (JSON.parse(raw) as AuthUser) : null;
+    } catch {
+      return null;
+    }
   }
 
   static getInstance(): AuthService {
@@ -155,9 +188,10 @@ class AuthService {
     }
   }
 
-  // Update current user and notify subscribers
+  // Update current user, persist to cache, and notify subscribers
   private setCurrentUser(user: AuthUser | null) {
     this.currentUser = user;
+    this.saveToCache(user);
     this.notifySubscribers();
   }
 
@@ -180,6 +214,7 @@ class AuthService {
       hasCompletedProfileCreation: data.hasCompletedProfileCreation ?? true,
       is_18_plus: data.is_18_plus,
       consent_accepted: data.consent_accepted,
+      notificationPreferences: data.notificationPreferences,
     };
   }
 
@@ -211,45 +246,75 @@ class AuthService {
   // render with a settled auth state.
   private authListenerRegistered = false;
   async initializeAuth(): Promise<void> {
-    if (this.authListenerRegistered) return;
-    this.authListenerRegistered = true;
-
-    // Check if Firebase Auth is available
-    if (!auth) {
-      console.warn("⚠️ Firebase Auth not configured. Running in mock mode.");
-      this.setCurrentUser(null);
-      return;
+    if (this.initializationPromise) {
+      return this.initializationPromise;
     }
 
-    try {
-      // Persist auth session across reloads
-      await setPersistence(auth, browserLocalPersistence);
-    } catch (error) {
-      secureLogError("setPersistence failed", error);
-    }
+    this.initializationPromise = (async () => {
+      if (this.authListenerRegistered) return;
+      this.authListenerRegistered = true;
 
-    await new Promise<void>((resolve) => {
-      let firstFire = true;
-      onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!auth) {
+        console.warn("⚠️ Firebase Auth not configured. Running in mock mode.");
+        this.setCurrentUser(null);
+        return;
+      }
+
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (error) {
+        secureLogError("setPersistence failed", error);
+      }
+
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const resolveOnce = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+
+        // Aggressive timeout for mobile - 1.5s to prevent stuck loading
+        const timeoutId = globalThis.setTimeout(() => {
+          console.warn(
+            "Auth initialization timed out; forcing resolve to prevent stuck loading.",
+          );
+          resolveOnce();
+        }, 1500);
+
         try {
-          if (!firebaseUser) {
-            this.setCurrentUser(null);
-          } else {
-            const profile = await this.loadProfile(firebaseUser);
-            this.setCurrentUser(profile);
-            debugLog(
-              "✅ Auth restored for:",
-              profile?.username || firebaseUser.email,
-            );
-          }
-        } finally {
-          if (firstFire) {
-            firstFire = false;
-            resolve();
-          }
+          onAuthStateChanged(auth, async (firebaseUser) => {
+            try {
+              if (!firebaseUser) {
+                this.setCurrentUser(null);
+              } else {
+                const profile = await this.loadProfile(firebaseUser);
+                this.setCurrentUser(profile);
+                debugLog(
+                  "✅ Auth restored for:",
+                  profile?.username || firebaseUser.email,
+                );
+              }
+            } catch (profileError) {
+              console.error(
+                "Error loading profile during auth init:",
+                profileError,
+              );
+              this.setCurrentUser(null);
+            } finally {
+              globalThis.clearTimeout(timeoutId);
+              resolveOnce();
+            }
+          });
+        } catch (error) {
+          console.error("Error setting up auth listener:", error);
+          globalThis.clearTimeout(timeoutId);
+          resolveOnce();
         }
       });
-    });
+    })();
+
+    return this.initializationPromise;
   }
 
   // Sign up new user using Firebase Auth email/password
@@ -313,9 +378,19 @@ class AuthService {
         postsCount: 0,
         isOnline: true,
         hasCompletedProfileCreation: false,
+        is_18_plus: false,
+        consent_accepted: false,
         user_id: uid,
         visibility: "PUBLIC",
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        lastActiveAt: serverTimestamp(),
+        notificationPreferences: {
+          challenges: true,
+          messages: true,
+          friendRequests: true,
+        },
       });
 
       // Create username mapping for uniqueness enforcement
@@ -344,6 +419,13 @@ class AuthService {
         lastActiveAt: new Date().toISOString(),
         isOnline: true,
         hasCompletedProfileCreation: false,
+        is_18_plus: false,
+        consent_accepted: false,
+        notificationPreferences: {
+          challenges: true,
+          messages: true,
+          friendRequests: true,
+        },
       };
 
       this.setCurrentUser(profile);
@@ -419,12 +501,22 @@ class AuthService {
           lastActiveAt: new Date().toISOString(),
           isOnline: true,
           hasCompletedProfileCreation: false,
+          is_18_plus: false,
+          consent_accepted: false,
+          notificationPreferences: {
+            challenges: true,
+            messages: true,
+            friendRequests: true,
+          },
         };
         await setDoc(doc(db, "users", uid), {
           ...fallback,
           user_id: uid,
           visibility: "PUBLIC",
+          updatedAt: serverTimestamp(),
+          updated_at: serverTimestamp(),
           createdAt: serverTimestamp(),
+          lastActiveAt: serverTimestamp(),
         });
         profile = fallback;
       } else {
@@ -459,21 +551,70 @@ class AuthService {
 
   // Sign out user via Firebase Auth
   async signOut(): Promise<void> {
+    console.log("🚪 [auth-v2] signOut called");
     // Check if Firebase Auth is available
     if (!auth) {
       this.setCurrentUser(null);
+      this.clearPersistedAuth();
       debugLog("User signed out (mock mode)");
       return;
     }
 
     try {
       await firebaseSignOut(auth);
+      console.log("✅ [auth-v2] Firebase signOut successful");
       this.setCurrentUser(null);
+      this.clearPersistedAuth();
       debugLog("User signed out");
     } catch (error) {
+      console.error("❌ [auth-v2] Firebase signOut error:", error);
       secureLogError("Sign out failed", error);
       // Force clear local state even if Firebase sign-out fails
       this.setCurrentUser(null);
+      this.clearPersistedAuth();
+    }
+  }
+
+  // Clear all Firebase persistence to prevent re-authentication on mobile
+  private clearPersistedAuth(): void {
+    try {
+      if (typeof window === "undefined") return;
+
+      // Clear Firebase auth-related localStorage entries
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (
+          key &&
+          (key.startsWith("firebase:") ||
+            key.includes("firebaseLocalStorageDb"))
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((key) => localStorage.removeItem(key));
+      console.log(
+        `✅ [auth-v2] Cleared ${keysToRemove.length} firebase keys from localStorage`,
+      );
+
+      // Clear IndexedDB where Firebase stores auth persistence
+      if (typeof indexedDB !== "undefined" && indexedDB.databases) {
+        indexedDB
+          .databases()
+          .then((databases) => {
+            for (const db of databases) {
+              if (db.name && db.name.includes("firebase")) {
+                indexedDB.deleteDatabase(db.name);
+                console.log(`✅ [auth-v2] Deleted IndexedDB: ${db.name}`);
+              }
+            }
+          })
+          .catch((err) => {
+            console.error("⚠️ [auth-v2] Failed to clear IndexedDB:", err);
+          });
+      }
+    } catch (error) {
+      console.error("⚠️ [auth-v2] Failed to clear persisted auth:", error);
     }
   }
 
@@ -495,6 +636,7 @@ class AuthService {
       await updateDoc(userRef, {
         hasCompletedProfileCreation: true,
         updatedAt: serverTimestamp(),
+        updated_at: serverTimestamp(),
       });
 
       // Update local state
@@ -509,12 +651,7 @@ class AuthService {
   }
 
   // Update profile
-  async updateProfile(updates: {
-    displayName?: string;
-    username?: string;
-    bio?: string;
-    avatar?: string;
-  }): Promise<AuthResponse> {
+  async updateProfile(updates: UpdateUserData): Promise<AuthResponse> {
     // Check if Firebase is available
     if (!auth || !db) {
       return {
@@ -535,33 +672,56 @@ class AuthService {
         SECURITY_LIMITS.rateLimitWindowMs,
       );
 
-      // Filter out undefined values to prevent Firebase errors
-      const filteredUpdates = Object.fromEntries(
-        Object.entries({
-          displayName:
-            updates.displayName !== undefined
-              ? validateDisplayName(updates.displayName)
-              : undefined,
-          username:
-            updates.username !== undefined
-              ? (() => {
-                  const normalizedUsername = validateUsername(updates.username);
-                  if (RESERVED_USERNAMES.has(normalizedUsername)) {
-                    throw new SecurityError("That username is not available.");
-                  }
-                  return normalizedUsername;
-                })()
-              : undefined,
-          bio:
-            updates.bio !== undefined
-              ? validateOptionalBio(updates.bio)
-              : undefined,
-          avatar:
-            updates.avatar !== undefined
-              ? validateOptionalMediaUrl(updates.avatar)
-              : undefined,
-        }).filter(([, value]) => value !== undefined),
-      );
+      const filteredUpdates: UpdateUserData = {};
+
+      if (updates.displayName !== undefined) {
+        filteredUpdates.displayName = validateDisplayName(updates.displayName);
+      }
+
+      if (updates.username !== undefined) {
+        const normalizedUsername = validateUsername(updates.username);
+        if (RESERVED_USERNAMES.has(normalizedUsername)) {
+          throw new SecurityError("That username is not available.");
+        }
+        filteredUpdates.username = normalizedUsername;
+      }
+
+      if (updates.bio !== undefined) {
+        filteredUpdates.bio = validateOptionalBio(updates.bio);
+      }
+
+      if (updates.avatar !== undefined) {
+        filteredUpdates.avatar = validateOptionalMediaUrl(updates.avatar);
+      }
+
+      if (updates.visibility !== undefined) {
+        filteredUpdates.visibility =
+          updates.visibility === "PRIVATE" ? "PRIVATE" : "PUBLIC";
+      }
+
+      if (updates.hasCompletedProfileCreation !== undefined) {
+        filteredUpdates.hasCompletedProfileCreation = Boolean(
+          updates.hasCompletedProfileCreation,
+        );
+      }
+
+      if (updates.is_18_plus !== undefined) {
+        filteredUpdates.is_18_plus = Boolean(updates.is_18_plus);
+      }
+
+      if (updates.consent_accepted !== undefined) {
+        filteredUpdates.consent_accepted = Boolean(updates.consent_accepted);
+      }
+
+      if (updates.notificationPreferences !== undefined) {
+        filteredUpdates.notificationPreferences = {
+          challenges: Boolean(updates.notificationPreferences.challenges),
+          messages: Boolean(updates.notificationPreferences.messages),
+          friendRequests: Boolean(
+            updates.notificationPreferences.friendRequests,
+          ),
+        };
+      }
 
       if (
         filteredUpdates.username &&
@@ -574,7 +734,10 @@ class AuthService {
       }
 
       // If avatar is being updated, store it in both fields for consistency
-      const firestoreUpdates = { ...filteredUpdates };
+      const firestoreUpdates: Record<string, unknown> = { ...filteredUpdates };
+      if (filteredUpdates.displayName) {
+        firestoreUpdates.display_name = filteredUpdates.displayName;
+      }
       if (filteredUpdates.avatar) {
         firestoreUpdates.avatar_url = filteredUpdates.avatar;
       }
@@ -583,10 +746,15 @@ class AuthService {
       await updateDoc(userRef, {
         ...firestoreUpdates,
         updatedAt: serverTimestamp(),
+        updated_at: serverTimestamp(),
       });
 
       // Update local state
-      this.currentUser = { ...this.currentUser, ...filteredUpdates };
+      this.currentUser = {
+        ...this.currentUser,
+        ...filteredUpdates,
+        updatedAt: new Date().toISOString(),
+      };
       this.notifySubscribers();
 
       return { success: true, user: this.currentUser };
@@ -885,7 +1053,3 @@ class AuthService {
 
 // Export singleton instance
 export const authService = AuthService.getInstance();
-
-function normalizeEmailForRateLimit(email: string): string {
-  return email.trim().toLowerCase();
-}

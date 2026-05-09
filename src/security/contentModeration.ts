@@ -5,26 +5,41 @@ interface ModerationResult {
   flagged: boolean;
   reason?: string;
   severity: "low" | "medium" | "high";
+  categories?: string[];
 }
 
 interface ModerationRule {
   pattern: RegExp;
   reason: string;
   severity: "low" | "medium" | "high";
+  category: string;
 }
 
 /**
  * Content Moderation Service
- * Provides basic content filtering for profanity, hate speech, and inappropriate content
- * Note: This is a foundation - production should use advanced AI moderation services
+ *
+ * SECURITY FIX: Enhanced with OpenAI integration for AI-powered moderation
+ * - Basic rule-based filtering for immediate detection
+ * - OpenAI Moderation API integration for advanced content analysis
+ * - Configurable strictness levels
+ * - Category-based flagging for better review workflow
  */
 class ContentModerationService {
+  private useOpenAI: boolean;
+  private openAIKey?: string;
+
+  constructor() {
+    this.useOpenAI = process.env.NEXT_PUBLIC_USE_OPENAI_MODERATION === "true";
+    this.openAIKey = process.env.OPENAI_API_KEY;
+  }
+
   private rules: ModerationRule[] = [
     // Profanity (basic list - expand in production)
     {
       pattern: /\b(fuck|shit|damn|ass|bitch|crap|hell)\b/gi,
       reason: "Profanity detected",
       severity: "low",
+      category: "profanity",
     },
 
     // Hate speech indicators (basic patterns)
@@ -33,6 +48,7 @@ class ContentModerationService {
         /\b(kill\s+(yourself|all\s+of\s+you)|rape|nigger|faggot|retard)\b/gi,
       reason: "Hate speech or harmful content",
       severity: "high",
+      category: "hate_speech",
     },
 
     // Personal information patterns
@@ -40,11 +56,13 @@ class ContentModerationService {
       pattern: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g,
       reason: "Potential phone number",
       severity: "medium",
+      category: "pii",
     },
     {
       pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
       reason: "Email address",
       severity: "medium",
+      category: "pii",
     },
 
     // Spam indicators
@@ -53,33 +71,101 @@ class ContentModerationService {
         /(buy\s+now|click\s+here|free\s+money|win\s+prize|limited\s+time)/gi,
       reason: "Spam-like content",
       severity: "medium",
+      category: "spam",
     },
 
     // URL patterns (external links)
     {
-      pattern: /https?:\/\/(?!localhost|127\.0\.0\.1)[^\s]+/gi,
+      pattern:
+        /https?:\/\/(?!localhost|127\.0\.0\.1|dare-g5ijg25ue-vignayshhhs-projects\.vercel\.app|dare-web-app\.vercel\.app)[^\s]+/gi,
       reason: "External link",
       severity: "low",
+      category: "external_links",
     },
   ];
 
   /**
-   * Moderate text content
+   * Moderate text content with OpenAI integration
+   * Falls back to rule-based moderation if OpenAI is not configured
    */
-  moderateText(content: string): ModerationResult {
+  async moderateText(content: string): Promise<ModerationResult> {
     if (!content || typeof content !== "string") {
       return { approved: true, flagged: false, severity: "low" };
     }
 
+    // Try OpenAI moderation first if configured
+    if (this.useOpenAI && this.openAIKey) {
+      try {
+        const openaiResult = await this.moderateWithOpenAI(content);
+        if (openaiResult.flagged) {
+          return openaiResult;
+        }
+      } catch (error) {
+        // Fall back to rule-based if OpenAI fails
+        console.warn("OpenAI moderation failed, falling back to rules:", error);
+      }
+    }
+
+    // Rule-based moderation (fallback or primary if OpenAI disabled)
+    return this.moderateWithRules(content);
+  }
+
+  /**
+   * Moderate content using OpenAI Moderation API
+   */
+  private async moderateWithOpenAI(content: string): Promise<ModerationResult> {
+    try {
+      const response = await fetch("https://api.openai.com/v1/moderations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.openAIKey}`,
+        },
+        body: JSON.stringify({ input: content }),
+      });
+
+      const data = await response.json();
+
+      if (data.results && data.results[0] && data.results[0].flagged) {
+        const result = data.results[0];
+        const categories = Object.entries(result.categories)
+          .filter(([_, flagged]) => flagged)
+          .map(([category, _]) => category);
+
+        return {
+          approved: false,
+          flagged: true,
+          reason: "Content flagged by AI moderation",
+          severity:
+            result.category_scores && result.category_scores.harassment > 0.5
+              ? "high"
+              : "medium",
+          categories,
+        };
+      }
+
+      return { approved: true, flagged: false, severity: "low" };
+    } catch (error) {
+      console.error("OpenAI moderation error:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Moderate content using rule-based patterns (fallback)
+   */
+  private moderateWithRules(content: string): ModerationResult {
     const lowerContent = content.toLowerCase();
     let flagged = false;
     let highestSeverity: "low" | "medium" | "high" = "low";
     const reasons: string[] = [];
+    const categories: string[] = [];
 
     for (const rule of this.rules) {
       if (rule.pattern.test(content)) {
         flagged = true;
         reasons.push(rule.reason);
+        categories.push(rule.category);
 
         // Track highest severity
         if (rule.severity === "high") {
@@ -95,6 +181,7 @@ class ContentModerationService {
       flagged,
       reason: reasons.length > 0 ? reasons.join(", ") : undefined,
       severity: highestSeverity,
+      categories,
     };
   }
 
@@ -137,12 +224,12 @@ class ContentModerationService {
   /**
    * Moderate and sanitize content in one step
    */
-  moderateAndSanitize(content: string): {
+  async moderateAndSanitize(content: string): Promise<{
     approved: boolean;
     sanitizedContent: string;
     reason?: string;
-  } {
-    const moderationResult = this.moderateText(content);
+  }> {
+    const moderationResult = await this.moderateText(content);
     const sanitizedContent = this.sanitizeHtml(content);
 
     return {
@@ -157,7 +244,7 @@ class ContentModerationService {
    */
   hasExternalLinks(content: string): boolean {
     const urlPattern =
-      /https?:\/\/(?!localhost|127\.0\.0\.1|firebasestorage\.googleapis\.com|storage\.googleapis\.com)[^\s]+/gi;
+      /https?:\/\/(?!localhost|127\.0\.0\.1|firebasestorage\.googleapis\.com|storage\.googleapis\.com|dare-g5ijg25ue-vignayshhhs-projects\.vercel\.app|dare-web-app\.vercel\.app)[^\s]+/gi;
     return urlPattern.test(content);
   }
 

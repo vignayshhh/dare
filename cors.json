@@ -4,7 +4,9 @@
       "http://localhost:3000",
       "http://localhost:3001",
       "http://127.0.0.1:3000",
-      "http://127.0.0.1:3001"
+      "http://127.0.0.1:3001",
+      "https://dare-g5ijg25ue-vignayshhhs-projects.vercel.app",
+      "https://dare-web-app.vercel.app"
     ],
     "method": ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
     "maxAgeSeconds": 3600,

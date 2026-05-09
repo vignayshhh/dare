@@ -16,7 +16,7 @@
     },
     "typing": {
       "$conversationId": {
-        ".read": "auth != null && (root.child('conversations_meta').child($conversationId).child('user1_id').val() === auth.uid || root.child('conversations_meta').child($conversationId).child('user2_id').val() === auth.uid)",
+        ".read": "auth != null",
         "$userId": {
           ".write": "auth != null && auth.uid === $userId",
           ".validate": "newData.val() === null || (newData.hasChildren(['is_typing']) && newData.childrenCount <= 3 && newData.child('is_typing').isBoolean() && (!newData.child('typing_speed').exists() || newData.child('typing_speed').isString()) && (!newData.child('last_seen').exists() || newData.child('last_seen').isString()))"

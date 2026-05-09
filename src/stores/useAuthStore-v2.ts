@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import {
   authService,
   type AuthUser,
+  type NotificationPreferences,
 } from "../middleware/services/auth-v2.service";
 import { useAvatarStore } from "./avatarStore";
 
@@ -58,6 +58,11 @@ export interface AuthStore extends AuthState {
     username?: string;
     bio?: string;
     avatar?: string;
+    visibility?: "PUBLIC" | "PRIVATE";
+    hasCompletedProfileCreation?: boolean;
+    is_18_plus?: boolean;
+    consent_accepted?: boolean;
+    notificationPreferences?: NotificationPreferences;
   }) => Promise<{
     success: boolean;
     user?: AuthUser;
@@ -116,12 +121,16 @@ export const useAuthStore = create<AuthStore>((set, get) => {
     });
   };
 
+  // Read cached user synchronously (authService restores from localStorage in its constructor)
+  const initialUser =
+    typeof window !== "undefined" ? authService.getCurrentUser() : null;
+
   return {
-    // Initial state
-    user: null,
+    // Initial state — pre-populated from localStorage cache for instant display on refresh
+    user: initialUser,
     loading: false,
     error: null,
-    isAuthenticated: false,
+    isAuthenticated: !!initialUser,
 
     // Sign up
     signUp: async (userData) => {

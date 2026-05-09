@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # Enable version updates for npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "security-team"
+    assignees:
+      - "security-team"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps(dev)"
+    groups:
+      # Group Firebase updates together
+      firebase-dependencies:
+        patterns:
+          - "firebase*"
+          - "@firebase/*"
+      # Group React updates together
+      react-dependencies:
+        patterns:
+          - "react*"
+          - "@types/react*"
+      # Group development dependencies
+      dev-dependencies:
+        patterns:
+          - "@types/*"
+          - "*eslint*"
+          - "*prettier*"
+          - "*jest*"
+    # Allow security updates even if they cause breaking changes
+    ignore:
+      # Ignore major version updates that may break the app
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]

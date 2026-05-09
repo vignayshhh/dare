@@ -22,6 +22,13 @@ if (!serviceAccountPath) {
 }
 ```
 
+## Current Operational Scripts
+
+- `backfill-friendships.js`
+  Backfills canonical friendship docs for legacy accepted friendships so
+  Firestore rules that rely on deterministic friendship IDs can authorize
+  story reads correctly. Defaults to dry-run; use `--apply` to write.
+
 ## Removed Files
 
 The following files were removed during security cleanup:

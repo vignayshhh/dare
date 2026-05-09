@@ -186,12 +186,17 @@ class DareServiceCompat {
 
   async challengerReviewDare(
     dareId: string,
-    _challengerId: string,
+    challengerId: string,
     decision: "ACCEPT" | "REJECT",
   ): Promise<void> {
-    await dareRepository.updateDare(dareId, {
-      state: decision === "ACCEPT" ? "ACCEPTED_REAL" : "REJECTED_FAKE",
-    });
+    const response = await dareServiceNew.challengerReviewDare(
+      dareId,
+      challengerId,
+      decision,
+    );
+    if (!response.success) {
+      throw new Error(response.error || "Failed to review dare");
+    }
   }
 
   async approveDare(dareId: string): Promise<void> {

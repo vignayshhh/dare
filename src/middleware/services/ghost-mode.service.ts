@@ -3,7 +3,7 @@
 // Suppresses all surveillance alerts during ghost mode period
 
 import { db } from "@/backend/lib/firebase";
-import { doc, getDoc, setDoc, updateDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 
 // ---------------------------------------------------------------------------  
 // Types and DTOs
@@ -21,6 +21,8 @@ export interface GhostModeActivationRequest {
   userId: string;
   dareId: string;
   durationMinutes?: number; // Default 15 minutes
+  activatedAt?: string | Date;
+  expiresAt?: string | Date;
 }
 
 // ---------------------------------------------------------------------------  
@@ -30,6 +32,12 @@ export interface GhostModeActivationRequest {
 class GhostModeService {
   private readonly DEFAULT_DURATION_MINUTES = 15;
   private readonly COLLECTION_NAME = "ghost_mode";
+
+  private resolveDateInput(value: string | Date | undefined): Date | null {
+    if (!value) return null;
+    const parsed = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
 
   /**
    * Check if a user is currently in ghost mode
@@ -80,20 +88,52 @@ class GhostModeService {
    */
   async activateGhostMode(request: GhostModeActivationRequest): Promise<void> {
     try {
-      const { userId, dareId, durationMinutes = this.DEFAULT_DURATION_MINUTES } = request;
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + durationMinutes * 60 * 1000);
+      const { userId, dareId, durationMinutes = this.DEFAULT_DURATION_MINUTES } =
+        request;
+      const activatedAt =
+        this.resolveDateInput(request.activatedAt) || new Date();
+      const explicitExpiresAt = this.resolveDateInput(request.expiresAt);
+      const expiresAt =
+        explicitExpiresAt ||
+        new Date(activatedAt.getTime() + durationMinutes * 60 * 1000);
 
       const ghostData = {
         userId,
         isActive: true,
-        activatedAt: Timestamp.fromDate(now),
+        activatedAt: Timestamp.fromDate(activatedAt),
         expiresAt: Timestamp.fromDate(expiresAt),
         dareId,
         durationMinutes,
       };
 
       await setDoc(doc(db, this.COLLECTION_NAME, userId), ghostData);
+      const ancillaryWrites = await Promise.allSettled([
+        setDoc(
+          doc(db, "users", userId),
+          {
+            ghost_mode_active: true,
+            ghost_mode_expires_at: expiresAt.toISOString(),
+            updated_at: activatedAt.toISOString(),
+          },
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, "presence", userId),
+          {
+            ghost_mode: true,
+            ghost_mode_expires_at: expiresAt.toISOString(),
+            last_seen: Timestamp.fromDate(activatedAt),
+          },
+          { merge: true },
+        ),
+      ]);
+
+      ancillaryWrites.forEach((result, index) => {
+        if (result.status === "rejected") {
+          const target = index === 0 ? "users" : "presence";
+          console.warn(`Ghost mode ancillary ${target} write failed:`, result.reason);
+        }
+      });
       
       console.log(`Ghost mode activated for user ${userId} until ${expiresAt.toISOString()}`);
     } catch (error) {
@@ -107,10 +147,35 @@ class GhostModeService {
    */
   async deactivateGhostMode(userId: string): Promise<void> {
     try {
-      await updateDoc(doc(db, this.COLLECTION_NAME, userId), {
-        isActive: false,
-        deactivatedAt: Timestamp.now(),
-      });
+      const now = new Date();
+      await Promise.all([
+        setDoc(
+          doc(db, this.COLLECTION_NAME, userId),
+          {
+            isActive: false,
+            deactivatedAt: Timestamp.now(),
+          },
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, "users", userId),
+          {
+            ghost_mode_active: false,
+            ghost_mode_expires_at: null,
+            updated_at: now.toISOString(),
+          },
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, "presence", userId),
+          {
+            ghost_mode: false,
+            ghost_mode_expires_at: null,
+            last_seen: Timestamp.fromDate(now),
+          },
+          { merge: true },
+        ),
+      ]);
       
       console.log(`Ghost mode deactivated for user ${userId}`);
     } catch (error) {

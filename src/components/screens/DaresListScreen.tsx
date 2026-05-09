@@ -217,7 +217,7 @@ export function DaresListScreen({
               margin: 0,
             }}
           >
-            Dares will appear here
+            Dares you take part in will appear here
           </p>
         </div>
       ) : (

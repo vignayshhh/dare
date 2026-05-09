@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { doc, getFirestore, updateDoc } from "firebase/firestore";
 import { useAuthStore } from "@/stores/useAuthStore-v2";
 
 export function ConsentScreen() {
@@ -26,17 +25,14 @@ export function ConsentScreen() {
     setError(null);
 
     try {
-      const db = getFirestore();
-      const userRef = doc(db, "users", user.id);
-      
-      await updateDoc(userRef, {
+      const result = await updateProfile({
         is_18_plus: true,
         consent_accepted: true,
-        updated_at: new Date().toISOString(),
       });
 
-      // Force reload user data to reflect changes
-      window.location.reload();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to save your consent.");
+      }
     } catch (err) {
       console.error("Error updating consent:", err);
       setError("Failed to save your consent. Please try again.");

@@ -54,11 +54,14 @@ interface UserProfileScreenProps {
   onNavigateToTruthPost?: (truth: FeedTruthPost) => void;
   onNavigateToDarePost?: (dare: FeedDarePost) => void;
   initialPostId?: string;
+  initialCommentId?: string;
+  initialTruthId?: string;
+  initialDareId?: string;
 }
 
-interface PublishedTruthCard extends FeedTruthPost {}
+type PublishedTruthCard = FeedTruthPost;
 
-interface PublishedDareCard extends FeedDarePost {}
+type PublishedDareCard = FeedDarePost;
 
 interface ProfileCommentPreview {
   id: string;
@@ -103,79 +106,33 @@ function formatProfileTime(timestamp: any): string {
   }
   return formatted === "just now" ? "Recently" : formatted;
 }
-
+// PostAvatar now uses the global Avatar component for consistent avatar handling
 function PostAvatar({
   src,
   name,
   size,
   style,
   className,
+  userId,
+  username,
 }: {
   src?: string;
   name?: string;
   size: number;
   style?: React.CSSProperties;
   className?: string;
+  userId?: string;
+  username?: string;
 }) {
-  const [error, setError] = React.useState(false);
-
-  React.useEffect(() => {
-    setError(false);
-  }, [src]);
-
-  if (!src || error) {
-    const fallbackStyles = {
-      backgroundColor: "#4ade80",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#000",
-      fontSize: Math.max(Math.round(size * 0.38), 12),
-      fontWeight: 700,
-      ...style,
-    };
-
-    if (className) {
-      return (
-        <div className={className} style={fallbackStyles}>
-          {name?.charAt(0)?.toUpperCase() || "?"}
-        </div>
-      );
-    }
-
-    return (
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          flexShrink: 0,
-          ...fallbackStyles,
-        }}
-      >
-        {name?.charAt(0)?.toUpperCase() || "?"}
-      </div>
-    );
-  }
-
   return (
-    <img
+    <Avatar
       src={src}
       alt={name || ""}
-      onError={() => setError(true)}
+      size={size >= 52 ? "xl" : size >= 48 ? "lg" : size >= 40 ? "md" : "sm"}
+      fallbackText={name?.charAt(0)?.toUpperCase()}
       className={className}
-      style={
-        className
-          ? style
-          : {
-              width: size,
-              height: size,
-              borderRadius: "50%",
-              objectFit: "cover",
-              flexShrink: 0,
-              ...style,
-            }
-      }
+      userId={userId}
+      username={username}
     />
   );
 }
@@ -800,6 +757,9 @@ export function UserProfileScreen({
   onNavigateToTruthPost,
   onNavigateToDarePost,
   initialPostId,
+  initialCommentId,
+  initialTruthId,
+  initialDareId,
 }: UserProfileScreenProps) {
   const [friendRequestSent, setFriendRequestSent] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -809,13 +769,14 @@ export function UserProfileScreen({
   );
   const [showPostsScreen, setShowPostsScreen] = useState(false);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [showAvatarPreview, setShowAvatarPreview] = useState(false);
   const [friendsList, setFriendsList] = useState<any[]>([]);
   const [showTruthsListScreen, setShowTruthsListScreen] = useState(false);
   const [showDaresListScreen, setShowDaresListScreen] = useState(false);
-  const [initialTruthId, setInitialTruthId] = useState<string | undefined>(
+  const [selectedTruthId, setSelectedTruthId] = useState<string | undefined>(
     undefined,
   );
-  const [initialDareId, setInitialDareId] = useState<string | undefined>(
+  const [selectedDareId, setSelectedDareId] = useState<string | undefined>(
     undefined,
   );
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -829,6 +790,9 @@ export function UserProfileScreen({
   const [publishedDares, setPublishedDares] = useState<PublishedDareCard[]>([]);
   const [loadingPublishedTruths, setLoadingPublishedTruths] = useState(false);
   const [loadingPublishedDares, setLoadingPublishedDares] = useState(false);
+  const consumedInitialPostsLinkRef = useRef<string | null>(null);
+  const consumedInitialTruthLinkRef = useRef<string | null>(null);
+  const consumedInitialDareLinkRef = useRef<string | null>(null);
   const stripAtSymbol = (username?: string) =>
     (username || "unknown").replace(/^@/, "");
 
@@ -1244,8 +1208,27 @@ export function UserProfileScreen({
   useEffect(() => {
     if (!initialPostId) return;
     if (!userFeedPosts.some((post) => post.id === initialPostId)) return;
+    const linkKey = `${initialPostId}:${initialCommentId || ""}`;
+    if (consumedInitialPostsLinkRef.current === linkKey) return;
+    consumedInitialPostsLinkRef.current = linkKey;
     setShowPostsScreen(true);
-  }, [initialPostId, userFeedPosts]);
+  }, [initialCommentId, initialPostId, userFeedPosts]);
+
+  useEffect(() => {
+    if (!initialTruthId) return;
+    if (!publishedTruths.some((truth) => truth.id === initialTruthId)) return;
+    if (consumedInitialTruthLinkRef.current === initialTruthId) return;
+    consumedInitialTruthLinkRef.current = initialTruthId;
+    setShowTruthsListScreen(true);
+  }, [initialTruthId, publishedTruths]);
+
+  useEffect(() => {
+    if (!initialDareId) return;
+    if (!publishedDares.some((dare) => dare.id === initialDareId)) return;
+    if (consumedInitialDareLinkRef.current === initialDareId) return;
+    consumedInitialDareLinkRef.current = initialDareId;
+    setShowDaresListScreen(true);
+  }, [initialDareId, publishedDares]);
 
   const userAllDares = [...sentDares, ...receivedDares].filter(
     (dare) => dare.challenger_id === userId || dare.receiver_id === userId,
@@ -1346,18 +1329,25 @@ export function UserProfileScreen({
   const showFriendsButton = currentUser?.id !== userId && isFriend;
 
   return (
-    <div className="screen-container">
+    <div className="screen-container bg-[radial-gradient(circle_at_top,#162016_0%,#0b100b_38%,#070a07_100%)]">
       {/* Header */}
-      <div className="bg-black border-b border-gray-800">
+      <div className="sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
         <div className="p-4">
           <div className="flex items-center space-x-4">
             <button
               onClick={onBack}
-              className="text-[#94a3b8] hover:text-white transition-colors"
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
             >
-              <ArrowLeft size={24} />
+              <ArrowLeft size={20} />
             </button>
-            <h1 className="text-xl font-bold text-white">Profile</h1>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold text-white">
+                @{stripAtSymbol(profile.username || "user")}
+              </h1>
+              <p className="truncate text-xs uppercase tracking-[0.18em] text-[#64748b]">
+                {profile.display_name || profile.username || "Profile"}
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -1372,6 +1362,7 @@ export function UserProfileScreen({
             userName={profile.display_name || profile.username}
             targetUserId={userId}
             initialPostId={initialPostId}
+            initialCommentId={initialCommentId}
           />
         </div>
       )}
@@ -1383,14 +1374,14 @@ export function UserProfileScreen({
             userId={userId}
             onBack={() => {
               setShowTruthsListScreen(false);
-              setInitialTruthId(undefined);
+              setSelectedTruthId(undefined);
             }}
             truthPosts={publishedTruths}
             loading={loadingPublishedTruths}
-            initialTruthId={initialTruthId}
+            initialTruthId={selectedTruthId || initialTruthId}
             onSelectTruth={(truth) => {
               setShowTruthsListScreen(false);
-              setInitialTruthId(undefined);
+              setSelectedTruthId(undefined);
               onNavigateToTruthPost?.(truth);
             }}
           />
@@ -1404,14 +1395,14 @@ export function UserProfileScreen({
             userId={userId}
             onBack={() => {
               setShowDaresListScreen(false);
-              setInitialDareId(undefined);
+              setSelectedDareId(undefined);
             }}
             darePosts={publishedDares}
             loading={loadingPublishedDares}
-            initialDareId={initialDareId}
+            initialDareId={selectedDareId || initialDareId}
             onSelectDare={(dare) => {
               setShowDaresListScreen(false);
-              setInitialDareId(undefined);
+              setSelectedDareId(undefined);
               onNavigateToDarePost?.(dare);
             }}
           />
@@ -1419,86 +1410,118 @@ export function UserProfileScreen({
       )}
 
       {/* Profile Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="custom-scrollbar flex-1 overflow-y-auto pb-8">
         {/* Avatar and Basic Info */}
-        <div className="w-full max-w-4xl px-5 pt-6 pb-4">
-          <div className="mb-5">
-            {/* Top row: avatar + name/username/bio */}
-            <div className="flex items-start gap-5 mb-4">
+        <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-4 sm:px-5 sm:pt-5">
+          <div className="mb-4 overflow-hidden rounded-[26px] border border-white/6 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(16,19,16,0.98))] p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.26)] sm:rounded-[28px] sm:p-4">
+            <div className="pointer-events-none -mx-4 -mt-4 mb-4 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.32),transparent)]" />
+
+            <div className="mb-3.5 flex items-start gap-3 sm:mb-4 sm:gap-4">
               <div className="relative shrink-0">
-                <Avatar
-                  src={profile.avatar_url || ""}
-                  alt={profile.display_name || profile.username}
-                  size="xl"
-                  className="border-4 border-[#1e1e1e] shadow-[0_0_20px_rgba(74,222,128,0.18)]"
-                />
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarPreview(true)}
+                  className="block rounded-full transition-transform duration-200 hover:scale-[1.02]"
+                >
+                  <Avatar
+                    src={profile.avatar_url || ""}
+                    alt={profile.display_name || profile.username}
+                    size="lg"
+                    className="border-2 border-[#111411] shadow-[0_0_22px_rgba(74,222,128,0.16)]"
+                  />
+                </button>
                 {onNavigateToActivity && (
                   <button
                     onClick={() => onNavigateToActivity(userId)}
-                    className="absolute bottom-0 -left-2 w-7 h-7 rounded-full bg-[#4ade80] border-2 border-[#0a0a0a] flex items-center justify-center cursor-pointer"
+                    className="absolute -bottom-1 -left-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#0b100b] bg-[#4ade80] shadow-[0_10px_24px_rgba(74,222,128,0.28)]"
                     style={{ color: "#000" }}
                   >
-                    <Activity size={14} />
+                    <Activity size={12} />
                   </button>
                 )}
               </div>
-              <div className="min-w-0 flex-1 pt-1">
-                <h2 className="text-[26px] leading-none font-bold text-white mb-2">
-                  {profile.display_name || profile.username}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onNavigateToProfile && userId) {
-                      onNavigateToProfile(userId);
-                    }
-                  }}
-                  className={`mb-3 text-[15px] font-semibold text-[#4ade80] ${
-                    onNavigateToProfile
-                      ? "cursor-pointer hover:text-[#86efac]"
-                      : "cursor-default"
-                  }`}
-                >
-                  {stripAtSymbol(profile.username)}
-                </button>
-                <p className="text-[#94a3b8] leading-relaxed max-w-xl mb-4">
+              <div className="min-w-0 flex-1">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <div className="inline-flex rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#86efac] sm:px-3 sm:text-[10px]">
+                    Profile
+                  </div>
+                  {profile.created_at && (
+                    <div className="inline-flex rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#94a3b8] sm:px-3 sm:text-[10px]">
+                      {formatJoinDate(profile.created_at)}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col items-start gap-y-1 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-3">
+                  <h2 className="text-[22px] font-bold leading-none tracking-[-0.03em] text-white sm:text-[24px]">
+                    {profile.display_name || profile.username}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onNavigateToProfile && userId) {
+                        onNavigateToProfile(userId);
+                      }
+                    }}
+                    className={`text-[15px] font-semibold text-[#4ade80] sm:text-sm ${
+                      onNavigateToProfile
+                        ? "cursor-pointer hover:text-[#86efac]"
+                        : "cursor-default"
+                    }`}
+                  >
+                    @{stripAtSymbol(profile.username)}
+                  </button>
+                </div>
+                <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-[#94a3b8] sm:text-sm">
                   {profile.bio || "No bio yet"}
                 </p>
-                {profile.created_at && (
-                  <p className="text-[#64748b] text-sm font-medium">
-                    {formatJoinDate(profile.created_at)}
-                  </p>
-                )}
               </div>
             </div>
 
-            {/* Action Buttons - full width row, flush to screen left */}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                gap: "8px",
-                flexWrap: "nowrap",
-              }}
-            >
+            <div className="grid grid-cols-3 gap-2 rounded-[22px] border border-white/6 bg-[linear-gradient(180deg,rgba(18,22,18,0.98),rgba(12,15,12,0.98))] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:gap-2.5 sm:rounded-[24px] sm:p-2.5">
+              <div className="rounded-[18px] bg-white/[0.03] px-2 py-2.5 text-center sm:rounded-[20px] sm:px-3 sm:py-3">
+                <div className="mb-1 text-[18px] font-bold leading-none text-white sm:text-[20px]">
+                  {userFeedPosts.length}
+                </div>
+                <div className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+                  Posts
+                </div>
+              </div>
+              <div className="rounded-[18px] bg-white/[0.03] px-2 py-2.5 text-center sm:rounded-[20px] sm:px-3 sm:py-3">
+                <div className="mb-1 text-[18px] font-bold leading-none text-white sm:text-[20px]">
+                  {userAllDares.length}
+                </div>
+                <div className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+                  Dares
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-[18px] border border-white/6 bg-white/[0.03] px-2 py-2.5 text-center transition-colors hover:border-[#4ade80]/18 hover:bg-[#202420] sm:rounded-[20px] sm:px-3 sm:py-3"
+                onClick={() => {
+                  setShowFriendsModal(true);
+                  setLoadingFriends(true);
+                  handleFriendsClick();
+                }}
+              >
+                <div className="mb-1 text-[18px] font-bold leading-none text-white sm:text-[20px]">
+                  {friendsCount}
+                </div>
+                <div className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+                  Friends
+                </div>
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap">
               {showFriendButton && (
                 <button
                   onClick={handleSendFriendRequest}
                   disabled={isAnimating}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    borderRadius: "999px",
-                    background: isAnimating ? "#2a2a2a" : "#4ade80",
-                    color: isAnimating ? "#64748b" : "#000",
-                    fontWeight: 700,
-                    fontSize: "14px",
-                    padding: "10px 20px",
-                    whiteSpace: "nowrap",
-                    border: "none",
-                    cursor: isAnimating ? "not-allowed" : "pointer",
-                  }}
+                  className={`col-span-2 inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-bold transition-all duration-200 sm:col-span-1 sm:px-5 sm:py-2.5 ${
+                    isAnimating
+                      ? "cursor-not-allowed bg-[#2a2a2a] text-[#64748b]"
+                      : "bg-[#4ade80] text-black shadow-[0_12px_30px_rgba(74,222,128,0.22)] hover:bg-[#34d399]"
+                  }`}
                 >
                   <UserPlus size={18} />
                   Send Friend Request
@@ -1507,43 +1530,21 @@ export function UserProfileScreen({
 
               {showPendingButton && (
                 <>
-                  <button
-                    disabled
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      borderRadius: "999px",
-                      background: "#2a2a2a",
-                      color: "#64748b",
-                      fontWeight: 700,
-                      fontSize: "14px",
-                      padding: "10px 16px",
-                      whiteSpace: "nowrap",
-                      border: "none",
-                      cursor: "not-allowed",
-                    }}
-                  >
-                    <Check size={18} />
-                    Request Sent
+                <button
+                  disabled
+                  className="col-span-2 inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full bg-[#2a2a2a] px-4 py-3 text-sm font-bold text-[#64748b] sm:col-span-1 sm:py-2.5"
+                >
+                  <Check size={18} />
+                  Request Sent
                   </button>
                   <button
                     onClick={handleResendFriendRequest}
                     disabled={isCancelling}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      borderRadius: "999px",
-                      background: isCancelling ? "#2a2a2a" : "#ef4444",
-                      color: isCancelling ? "#64748b" : "#fff",
-                      fontWeight: 700,
-                      fontSize: "14px",
-                      padding: "10px 16px",
-                      whiteSpace: "nowrap",
-                      border: "none",
-                      cursor: isCancelling ? "not-allowed" : "pointer",
-                    }}
+                    className={`col-span-2 inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-bold transition-colors sm:col-span-1 sm:py-2.5 ${
+                      isCancelling
+                        ? "cursor-not-allowed bg-[#2a2a2a] text-[#64748b]"
+                        : "bg-[#ef4444] text-white hover:bg-[#dc2626]"
+                    }`}
                   >
                     <X size={18} />
                     {isCancelling ? "Cancelling..." : "Cancel"}
@@ -1562,20 +1563,7 @@ export function UserProfileScreen({
                         );
                       }
                     }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      borderRadius: "999px",
-                      background: "#4ade80",
-                      color: "#000",
-                      fontWeight: 700,
-                      fontSize: "14px",
-                      padding: "10px 16px",
-                      whiteSpace: "nowrap",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-[#4ade80] px-4 py-3 text-sm font-bold text-black shadow-[0_12px_30px_rgba(74,222,128,0.22)] transition-colors hover:bg-[#34d399] sm:py-2.5"
                   >
                     <MessageCircle size={18} />
                     Message
@@ -1586,40 +1574,14 @@ export function UserProfileScreen({
                       setLoadingFriends(true);
                       handleFriendsClick();
                     }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      borderRadius: "999px",
-                      background: "#1e1e1e",
-                      color: "#fff",
-                      fontWeight: 700,
-                      fontSize: "14px",
-                      padding: "10px 16px",
-                      whiteSpace: "nowrap",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white transition-colors hover:border-[#4ade80]/30 hover:text-[#86efac] sm:py-2.5"
                   >
                     <Users size={18} />
                     {isCloseFriend ? "Close Friend" : "Friends"}
                   </button>
                   <button
                     onClick={() => setShowUnfriendModal(true)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      borderRadius: "999px",
-                      background: "#ef4444",
-                      color: "#fff",
-                      fontWeight: 700,
-                      fontSize: "14px",
-                      padding: "10px 16px",
-                      whiteSpace: "nowrap",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
+                    className="col-span-2 inline-flex items-center justify-center gap-2 rounded-full bg-[#ef4444] px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-[#dc2626] sm:col-span-1 sm:py-2.5"
                   >
                     <X size={18} />
                     Unfriend
@@ -1630,83 +1592,56 @@ export function UserProfileScreen({
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="mx-auto grid w-full max-w-4xl grid-cols-3 gap-3 px-5 mb-5">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-3 py-3 text-center">
-            <div className="text-[22px] font-bold text-white leading-none mb-1">
-              {userFeedPosts.length}
-            </div>
-            <div className="text-[#64748b] text-xs uppercase tracking-[0.12em]">
-              Posts
-            </div>
-          </div>
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-3 py-3 text-center">
-            <div className="text-[22px] font-bold text-white leading-none mb-1">
-              {userAllDares.length}
-            </div>
-            <div className="text-[#64748b] text-xs uppercase tracking-[0.12em]">
-              Dares
-            </div>
-          </div>
-          <div
-            className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-3 py-3 text-center cursor-pointer hover:bg-[#202020] transition-colors"
-            onClick={() => {
-              setShowFriendsModal(true);
-              setLoadingFriends(true);
-              handleFriendsClick();
-            }}
-          >
-            <div className="text-[22px] font-bold text-white leading-none mb-1">
-              {friendsCount}
-            </div>
-            <div className="text-[#64748b] text-xs uppercase tracking-[0.12em]">
-              Friends
-            </div>
-          </div>
-        </div>
-
         {/* Content Tabs - Only show if friends or own profile */}
         {(isFriend || currentUser?.id === userId) && (
           <>
             {/* Tab Navigation */}
-            <div className="mx-auto flex w-full max-w-4xl border-b border-gray-800 px-5">
-              <button
-                onClick={() => setActiveTab("posts")}
-                className={`flex-1 py-4 text-center font-medium transition-colors ${
-                  activeTab === "posts"
-                    ? "text-white border-b-2 border-[#4ade80]"
-                    : "text-[#64748b] hover:text-white"
-                }`}
-              >
-                <Grid3X3 size={20} className="mx-auto mb-1" />
-                <div className="text-sm">Posts</div>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab("truths");
-                }}
-                className={`flex-1 py-4 text-center font-medium transition-colors ${
-                  activeTab === "truths"
-                    ? "text-white border-b-2 border-[#4ade80]"
-                    : "text-[#64748b] hover:text-white"
-                }`}
-              >
-                <MessageSquare size={20} className="mx-auto mb-1" />
-                <div className="text-sm">Truths</div>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab("dares");
-                }}
-                className={`flex-1 py-4 text-center font-medium transition-colors ${
-                  activeTab === "dares"
-                    ? "text-white border-b-2 border-[#4ade80]"
-                    : "text-[#64748b] hover:text-white"
-                }`}
-              >
-                <Play size={20} className="mx-auto mb-1" />
-                <div className="text-sm">Dares</div>
-              </button>
+            <div className="mx-auto w-full max-w-4xl px-5">
+              <div className="flex rounded-full border border-white/6 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(17,21,17,0.98))] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+                <button
+                  onClick={() => setActiveTab("posts")}
+                  className={`flex-1 rounded-full px-3 py-3 text-center font-semibold transition-all sm:px-4 ${
+                    activeTab === "posts"
+                      ? "bg-[#4ade80] text-black shadow-[0_10px_26px_rgba(74,222,128,0.24)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                    <Grid3X3 size={16} />
+                    <span className="text-sm">Posts</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab("truths");
+                  }}
+                  className={`flex-1 rounded-full px-3 py-3 text-center font-semibold transition-all sm:px-4 ${
+                    activeTab === "truths"
+                      ? "bg-[#4ade80] text-black shadow-[0_10px_26px_rgba(74,222,128,0.24)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                    <MessageSquare size={16} />
+                    <span className="text-sm">Truths</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab("dares");
+                  }}
+                  className={`flex-1 rounded-full px-3 py-3 text-center font-semibold transition-all sm:px-4 ${
+                    activeTab === "dares"
+                      ? "bg-[#4ade80] text-black shadow-[0_10px_26px_rgba(74,222,128,0.24)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                    <Play size={16} />
+                    <span className="text-sm">Dares</span>
+                  </div>
+                </button>
+              </div>
             </div>
 
             {/* Tab Content */}
@@ -1714,12 +1649,14 @@ export function UserProfileScreen({
               {activeTab === "posts" && (
                 <div>
                   {userFeedPosts.length === 0 ? (
-                    <div className="text-center py-12">
-                      <Grid3X3
-                        size={48}
-                        className="mx-auto mb-4 text-[#64748b]"
-                      />
-                      <p className="text-[#64748b]">No posts yet</p>
+                    <div className="rounded-[30px] border border-white/6 bg-[linear-gradient(180deg,rgba(22,26,22,0.98),rgba(15,18,15,0.98))] px-6 py-12 text-center">
+                      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-white/8 bg-white/5 text-[#64748b]">
+                        <Grid3X3 size={26} />
+                      </div>
+                      <p className="font-semibold text-white">No posts yet</p>
+                      <p className="mt-2 text-sm text-[#64748b]">
+                        Posts will show up here once something gets shared.
+                      </p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-3">
@@ -1727,7 +1664,7 @@ export function UserProfileScreen({
                         <div
                           key={post.id}
                           onClick={() => setShowPostsScreen(true)}
-                          className="aspect-square min-h-[132px] bg-[#151515] border border-[#2a2a2a] rounded-2xl cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+                          className="aspect-square min-h-[132px] cursor-pointer overflow-hidden rounded-[24px] border border-white/6 bg-[#151515] shadow-[0_14px_34px_rgba(0,0,0,0.2)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#4ade80]/20 hover:opacity-95"
                         >
                           {post.media ? (
                             <img
@@ -1833,7 +1770,7 @@ export function UserProfileScreen({
                           <div
                             key={truth.id}
                             onClick={() => {
-                              setInitialTruthId(truth.id);
+                              setSelectedTruthId(truth.id);
                               setShowTruthsListScreen(true);
                             }}
                             style={{
@@ -2055,7 +1992,7 @@ export function UserProfileScreen({
                           <div
                             key={dare.id}
                             onClick={() => {
-                              setInitialDareId(dare.id);
+                              setSelectedDareId(dare.id);
                               setShowDaresListScreen(true);
                             }}
                             style={{
@@ -2193,8 +2130,8 @@ export function UserProfileScreen({
         {/* Posts Notice - Only show if not friends and not own profile */}
         {!isFriend && currentUser?.id !== userId && (
           <div className="px-6 pb-6">
-            <div className="bg-[#1e1e1e] rounded-2xl p-6 text-center">
-              <div className="w-16 h-16 bg-[#4ade80]/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="rounded-[30px] border border-white/6 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(16,19,16,0.98))] p-6 text-center shadow-[0_18px_46px_rgba(0,0,0,0.24)]">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10">
                 <svg
                   className="w-8 h-8 text-[#4ade80]"
                   fill="none"
@@ -2209,8 +2146,8 @@ export function UserProfileScreen({
                   />
                 </svg>
               </div>
-              <p className="text-white font-medium mb-2">Posts are hidden</p>
-              <p className="text-[#64748b] text-sm leading-relaxed">
+              <p className="mb-2 font-medium text-white">Posts are hidden</p>
+              <p className="text-sm leading-relaxed text-[#64748b]">
                 Send a friend request to see{" "}
                 {profile.display_name || profile.username}&apos;s truth and dare
                 posts
@@ -2220,13 +2157,40 @@ export function UserProfileScreen({
         )}
 
         {/* Friends Modal */}
+        {showAvatarPreview && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/88 px-6"
+            onClick={() => setShowAvatarPreview(false)}
+          >
+            <div
+              className="relative flex h-[min(72vw,320px)] w-[min(72vw,320px)] items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.14),rgba(18,20,18,0.98)_58%,rgba(8,10,8,1)_100%)] p-2 shadow-[0_30px_100px_rgba(0,0,0,0.55),0_0_40px_rgba(74,222,128,0.12)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setShowAvatarPreview(false)}
+                className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/40 text-white/80 transition-colors hover:text-white"
+              >
+                <X size={18} />
+              </button>
+              <div className="h-full w-full overflow-hidden rounded-full border border-white/8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                <img
+                  src={profile.avatar_url || ""}
+                  alt={profile.display_name || profile.username || "Profile"}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {showFriendsModal && (
           <div
             className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-70"
             onClick={() => setShowFriendsModal(false)}
           >
             <div
-              className="bg-[#111] w-full max-w-md rounded-t-3xl p-6"
+              className="w-full max-w-md rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,23,20,0.98),rgba(12,14,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">
@@ -2274,7 +2238,7 @@ export function UserProfileScreen({
                   {friendsList.map((friend: any) => (
                     <div
                       key={friend.userId}
-                      className="flex items-center space-x-3 p-3 bg-[#1e1e1e] rounded-xl"
+                      className="flex items-center space-x-3 rounded-2xl border border-white/6 bg-white/[0.03] p-3"
                     >
                       <Avatar
                         src={friend.avatarUrl || ""}
@@ -2329,7 +2293,7 @@ export function UserProfileScreen({
             onClick={() => setShowUnfriendModal(false)}
           >
             <div
-              className="bg-[#111] w-full max-w-sm mx-4 rounded-2xl p-6"
+              className="mx-4 w-full max-w-sm rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,23,20,0.98),rgba(12,14,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="text-center mb-6">

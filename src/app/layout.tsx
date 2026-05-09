@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     description: "Challenge your friends with dares and see who completes them",
     type: "website",
     locale: "en_US",
-    url: "https://dare-app.example.com",
+    url: "https://dare-web-app.vercel.app",
     siteName: "DARE",
     images: [
       {
@@ -63,7 +63,7 @@ export default function RootLayout({
       <head>
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+          content="width=device-width, initial-scale=1, user-scalable=yes, maximum-scale=5.0"
         />
         <link rel="icon" href="/favicon.ico" />
       </head>

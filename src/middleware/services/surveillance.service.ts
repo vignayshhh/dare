@@ -12,6 +12,7 @@ import {
   doc,
   setDoc,
   updateDoc,
+  deleteDoc,
   Timestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
@@ -309,6 +310,12 @@ class SurveillanceService {
       const now = new Date();
       const alertId = this.getProfileViewingAlertId(viewerUserId, targetUserId);
 
+      // This alert uses a deterministic doc id per viewer/target pair.
+      // Delete any previous session doc first so the next write is a fresh create.
+      // Otherwise Firestore treats setDoc as an update, and our rules reject
+      // changing createdAt on existing alerts.
+      await deleteDoc(doc(db, "alerts", alertId));
+
       // Firestore is the reliable live channel in this app because custom auth
       // does not guarantee RTDB auth. Keep one deterministic live alert doc per pair.
       await setDoc(doc(db, "alerts", alertId), {
@@ -367,8 +374,8 @@ class SurveillanceService {
     viewerUserId: string,
     targetUserId: string,
     viewerUsername: string,
-    _viewerDisplayName: string,
-    _viewerAvatar: string,
+    viewerDisplayName: string,
+    viewerAvatar: string,
   ): Promise<void> {
     if (viewerUserId === targetUserId) return;
 
@@ -385,8 +392,12 @@ class SurveillanceService {
       await updateDoc(doc(db, "alerts", alertId), {
         message: `@${cleanUsername} viewed your profile`,
         metadata: {
-          viewerUsername: cleanUsername,
+          actorName: viewerDisplayName,
           actorUsername: cleanUsername,
+          actorAvatar: viewerAvatar,
+          viewerName: viewerDisplayName,
+          viewerUsername: cleanUsername,
+          viewerAvatar,
           isLive: false,
           viewingEndTime: Date.now(),
         },

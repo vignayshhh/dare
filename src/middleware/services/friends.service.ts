@@ -55,6 +55,10 @@ class FriendsService {
   >();
   private inFlightFriendsRequests = new Map<string, Promise<Friend[]>>();
 
+  private getCanonicalFriendshipId(userId1: string, userId2: string): string {
+    return [userId1, userId2].sort().join("_");
+  }
+
   private getCachedFriends(userId: string): Friend[] | null {
     const cached = this.friendsCache.get(userId);
     if (!cached) return null;
@@ -102,7 +106,11 @@ class FriendsService {
         throw new Error("Cannot send friend request to yourself");
       }
 
-      const friendshipRef = doc(collection(db, "friendships"));
+      const friendshipRef = doc(
+        db,
+        "friendships",
+        this.getCanonicalFriendshipId(requesterId, addresseeId),
+      );
       const friendshipData = {
         requester_id: requesterId,
         addressee_id: addresseeId,
@@ -224,9 +232,27 @@ class FriendsService {
       }
 
       const friendshipsRef = collection(db, "friendships");
+      const canonicalFriendshipId = this.getCanonicalFriendshipId(
+        userId1,
+        userId2,
+      );
+      const canonicalFriendshipDoc = await getDoc(
+        doc(db, "friendships", canonicalFriendshipId),
+      );
 
-      // Firestore does not support multiple "in" filters in a single query.
-      // Check both possible directions explicitly instead.
+      if (canonicalFriendshipDoc.exists()) {
+        const result = {
+          id: canonicalFriendshipDoc.id,
+          ...canonicalFriendshipDoc.data(),
+        } as Friendship;
+        this.friendshipBetweenCache.set(pairKey, {
+          data: result,
+          expiresAt: now + this.friendsCacheTtlMs,
+        });
+        return result;
+      }
+
+      // Fallback for legacy friendships created before deterministic IDs.
       const [forwardSnap, reverseSnap] = await Promise.all([
         getDocs(
           query(

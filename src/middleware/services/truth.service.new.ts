@@ -10,6 +10,7 @@ import { IFeedRepository } from "@/backend/domain/interfaces/IFeedRepository";
 import { FeedRepository } from "@/backend/repositories/FeedRepository";
 import { AlertService } from "./alert.service.new";
 import { AlertRepository } from "@/backend/repositories/AlertRepository";
+import { friendsService } from "./friends.service";
 
 export interface TruthResponse {
   success: boolean;
@@ -331,6 +332,47 @@ class TruthService {
       return { success: true, truths: truthEntities };
     } catch (error) {
       console.error("❌ TruthService.getUserTruths error:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  async getFriendsTruths(userId: string): Promise<TruthListResponse> {
+    try {
+      const friends = await friendsService.getFriends(userId);
+
+      if (!Array.isArray(friends) || friends.length === 0) {
+        return { success: true, truths: [] };
+      }
+
+      const friendIds = friends
+        .map((friend: any) => friend.id || friend.user_id || friend.userId)
+        .filter(Boolean);
+
+      const truthGroups = await Promise.all(
+        friendIds.map((friendId: string) =>
+          this.truthRepository.getUserTruths(friendId, "all"),
+        ),
+      );
+
+      const seen = new Set<string>();
+      const dedupedTruths = truthGroups
+        .flat()
+        .filter((truth) => {
+          if (!truth?.id || seen.has(truth.id)) return false;
+          seen.add(truth.id);
+          return true;
+        })
+        .map((truth) => TruthEntity.create(this.mapToEntity(truth)))
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+
+      return { success: true, truths: dedupedTruths };
+    } catch (error) {
+      console.error("❌ TruthService.getFriendsTruths error:", error);
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
       return { success: false, error: errorMessage };

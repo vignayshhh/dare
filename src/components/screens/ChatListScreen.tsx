@@ -2,12 +2,48 @@
 
 import { useState, useEffect } from "react";
 import { doc, getFirestore, onSnapshot } from "firebase/firestore";
-import { MessageCircle, Search, Plus } from "lucide-react";
+import { MessageCircle, Search, Plus, X, User } from "lucide-react";
 import { useMessagingStore } from "../../stores/useMessagingStore";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
 import { BottomNavigation } from "../../components/navigation/BottomNavigation";
 import { Avatar } from "../ui/Avatar";
 import { useProfileDataStore } from "../../stores/profileDataStore";
+import { friendsService } from "../../middleware/services/service-factory";
+import { primeResolvedUserProfile } from "../../utils/profileResolver";
+import { useUserGhostModes } from "../../hooks/useUserGhostModes";
+
+function formatConversationTime(timestamp: unknown): string {
+  if (!timestamp) return "";
+
+  let date: Date | null = null;
+
+  if (timestamp instanceof Date) {
+    date = timestamp;
+  } else if (typeof timestamp === "string" || typeof timestamp === "number") {
+    date = new Date(timestamp);
+  } else if (
+    typeof timestamp === "object" &&
+    timestamp !== null &&
+    "toDate" in timestamp &&
+    typeof (timestamp as { toDate?: () => Date }).toDate === "function"
+  ) {
+    date = (timestamp as { toDate: () => Date }).toDate();
+  } else if (
+    typeof timestamp === "object" &&
+    timestamp !== null &&
+    "seconds" in timestamp &&
+    typeof (timestamp as { seconds?: number }).seconds === "number"
+  ) {
+    date = new Date((timestamp as { seconds: number }).seconds * 1000);
+  }
+
+  if (!date || Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export function ChatListScreen({
   isActive = true,
@@ -30,11 +66,14 @@ export function ChatListScreen({
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [presenceByUserId, setPresenceByUserId] = useState<
-    Record<string, boolean>
+    Record<string, { isOnline: boolean; isGhostMode: boolean }>
   >({});
   const [typingByConversationId, setTypingByConversationId] = useState<
     Record<string, boolean>
   >({});
+  const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [friendsList, setFriendsList] = useState<any[]>([]);
+  const [loadingFriends, setLoadingFriends] = useState(false);
 
   const {
     conversations,
@@ -63,8 +102,9 @@ export function ChatListScreen({
 
     const onVisibility = () =>
       setOnlineStatus(document.visibilityState !== "hidden");
+    const onBeforeUnload = () => setOnlineStatus(false);
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("beforeunload", () => setOnlineStatus(false));
+    window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
       setOnlineStatus(false);
@@ -103,10 +143,27 @@ export function ChatListScreen({
               data?.online === true ||
               data?.is_online === true ||
               data?.status === "online";
+            const ghostExpiryRaw =
+              data?.ghost_mode_expires_at?.toDate?.()?.toISOString?.() ||
+              data?.ghost_mode_expires_at ||
+              null;
+            const ghostExpiryMs = ghostExpiryRaw
+              ? new Date(ghostExpiryRaw).getTime()
+              : 0;
+            const isGhostMode =
+              data?.ghost_mode === true &&
+              Number.isFinite(ghostExpiryMs) &&
+              ghostExpiryMs > Date.now();
 
             setPresenceByUserId((prev) => {
-              if (prev[otherUserId] === isOnline) return prev;
-              return { ...prev, [otherUserId]: isOnline };
+              const previous = prev[otherUserId];
+              if (
+                previous?.isOnline === isOnline &&
+                previous?.isGhostMode === isGhostMode
+              ) {
+                return prev;
+              }
+              return { ...prev, [otherUserId]: { isOnline, isGhostMode } };
             });
           },
         );
@@ -135,15 +192,63 @@ export function ChatListScreen({
     };
   }, [isActive, conversations]);
 
-  const filteredConversations = conversations.filter(
-    (conv) =>
-      conv.other_user?.display_name
-        ?.toLowerCase()
-        .includes(searchQuery.toLowerCase()) ||
-      conv.other_user?.username
-        ?.toLowerCase()
-        .includes(searchQuery.toLowerCase()),
-  );
+  const filteredConversations = conversations
+    .filter(
+      (conv) =>
+        conv.other_user?.display_name
+          ?.toLowerCase()
+          .includes(searchQuery.toLowerCase()) ||
+        conv.other_user?.username
+          ?.toLowerCase()
+          .includes(searchQuery.toLowerCase()),
+    )
+    .sort((a, b) => {
+      const getTimestamp = (conv: any) => {
+        const timestamp =
+          conv.last_message?.created_at ||
+          conv.last_message_at ||
+          conv.created_at;
+        if (!timestamp) return 0;
+
+        let date: Date | null = null;
+        if (timestamp instanceof Date) {
+          date = timestamp;
+        } else if (
+          typeof timestamp === "string" ||
+          typeof timestamp === "number"
+        ) {
+          date = new Date(timestamp);
+        } else if (
+          typeof timestamp === "object" &&
+          timestamp !== null &&
+          "toDate" in timestamp &&
+          typeof (timestamp as { toDate?: () => Date }).toDate === "function"
+        ) {
+          date = (timestamp as { toDate: () => Date }).toDate();
+        } else if (
+          typeof timestamp === "object" &&
+          timestamp !== null &&
+          "seconds" in timestamp &&
+          typeof (timestamp as { seconds?: number }).seconds === "number"
+        ) {
+          date = new Date((timestamp as { seconds: number }).seconds * 1000);
+        }
+
+        return date ? date.getTime() : 0;
+      };
+
+      const timeA = getTimestamp(a);
+      const timeB = getTimestamp(b);
+
+      return timeB - timeA;
+    });
+  const ghostModesByUserId = useUserGhostModes([
+    ...filteredConversations.map(
+      (conversation) =>
+        conversation.other_user?.user_id || conversation.other_user?.id,
+    ),
+    ...friendsList.map((friend) => friend.userId || friend.id),
+  ]);
 
   const handleChatSelect = async (conversation: any) => {
     if (!user?.id) return;
@@ -162,16 +267,124 @@ export function ChatListScreen({
     );
   };
 
-  const handleNewChat = async () => {
+  const handleNewChat = () => {
+    setShowFriendsModal(true);
+  };
+
+  const loadFriends = async () => {
     if (!user?.id) return;
+    setLoadingFriends(true);
     try {
-      const sakthiiiId = "user_1772876886209_vlfcgglfn";
-      const conversationId = await getOrCreateConversation(user.id, sakthiiiId);
-      onChatSelect(sakthiiiId, "sakthiii", conversationId);
+      const response = await friendsService.getFriends(user.id);
+      console.log("[ChatList] Friends response:", response);
+      if (response.success && response.friends) {
+        console.log("[ChatList] Friends data:", response.friends);
+        // Get existing conversation user IDs
+        const existingConversationUserIds = new Set(
+          conversations.map(
+            (conv) => conv.other_user?.user_id || conv.other_user?.id,
+          ),
+        );
+
+        // Filter friends who don't have existing conversations
+        const availableFriends = response.friends.filter(
+          (friend: any) =>
+            !existingConversationUserIds.has(friend.userId || friend.id),
+        );
+
+        console.log("[ChatList] Available friends:", availableFriends);
+        setFriendsList(availableFriends);
+      } else {
+        setFriendsList([]);
+      }
+    } catch (error) {
+      console.error("Error loading friends:", error);
+      setFriendsList([]);
+    } finally {
+      setLoadingFriends(false);
+    }
+  };
+
+  const handleFriendSelect = async (friend: any) => {
+    if (!user?.id) return;
+    const friendUserId = friend.userId || friend.id;
+    const friendName =
+      friend.displayName ||
+      friend.nickname ||
+      friend.display_name ||
+      friend.username;
+
+    try {
+      console.log("[ChatList] Friend selected:", friend);
+
+      // Prime the friend's profile in the cache with ALL possible field names
+      // This ensures the messaging service can find the correct username
+      const profileData = {
+        displayName:
+          friend.displayName ||
+          friend.display_name ||
+          friend.nickname ||
+          friend.username,
+        username: friend.username,
+        avatarUrl: friend.avatarUrl || friend.avatar_url || friend.avatar,
+        display_name:
+          friend.display_name ||
+          friend.displayName ||
+          friend.nickname ||
+          friend.username,
+        avatar_url: friend.avatarUrl || friend.avatar_url || friend.avatar,
+        avatar: friend.avatar || friend.avatarUrl || friend.avatar_url,
+        nickname:
+          friend.nickname ||
+          friend.displayName ||
+          friend.display_name ||
+          friend.username,
+      };
+
+      console.log("[ChatList] Priming profile for:", friendUserId, profileData);
+      primeResolvedUserProfile(friendUserId, profileData);
+
+      // Wait a moment for the profile cache to be set
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Reload conversations to ensure the new conversation is in the list
+      await loadConversations(user.id);
+      const conversationId = await getOrCreateConversation(
+        user.id,
+        friendUserId,
+      );
+
+      console.log("[ChatList] Conversation created/loaded:", conversationId);
+
+      // Small delay to ensure Firestore has propagated the new conversation
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Reload conversations again after creating to ensure it's in the store with user data
+      await loadConversations(user.id);
+
+      // Check if the conversation is in the list and has the correct user data
+      const updatedConversation = useMessagingStore
+        .getState()
+        .conversations.find((c) => c.id === conversationId);
+      console.log("[ChatList] Updated conversation:", updatedConversation);
+
+      const resolvedFriendName =
+        updatedConversation?.other_user?.display_name ||
+        updatedConversation?.other_user?.username ||
+        friendName;
+
+      onChatSelect(friendUserId, resolvedFriendName, conversationId);
+      setShowFriendsModal(false);
     } catch (error) {
       console.error("Failed to create new chat:", error);
     }
   };
+
+  // Load friends when modal opens
+  useEffect(() => {
+    if (showFriendsModal) {
+      loadFriends();
+    }
+  }, [showFriendsModal, conversations]);
 
   const showSpinner = loading && conversations.length === 0;
 
@@ -258,7 +471,7 @@ export function ChatListScreen({
       </div>
 
       <div
-        className="flex-1 overflow-y-auto px-4 pt-4"
+        className="flex-1 overflow-y-auto px-4 pt-4 pb-8"
         style={{ gap: "10px", display: "flex", flexDirection: "column" }}
       >
         {showSpinner ? (
@@ -283,9 +496,10 @@ export function ChatListScreen({
               conversation.other_user?.user_id || conversation.other_user?.id;
             const unreadCount = conversation.unread_count ?? 0;
             const isRead = unreadCount === 0;
+            const livePresence = presenceByUserId[otherUserId || ""];
             const isOnline =
               !!conversation.is_online ||
-              !!presenceByUserId[otherUserId || ""] ||
+              !!livePresence?.isOnline ||
               (!!otherUserId && onlineFriends.includes(otherUserId));
             const isTyping =
               !!conversation.is_typing ||
@@ -304,6 +518,7 @@ export function ChatListScreen({
               conversation.last_message?.created_at ||
               conversation.last_message_at ||
               conversation.created_at;
+            const latestMessageTime = formatConversationTime(latestMessageAt);
 
             return (
               <div
@@ -339,6 +554,12 @@ export function ChatListScreen({
                     }
                     size="lg"
                     userId={otherUserId}
+                    forceGhostMode={
+                      otherUserId
+                        ? livePresence?.isGhostMode ??
+                          ghostModesByUserId[otherUserId]
+                        : undefined
+                    }
                     showStatus={false}
                   />
                   <div
@@ -391,13 +612,11 @@ export function ChatListScreen({
                         fontSize: "12px",
                         flexShrink: 0,
                         marginLeft: "8px",
-                        visibility: isTyping ? "hidden" : "visible",
+                        visibility:
+                          isTyping || !latestMessageTime ? "hidden" : "visible",
                       }}
                     >
-                      {new Date(latestMessageAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {latestMessageTime}
                     </span>
                   </div>
 
@@ -522,6 +741,204 @@ export function ChatListScreen({
           50% { transform: translateY(-4px); }
         }
       `}</style>
+
+      {/* Friends Modal */}
+      {showFriendsModal && (
+        <>
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0,0,0,0.85)",
+              backdropFilter: "blur(20px)",
+              zIndex: 200,
+            }}
+            onClick={() => setShowFriendsModal(false)}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              background: "#111",
+              borderRadius: "24px",
+              width: "90%",
+              maxWidth: "400px",
+              maxHeight: "70vh",
+              zIndex: 201,
+              border: "1px solid #222",
+              boxShadow: "0 24px 48px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div
+              style={{
+                padding: "20px",
+                borderBottom: "1px solid #222",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <h2
+                style={{
+                  color: "#fff",
+                  fontSize: "18px",
+                  fontWeight: 700,
+                  margin: 0,
+                }}
+              >
+                Start New Chat
+              </h2>
+              <button
+                onClick={() => setShowFriendsModal(false)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "50%",
+                  border: "none",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.6)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: "16px",
+                overflowY: "auto",
+                maxHeight: "calc(70vh - 80px)",
+              }}
+            >
+              {loadingFriends ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "40px 20px",
+                    color: "rgba(255,255,255,0.4)",
+                    fontSize: 14,
+                  }}
+                >
+                  Loading friends...
+                </div>
+              ) : friendsList.length === 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "40px 20px",
+                    color: "rgba(255,255,255,0.4)",
+                    fontSize: 14,
+                    textAlign: "center",
+                  }}
+                >
+                  <User size={48} style={{ marginBottom: "12px" }} />
+                  <p>No friends available</p>
+                  <p style={{ fontSize: 12, marginTop: "4px" }}>
+                    All your friends already have conversations
+                  </p>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
+                  {friendsList.map((friend, i) => (
+                    <div
+                      key={`friend-${friend.id || friend.userId}-${i}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "12px",
+                        borderRadius: "14px",
+                        background: "rgba(255,255,255,0.03)",
+                        cursor: "pointer",
+                        transition: "background 0.15s",
+                      }}
+                      onClick={() => handleFriendSelect(friend)}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background =
+                          "rgba(255,255,255,0.06)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background =
+                          "rgba(255,255,255,0.03)")
+                      }
+                    >
+                      <div style={{ flexShrink: 0 }}>
+                        <Avatar
+                          src={friend.avatarUrl || friend.avatar_url || ""}
+                          alt={
+                            friend.displayName ||
+                            friend.nickname ||
+                            friend.display_name ||
+                            friend.username
+                          }
+                          size="md"
+                          userId={friend.userId || friend.id}
+                          forceGhostMode={
+                            (friend.userId || friend.id)
+                              ? ghostModesByUserId[friend.userId || friend.id]
+                              : undefined
+                          }
+                        />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p
+                          style={{
+                            color: "#fff",
+                            fontWeight: 600,
+                            fontSize: 15,
+                            margin: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {friend.displayName ||
+                            friend.nickname ||
+                            friend.display_name ||
+                            friend.username}
+                        </p>
+                        <p
+                          style={{
+                            color: "rgba(255,255,255,0.4)",
+                            fontSize: 13,
+                            margin: "2px 0 0",
+                          }}
+                        >
+                          @
+                          {String(friend.username || "unknown").replace(
+                            /^@/,
+                            "",
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

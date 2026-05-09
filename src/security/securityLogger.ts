@@ -5,6 +5,12 @@ import { auth } from "@/backend/lib/firebase";
 /**
  * Security logging utility
  * Logs security events to Firestore for monitoring and analysis
+ *
+ * SECURITY FIX: Enhanced to support both client-side and server-side logging
+ * - Client-side: Uses Firebase Auth and browser context
+ * - Server-side: Accepts explicit userId and context
+ * - Added real-time alerting for critical events
+ * - Added structured logging for better analysis
  */
 
 export interface SecurityEvent {
@@ -26,22 +32,65 @@ export interface SecurityEvent {
     | "admin_action"
     | "2fa_enabled"
     | "2fa_disabled"
-    | "2fa_failed";
+    | "2fa_failed"
+    | "csrf_failure"
+    | "bot_detected"
+    | "ip_blocked"
+    | "xss_attempt"
+    | "injection_attempt";
   userId?: string;
   email?: string;
   details: any;
   severity: "low" | "medium" | "high" | "critical";
   ipAddress?: string;
   deviceFingerprint?: string;
+  userAgent?: string;
+  path?: string;
+  method?: string;
 }
 
 /**
- * Log a security event to Firestore
- * Only logs in production to avoid cluttering development logs
+ * Server-side security logging (for API routes)
+ * This can be imported in server-only contexts
+ */
+export async function logSecurityEventServer(
+  event: SecurityEvent,
+): Promise<void> {
+  if (process.env.NODE_ENV !== "production") {
+    // In development, still log to console for debugging
+    console.log("[SECURITY]", event.type, event.severity, event.details);
+    return;
+  }
+
+  try {
+    const logRef = doc(collection(db, "security_logs"));
+
+    await setDoc(logRef, {
+      ...event,
+      timestamp: serverTimestamp(),
+      userAgent: event.userAgent || "server-side",
+      environment: process.env.NODE_ENV,
+      ipAddress: event.ipAddress || "unknown",
+      deviceFingerprint: event.deviceFingerprint || "unknown",
+    });
+
+    // Trigger alert for critical events
+    if (event.severity === "critical") {
+      await triggerSecurityAlert(event);
+    }
+  } catch (error) {
+    // Fail silently - logging should never break the application
+    console.error("Failed to log security event:", error);
+  }
+}
+
+/**
+ * Client-side security logging (for browser contexts)
  */
 export async function logSecurityEvent(event: SecurityEvent): Promise<void> {
-  // Only log in production
   if (process.env.NODE_ENV !== "production") {
+    // In development, still log to console for debugging
+    console.log("[SECURITY]", event.type, event.severity, event.details);
     return;
   }
 
@@ -53,15 +102,44 @@ export async function logSecurityEvent(event: SecurityEvent): Promise<void> {
       ...event,
       userId: event.userId || userId,
       timestamp: serverTimestamp(),
-      user_agent:
+      userAgent:
         typeof navigator !== "undefined" ? navigator.userAgent : "server-side",
       environment: process.env.NODE_ENV,
       ipAddress: event.ipAddress || "unknown",
       deviceFingerprint: event.deviceFingerprint || "unknown",
     });
+
+    // Trigger alert for critical events
+    if (event.severity === "critical") {
+      await triggerSecurityAlert(event);
+    }
   } catch (error) {
     // Fail silently - logging should never break the application
     console.error("Failed to log security event:", error);
+  }
+}
+
+/**
+ * Trigger real-time alert for critical security events
+ * This could send notifications to admins via email, Slack, etc.
+ */
+async function triggerSecurityAlert(event: SecurityEvent): Promise<void> {
+  try {
+    // Create alert document for real-time monitoring
+    const alertRef = doc(collection(db, "security_alerts"));
+    await setDoc(alertRef, {
+      event: event.type,
+      severity: event.severity,
+      userId: event.userId,
+      details: event.details,
+      timestamp: serverTimestamp(),
+      acknowledged: false,
+    });
+
+    // TODO: Integrate with external alerting services (e.g., SendGrid for email, Slack webhook)
+    // This would require additional environment variables and service configuration
+  } catch (error) {
+    console.error("Failed to trigger security alert:", error);
   }
 }
 

@@ -42,8 +42,13 @@ import { useProfileDataStore } from "../../stores/profileDataStore";
 import { useAlertStore } from "../../stores/useAlertStore";
 import { useGhostModeStore } from "../../stores/useGhostModeStore";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
+import { useUserGhostModes } from "../../hooks/useUserGhostModes";
 import { commentLikePersistence } from "../../utils/commentLikePersistence";
 import { GhostModeTimer } from "../ui/GhostModeTimer";
+import { StoryViewer } from "../app/StoryViewer";
+import { ghostModeService } from "../../middleware/services/ghost-mode.service";
+import { storyReactionService } from "../../middleware/services/story-reaction.service";
+import alertService from "../../middleware/services/alert.service.new";
 import {
   buildSharedPostPayload,
   encodeSharedPostPayload,
@@ -122,7 +127,7 @@ const stripAtSymbol = (username?: string) =>
 
 function HeartBurstLayer({ bursts }: { bursts: HeartBurst[] }) {
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
+    <div className="absolute inset-0 overflow-hidden z-10">
       {bursts.map((burst) => {
         const size = HEART_SIZES[burst.id % HEART_SIZES.length];
         const color = HEART_COLORS[burst.colorIdx % HEART_COLORS.length];
@@ -135,7 +140,8 @@ function HeartBurstLayer({ bursts }: { bursts: HeartBurst[] }) {
               top: burst.y - size / 2,
               width: size,
               height: size,
-              pointerEvents: "none",
+              /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+              /* DISABLED: pointerEvents: "none", */
             }}
           >
             <div
@@ -240,6 +246,7 @@ export function FeedScreen({
   onNavigateToAlerts,
   onNavigateToSearch,
   onNavigateToProfile,
+  onStoryViewerOpenChange,
 }: {
   isActive?: boolean;
   onBack: () => void;
@@ -248,6 +255,7 @@ export function FeedScreen({
   onNavigateToAlerts: () => void;
   onNavigateToSearch: () => void;
   onNavigateToProfile?: (userId: string) => void;
+  onStoryViewerOpenChange?: (isOpen: boolean) => void;
 }) {
   const { getOrCreateConversation, sendRealTimeMessage } = useMessagingStore();
   const unreadCount = useMessagingStore((s) =>
@@ -302,7 +310,7 @@ export function FeedScreen({
         if (unsub) unsub();
       };
     }
-  }, [isActive, user?.id, subscribeAlerts]);
+  }, [isActive, user?.id]);
 
   // Helper: resolve author display name and username from profileDataStore
   const resolveAuthor = useCallback(
@@ -339,11 +347,17 @@ export function FeedScreen({
   const [showLikesModal, setShowLikesModal] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [animatingPosts, setAnimatingPosts] = useState<Set<string>>(new Set());
   const [showStoryUploadModal, setShowStoryUploadModal] = useState(false);
   const [showStoryViewerModal, setShowStoryViewerModal] = useState(false);
   const [selectedStoryIndex, setSelectedStoryIndex] = useState(0);
   const [viewerStories, setViewerStories] = useState<StoryDTO[]>([]);
   const [viewerIsOwner, setViewerIsOwner] = useState(false);
+  const [ghostDebugLoading, setGhostDebugLoading] = useState(false);
+  const [ghostDebugText, setGhostDebugText] = useState<string | null>(null);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<Set<string>>(new Set());
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -358,20 +372,45 @@ export function FeedScreen({
     deleteStory,
     isUploading,
     uploadProgress,
-    loadFriendsStories,
-    loadUserStories,
     cleanupExpiredStories,
-    clearAllStories,
+    subscribeToFriendsStories,
+    subscribeToUserStories,
+    unsubscribeFromAllStories,
   } = useStoryStore();
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const isLoadingMoreRef = useRef(false);
+  const postsCountRef = useRef(0);
+  const exhaustedLoadAttemptsRef = useRef(0);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
 
   const [bursts, setBursts] = useState<Record<string, HeartBurst[]>>({});
   const lastTapTimeRef = useRef<Record<string, number>>({});
   const burstIdCounter = useRef(0);
   const colorCounterRef = useRef(0);
+
+  // ── Header hide/show logic ──
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY =
+        window.scrollY || document.documentElement.scrollTop;
+      const scrollDifference = currentScrollY - lastScrollY;
+
+      // Hide header when scrolling down, show when scrolling up
+      if (scrollDifference > 50) {
+        setIsHeaderVisible(false);
+      } else if (scrollDifference < -50) {
+        setIsHeaderVisible(true);
+      }
+
+      setLastScrollY(currentScrollY);
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [lastScrollY]);
 
   const currentUser = user
     ? {
@@ -429,19 +468,24 @@ export function FeedScreen({
     () => sortedPosts.find((p) => p.id === selectedPostId) || null,
     [sortedPosts, selectedPostId],
   );
+  const ghostModesByUserId = useUserGhostModes([
+    ...stories.map((story) => story.author.id),
+    ...sortedPosts.map((post) => post.author.id),
+    ...friends.map((friend) => friend.user_id || friend.id),
+    ...(selectedPost
+      ? Object.values(selectedPost.likesByUser).map((entry) => entry.userId)
+      : []),
+  ]);
 
-  // Load real stories (no mocks)
+  // Real-time story subscriptions — fire immediately and keep circles live
   useEffect(() => {
     if (isActive && currentUser.userId !== "me") {
-      const {
-        clearAllStories: clear,
-        loadFriendsStories: loadFriends,
-        loadUserStories: loadUser,
-      } = useStoryStore.getState();
-      clear();
-      loadFriends(currentUser.userId);
-      loadUser(currentUser.userId);
+      void subscribeToFriendsStories(currentUser.userId);
+      void subscribeToUserStories(currentUser.userId);
     }
+    return () => {
+      unsubscribeFromAllStories();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, currentUser.userId]);
 
@@ -455,13 +499,20 @@ export function FeedScreen({
     }
   }, [isActive, currentUser.userId]);
 
-  // Cleanup expired stories every minute
+  // Cleanup expired story docs from Firestore every 5 minutes.
+  // The onSnapshot subscription picks up the deletions automatically — no manual reload needed.
   useEffect(() => {
-    const interval = setInterval(() => {
-      cleanupExpiredStories();
-    }, 60000);
+    if (currentUser.userId === "me") return;
+
+    const interval = setInterval(
+      () => {
+        useStoryStore.getState().cleanupExpiredStories(currentUser.userId);
+      },
+      5 * 60 * 1000,
+    );
+
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser.userId]);
 
   // Handle opening comments from alert navigation
   useEffect(() => {
@@ -513,17 +564,54 @@ export function FeedScreen({
     }
   }, [selectedPost?.id, showLikesModal, showCommentsModal]);
 
-  // ── Infinite Scroll ──
+  // Reset spinner whenever the tab becomes inactive so it never shows on return
   useEffect(() => {
+    if (!isActive) {
+      isLoadingMoreRef.current = false;
+      setIsLoadingMore(false);
+      exhaustedLoadAttemptsRef.current = 0;
+      setHasMorePosts(true);
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    postsCountRef.current = sortedPosts.length;
+    if (sortedPosts.length === 0) {
+      exhaustedLoadAttemptsRef.current = 0;
+      setHasMorePosts(true);
+    }
+  }, [sortedPosts.length]);
+
+  // ── Infinite Scroll ──
+  // Dependency array intentionally excludes isLoadingMore — use a ref instead
+  // so state updates never recreate the observer (which re-fires it immediately).
+  useEffect(() => {
+    if (!isActive || !hasMorePosts) return;
     const sentinel = loadMoreRef.current;
     if (!sentinel || sortedPosts.length === 0) return;
 
     const observer = new IntersectionObserver(
       async (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMore) {
+        if (entries[0].isIntersecting && !isLoadingMoreRef.current) {
+          const beforeCount = postsCountRef.current;
+          isLoadingMoreRef.current = true;
           setIsLoadingMore(true);
-          await loadMorePosts();
-          setIsLoadingMore(false);
+          try {
+            await loadMorePosts();
+          } finally {
+            const afterCount = postsCountRef.current;
+            if (afterCount <= beforeCount) {
+              exhaustedLoadAttemptsRef.current += 1;
+              if (exhaustedLoadAttemptsRef.current >= 2) {
+                setHasMorePosts(false);
+              }
+            } else {
+              exhaustedLoadAttemptsRef.current = 0;
+            }
+
+            isLoadingMoreRef.current = false;
+            setIsLoadingMore(false);
+          }
         }
       },
       { rootMargin: "200px", threshold: 0.1 },
@@ -534,7 +622,8 @@ export function FeedScreen({
     return () => {
       observer.disconnect();
     };
-  }, [isLoadingMore, loadMorePosts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMorePosts, isActive, sortedPosts.length, loadMorePosts]);
 
   useBodyScrollLock(showLikesModal || showCommentsModal || showShareModal);
 
@@ -573,16 +662,22 @@ export function FeedScreen({
       setViewerStories(userStories);
       setViewerIsOwner(true);
       setShowStoryViewerModal(true);
+      onStoryViewerOpenChange?.(true);
     } else {
       setShowStoryUploadModal(true);
     }
   };
 
   const handleStoryClick = async (index: number) => {
+    const nextViewerStories = stories.map((story, storyIndex) =>
+      storyIndex === index ? { ...story, hasViewed: true } : story,
+    );
+
     setSelectedStoryIndex(index);
-    setViewerStories(stories);
+    setViewerStories(nextViewerStories);
     setViewerIsOwner(false);
     setShowStoryViewerModal(true);
+    onStoryViewerOpenChange?.(true);
 
     const story = stories[index];
     if (story && !story.hasViewed) {
@@ -624,12 +719,119 @@ export function FeedScreen({
     const remaining = userStories.filter((s) => s.id !== storyId);
     if (remaining.length === 0) {
       setShowStoryViewerModal(false);
+      onStoryViewerOpenChange?.(false);
     } else {
       // Stay on previous index if possible
       setViewerStories(remaining);
       setSelectedStoryIndex((prev) => Math.min(prev, remaining.length - 1));
     }
   };
+
+  useEffect(() => {
+    if (!showStoryViewerModal) return;
+    setViewerStories(viewerIsOwner ? userStories : stories);
+  }, [showStoryViewerModal, viewerIsOwner, userStories, stories]);
+
+  // ── Story reaction handler ──
+  // Uses a deterministic Firestore doc ID so no reads are needed —
+  // setDoc just overwrites on double-tap, and deleteDoc removes on toggle-off.
+  const handleStoryReact = useCallback(
+    async (storyId: string, authorId: string, type: "like" | "hate") => {
+      if (!currentUser.userId || authorId === currentUser.userId) return null;
+
+      try {
+        const result = await storyReactionService.toggleReaction(
+          storyId,
+          currentUser.userId,
+          type,
+        );
+
+        if (!result.success) {
+          throw new Error("Failed to save story reaction");
+        }
+
+        if (result.currentReaction) {
+          await alertService.createAlert({
+            userId: authorId,
+            type: "STORY_REACTION",
+            entityId: storyId,
+            actorId: currentUser.userId,
+            actorName: currentUser.name,
+            actorUsername: currentUser.username,
+            actorAvatar: currentUser.avatar,
+            message: `${currentUser.name} ${result.currentReaction === "like" ? "liked" : "hated"} your story`,
+            metadata: {
+              reactionType: result.currentReaction,
+            },
+          });
+        }
+
+        return result.currentReaction;
+      } catch (err) {
+        console.error("Story reaction failed:", err);
+        return null;
+      }
+    },
+    [currentUser],
+  );
+
+  // ── Story reply handler ──
+  // Gets or creates a DM conversation then sends the reply text.
+  const handleStoryReply = useCallback(
+    async (storyId: string, authorId: string, text: string) => {
+      if (
+        !text.trim() ||
+        !currentUser.userId ||
+        authorId === currentUser.userId
+      )
+        return;
+      try {
+        const convId = await getOrCreateConversation(
+          currentUser.userId,
+          authorId,
+        );
+        await sendRealTimeMessage(
+          convId,
+          `Replied to your story: "${text.trim()}"`,
+        );
+        const { alertService } =
+          await import("../../middleware/services/service-factory");
+        await alertService.createAlert({
+          userId: authorId,
+          type: "STORY_REPLY",
+          entityId: storyId,
+          actorId: currentUser.userId,
+          actorName: currentUser.name,
+          actorUsername: currentUser.username,
+          actorAvatar: currentUser.avatar,
+          message: `${currentUser.name} replied to your story`,
+          metadata: { replyText: text.trim() },
+        });
+      } catch (err) {
+        console.error("Story reply failed:", err);
+      }
+    },
+    [currentUser, getOrCreateConversation, sendRealTimeMessage],
+  );
+
+  const handleGhostDebugCheck = useCallback(async () => {
+    if (!user?.id) return;
+
+    setGhostDebugLoading(true);
+
+    try {
+      const backendStatus = await ghostModeService.getGhostModeStatus(user.id);
+      setGhostDebugText(
+        `UI:${ghostModeIsActive ? "ON" : "OFF"} | backend:${
+          backendStatus.isActive ? "ON" : "OFF"
+        }${backendStatus.expiresAt ? ` | until ${new Date(backendStatus.expiresAt).toLocaleTimeString()}` : ""}`,
+      );
+    } catch (error) {
+      setGhostDebugText("UI check failed");
+    } finally {
+      setGhostDebugLoading(false);
+    }
+  }, [ghostModeIsActive, user?.id]);
 
   // ── Heart burst spawner ──
   const spawnBurst = useCallback((postId: string, x: number, y: number) => {
@@ -657,6 +859,36 @@ export function FeedScreen({
   const addLike = useCallback(
     (postId: string) => {
       storeAddLike(postId, currentUser.userId);
+
+      // Track like count for animation trigger (every 10 likes)
+      setLikeCounts((prev) => {
+        const newCount = (prev[postId] || 0) + 1;
+        const updated = { ...prev, [postId]: newCount };
+        console.log(`Like count for post ${postId}: ${newCount}`);
+
+        // Trigger animation every 10 likes
+        if (newCount % 10 === 0) {
+          console.log(
+            `Triggering animation for post ${postId} at count ${newCount}`,
+          );
+          setAnimatingPosts((prev) => {
+            const newSet = new Set(prev).add(postId);
+            console.log(`Animating posts:`, Array.from(newSet));
+            return newSet;
+          });
+          // Remove animation class after animation completes
+          setTimeout(() => {
+            setAnimatingPosts((prev) => {
+              const next = new Set(prev);
+              next.delete(postId);
+              console.log(`Removing animation for post ${postId}`);
+              return next;
+            });
+          }, 1800); // Animation duration
+        }
+
+        return updated;
+      });
     },
     [storeAddLike, currentUser.userId],
   );
@@ -711,28 +943,48 @@ export function FeedScreen({
 
   const handleSendToDM = useCallback(
     async (friend: Friend) => {
-      if (!selectedPost || !user?.id) return;
+      console.log("handleSendToDM called with friend:", friend);
+      console.log("selectedPost:", selectedPost);
+      console.log("user?.id:", user?.id);
+
+      if (!selectedPost || !user?.id) {
+        console.error("Missing selectedPost or user.id");
+        return;
+      }
 
       const recipientId = friend.user_id || friend.id;
-      if (!recipientId || sentTo.has(recipientId)) return;
+      console.log("recipientId:", recipientId);
+      if (!recipientId || sentTo.has(recipientId)) {
+        console.error("Invalid recipientId or already sent");
+        return;
+      }
 
       const payload = buildSharedPostPayload({
         ...selectedPost,
         author: resolveAuthor(selectedPost.author),
       });
-      if (!payload) return;
+      console.log("payload:", payload);
+      if (!payload) {
+        console.error("Failed to build payload");
+        return;
+      }
 
       try {
+        console.log("Creating or getting conversation...");
         const conversationId = await getOrCreateConversation(
           user.id,
           recipientId,
         );
+        console.log("conversationId:", conversationId);
+
+        console.log("Sending message...");
         await sendRealTimeMessage(
           conversationId,
           SHARED_POST_FALLBACK_TEXT,
           encodeSharedPostPayload(payload),
           "TEXT",
         );
+        console.log("Message sent successfully");
         setSentTo((prev) => new Set(prev).add(recipientId));
       } catch (error) {
         console.error("Failed to share post to DM:", error);
@@ -748,47 +1000,10 @@ export function FeedScreen({
     ],
   );
 
-  // ── Full-screen loading gate ──
-  // Block ALL content until data is fully loaded from backend.
-  if (loading || feedBootstrapping) {
-    return (
-      <div
-        className="screen-container"
-        style={{
-          paddingBottom: "120px",
-          boxSizing: "border-box",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "100vh",
-          background: "#000",
-        }}
-      >
-        <h1
-          className="text-3xl font-bold text-white mb-6"
-          style={{ textShadow: "0 0 8px rgba(74, 222, 128, 0.3)" }}
-        >
-          DARE
-        </h1>
-        <div className="flex items-center gap-2 mb-4">
-          <div
-            className="w-2 h-2 rounded-full bg-[#4ade80] animate-bounce"
-            style={{ animationDelay: "0ms" }}
-          />
-          <div
-            className="w-2 h-2 rounded-full bg-[#4ade80] animate-bounce"
-            style={{ animationDelay: "150ms" }}
-          />
-          <div
-            className="w-2 h-2 rounded-full bg-[#4ade80] animate-bounce"
-            style={{ animationDelay: "300ms" }}
-          />
-        </div>
-        <p className="text-[#94a3b8] text-sm">Loading your feed...</p>
-      </div>
-    );
-  }
+  // Only skeleton-gate when there are genuinely no posts to show.
+  // If posts are already in memory (from a previous load or persist cache),
+  // render them immediately and let the background subscription refresh silently.
+  const isFeedBootstrapping = feedBootstrapping && sortedPosts.length === 0;
 
   return (
     <div
@@ -798,44 +1013,88 @@ export function FeedScreen({
         boxSizing: "border-box",
       }}
     >
+      <style>{`
+        @keyframes premiumBorderPulse {
+          0% {
+            border-color: rgba(74, 222, 128, 0.3);
+            box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5), 0 0 30px rgba(74, 222, 128, 0.3);
+            transform: scale(1);
+          }
+          50% {
+            border-color: rgba(74, 222, 128, 1);
+            box-shadow: 0 0 0 8px rgba(74, 222, 128, 0.8), 0 0 50px rgba(74, 222, 128, 0.6);
+            transform: scale(1.02);
+          }
+          100% {
+            border-color: rgba(74, 222, 128, 0.3);
+            box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5), 0 0 30px rgba(74, 222, 128, 0.3);
+            transform: scale(1);
+          }
+        }
+        .premium-border-animation {
+          animation: premiumBorderPulse 1.5s ease-in-out;
+        }
+      `}</style>
       {/* ── Header ── */}
-      <div className="bg-black border-b border-gray-800">
+      <div
+        className={`border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-in-out ${
+          isHeaderVisible ? "translate-y-0" : "-translate-y-full"
+        }`}
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+        }}
+      >
         <div className="p-4">
-          <div className="flex items-center justify-between relative">
+          <div className="relative flex items-center justify-between">
             <button
               onClick={onNavigateToSearch}
-              className="text-[#94a3b8] hover:text-white transition-colors z-10"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white z-10"
+              aria-label="Search"
             >
-              <Search size={24} />
+              <Search size={18} />
             </button>
-            <div className="absolute left-1/2 transform -translate-x-1/2">
+            <div className="absolute left-1/2 -translate-x-1/2">
               <GhostModeTimer />
             </div>
-            <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center space-x-3">
+            {/*
+            <div className="absolute left-12 top-1/2 -translate-y-1/2">
+              <button
+                type="button"
+                onClick={() => void handleGhostDebugCheck()}
+                className="rounded-full border border-[#4ade80]/30 bg-[#071109]/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#86efac] shadow-[0_8px_20px_rgba(0,0,0,0.28)] transition-all duration-200 hover:border-[#4ade80]/55 hover:bg-[#0b1a0d]"
+              >
+                {ghostDebugLoading ? "Checking..." : "Ghost Check"}
+              </button>
+            </div>
+            */}
+            <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center space-x-3">
               <button
                 onClick={() => {
-                  // Mark all alerts as read when user clicks to view them (Instagram-style)
                   if (alertUnreadCount > 0) {
                     markAllAsRead().catch(() => {});
                   }
                   onNavigateToAlerts();
                 }}
-                className="text-[#94a3b8] hover:text-white transition-colors relative"
+                className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#fb7185]/30 hover:bg-[#fb7185]/8 hover:text-white"
+                aria-label="Notifications"
               >
-                <Heart size={24} />
+                <Heart size={18} />
                 {alertUnreadCount > 0 && (
-                  <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] flex items-center justify-center shadow-md border border-black leading-none">
+                  <span className="absolute -right-1 -top-1 flex min-w-[20px] items-center justify-center rounded-full border border-black bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-md">
                     {alertUnreadCount > 99 ? "99+" : alertUnreadCount}
                   </span>
                 )}
               </button>
               <button
                 onClick={onNavigateToChat}
-                className="text-[#94a3b8] hover:text-white transition-colors relative"
+                className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
+                aria-label="Messages"
               >
-                <MessageSquare size={24} />
+                <MessageSquare size={18} />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-1.5 -right-2 bg-[#4ade80] text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] flex items-center justify-center shadow-md border border-black leading-none">
+                  <span className="absolute -right-1 -top-1 flex min-w-[20px] items-center justify-center rounded-full border border-black bg-[#4ade80] px-1.5 py-0.5 text-[10px] font-bold leading-none text-black shadow-md">
                     {unreadCount > 99 ? "99+" : unreadCount}
                   </span>
                 )}
@@ -843,27 +1102,33 @@ export function FeedScreen({
             </div>
           </div>
         </div>
+        {ghostDebugText && (
+          <div className="px-4 pb-3">
+            <div className="rounded-full border border-[#4ade80]/20 bg-[#08110b]/90 px-3 py-2 text-center text-[11px] font-medium text-[#bbf7d0] shadow-[0_10px_24px_rgba(0,0,0,0.22)]">
+              {ghostDebugText}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Scrollable content ── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-8">
         {/* ── Stories row ── */}
         <div className="px-4 py-6">
-          <div className="flex space-x-3 overflow-x-auto scrollbar-hide">
+          <div className="flex space-x-4 overflow-x-auto scrollbar-hide">
             {/* Your Story Circle */}
             <div
               className="shrink-0 flex flex-col items-center cursor-pointer group"
               onClick={handleYourStoryClick}
             >
               <div className="relative">
-                <div className="absolute inset-0 w-20 h-20 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <div className="w-full h-full rounded-full border-2 border-[#4ade80]/30 animate-pulse" />
+                <div className="absolute inset-0 w-20 h-20 rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
+                  <div className="w-full h-full rounded-full border-2 border-[#4ade80]/25" />
                 </div>
                 {userStories.length > 0 ? (
                   // User has active stories — show profile picture avatar with green ring
-                  <div className="relative w-20 h-20 rounded-full p-0.5 bg-gradient-to-br from-[#4ade80] via-[#22c55e] to-[#16a34a] group-hover:scale-105 shadow-lg group-hover:shadow-xl backdrop-blur-sm transition-all duration-300">
-                    <div className="absolute inset-0 rounded-full bg-gradient-to-t from-transparent via-transparent to-white/5" />
-                    <div className="w-full h-full rounded-full p-0.5 bg-black">
+                  <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-[#4ade80] via-[#34d399] to-[#facc15] p-[3px] shadow-[0_18px_40px_rgba(10,14,12,0.45)] transition-all duration-300 group-hover:scale-[1.04]">
+                    <div className="w-full h-full rounded-full bg-[#050505] p-[3px]">
                       <img
                         src={currentUser.avatar}
                         alt="Your story"
@@ -873,11 +1138,10 @@ export function FeedScreen({
                   </div>
                 ) : (
                   // No stories — show add button
-                  <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-[#1a1a1a] via-[#1f1f1f] to-[#2a2a2a] flex items-center justify-center border-2 border-[#4ade80]/60 group-hover:border-[#4ade80] shadow-lg group-hover:shadow-xl group-hover:shadow-[#4ade80]/20 transition-all duration-300 group-hover:scale-105 backdrop-blur-sm">
-                    <div className="absolute inset-0 rounded-full bg-gradient-to-t from-transparent via-transparent to-white/5" />
+                  <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,#20242c_0%,#121417_55%,#090909_100%)] shadow-[0_18px_40px_rgba(0,0,0,0.45)] transition-all duration-300 group-hover:scale-[1.04] group-hover:border-[#4ade80]/60">
                     <Plus
                       size={28}
-                      className="text-[#4ade80] group-hover:scale-110 transition-transform duration-300 drop-shadow-sm"
+                      className="text-[#4ade80] transition-transform duration-300 group-hover:scale-110"
                     />
                   </div>
                 )}
@@ -890,7 +1154,20 @@ export function FeedScreen({
               </span>
             </div>
 
-            {/* Friends' Stories — only real stories from Firestore, no mocks */}
+            {/* Shimmer skeleton circles while stories are loading and no cached data */}
+            {storiesLoading &&
+              stories.length === 0 &&
+              [1, 2, 3, 4].map((i) => (
+                <div
+                  key={`story-skel-${i}`}
+                  className="shrink-0 flex flex-col items-center"
+                >
+                  <div className="w-20 h-20 rounded-full bg-[#1e1e1e] animate-pulse" />
+                  <div className="w-14 h-2.5 bg-[#1e1e1e] rounded-full mt-3 animate-pulse" />
+                </div>
+              ))}
+
+            {/* Friends' Stories — real-time from Firestore onSnapshot */}
             {stories.map((story, index) => (
               <div
                 key={story.id}
@@ -902,22 +1179,21 @@ export function FeedScreen({
                   onClick={() => handleStoryClick(index)}
                 >
                   {!story.hasViewed && (
-                    <div className="absolute inset-0 w-20 h-20 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="w-full h-full rounded-full border-2 border-[#4ade80]/40 animate-pulse" />
+                    <div className="absolute inset-0 w-20 h-20 rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
+                      <div className="w-full h-full rounded-full border-2 border-[#4ade80]/35" />
                     </div>
                   )}
                   <div
-                    className={`relative w-20 h-20 rounded-full p-[2px] transition-all duration-300 group-hover:scale-105 shadow-lg group-hover:shadow-xl backdrop-blur-sm ${
+                    className={`relative w-20 h-20 rounded-full p-[3px] transition-all duration-300 group-hover:scale-[1.04] shadow-[0_18px_40px_rgba(0,0,0,0.45)] ${
                       story.hasViewed
-                        ? "bg-gradient-to-br from-[#2a2a2a] via-[#2d2d2d] to-[#333333]"
-                        : "bg-gradient-to-tr from-[#4ade80] via-[#22c55e] to-[#16a34a]"
+                        ? "bg-gradient-to-br from-[#2b2f35] via-[#353941] to-[#44474f]"
+                        : "bg-gradient-to-br from-[#facc15] via-[#fb7185] to-[#4ade80]"
                     }`}
                   >
-                    <div className="absolute inset-0 rounded-full bg-gradient-to-t from-transparent via-transparent to-white/5" />
                     <div
                       className={`w-full h-full rounded-full ${
-                        story.hasViewed ? "bg-[#1a1a1a]" : "bg-black"
-                      } p-[2px]`}
+                        story.hasViewed ? "bg-[#111315]" : "bg-[#050505]"
+                      } p-[3px]`}
                     >
                       <div className="w-full h-full rounded-full overflow-hidden">
                         <Avatar
@@ -926,13 +1202,18 @@ export function FeedScreen({
                           size="2xl"
                           userId={story.author.id}
                           username={story.author.username}
+                          forceGhostMode={ghostModesByUserId[story.author.id]}
                           className="w-full h-full"
                         />
                       </div>
                     </div>
                   </div>
                   {!story.hasViewed && (
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-full border-2 border-black shadow-md animate-pulse group-hover:scale-110 transition-transform duration-300" />
+                    <div className="absolute -bottom-1 -right-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-[#4ade80]/70 bg-[#08110b] px-1 shadow-lg transition-transform duration-300 group-hover:scale-105">
+                      <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#86efac]">
+                        New
+                      </span>
+                    </div>
                   )}
                 </button>
                 <button
@@ -944,8 +1225,8 @@ export function FeedScreen({
                   }}
                   className={`text-sm mt-3 block text-center w-20 truncate font-medium transition-colors duration-300 ${
                     story.hasViewed
-                      ? "text-[#64748b]"
-                      : "text-[#94a3b8] group-hover:text-white"
+                      ? "text-[#6b7280]"
+                      : "text-[#d1d5db] group-hover:text-white"
                   } ${
                     onNavigateToProfile && story.author.id
                       ? "cursor-pointer hover:text-[#4ade80]"
@@ -960,173 +1241,202 @@ export function FeedScreen({
         </div>
 
         {/* ── Posts ── show only the most recent post per user */}
-        <div className="px-2 pb-6 space-y-5">
-          {sortedPosts.map((post: FeedPost) => {
-            const liked = iLiked(post, currentUser.userId);
-            const likeCount = totalLikes(post);
-            const postBursts = bursts[post.id] ?? [];
-            const author = resolveAuthor(post.author);
+        {isFeedBootstrapping ? (
+          <div className="px-2 pb-6 space-y-5">
+            <PostSkeleton />
+            <PostSkeleton />
+            <PostSkeleton />
+          </div>
+        ) : (
+          <div className="px-2 pb-6 space-y-5">
+            {sortedPosts.map((post: FeedPost) => {
+              const liked = iLiked(post, currentUser.userId);
+              const likeCount = totalLikes(post);
+              const postBursts = bursts[post.id] ?? [];
+              const author = resolveAuthor(post.author);
 
-            return (
-              <div
-                key={post.id}
-                id={`feed-post-${post.id}`}
-                className="bg-[#111] rounded-3xl overflow-hidden"
-              >
-                {/* Post header */}
-                <div className="flex items-center px-3 pt-3 pb-2">
-                  <div className="flex w-full items-center space-x-3 rounded-full bg-[#1e1e1e] px-5 py-2.5 pr-7">
-                    <Avatar
-                      src={author.avatar}
-                      alt={author.name}
-                      size="md"
-                      userId={author.id}
-                      username={author.username}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onNavigateToProfile && author.id) {
-                          onNavigateToProfile(author.id);
+              return (
+                <div
+                  key={post.id}
+                  id={`feed-post-${post.id}`}
+                  className="bg-[#111] rounded-3xl overflow-hidden"
+                >
+                  {/* Post header */}
+                  <div className="flex items-center px-3 pt-3 pb-3">
+                    <div className="flex w-full items-center space-x-3 rounded-full bg-gradient-to-r from-[#1a1f1a]/90 to-[#141714]/90 px-5 py-2.5 pr-7 backdrop-blur-md border border-white/12 shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                      <Avatar
+                        src={author.avatar}
+                        alt={author.name}
+                        size="md"
+                        userId={author.id}
+                        username={author.username}
+                        forceGhostMode={
+                          author.id ? ghostModesByUserId[author.id] : undefined
                         }
-                      }}
-                      className={`min-w-0 text-left ${
-                        onNavigateToProfile && author.id
-                          ? "cursor-pointer"
-                          : "cursor-default"
-                      }`}
-                    >
-                      <h3 className="font-bold text-white text-base leading-tight">
-                        {author.name}
-                      </h3>
-                      <p className="text-[#4ade80] text-sm font-medium tracking-wide">
-                        {author.username}
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Media */}
-                {post.media && post.media.url && (
-                  <div className="px-1">
-                    <div
-                      id={`media-${post.id}`}
-                      className="w-full relative select-none cursor-pointer rounded-3xl overflow-hidden"
-                      onClick={(e) => handleMediaTap(post.id, e)}
-                    >
-                      {post.media.type === "image" ? (
-                        <img
-                          src={post.media.url}
-                          alt="Post media"
-                          className="w-full object-cover"
-                          style={{ height: "520px" }}
-                          draggable={false}
-                          loading="lazy"
-                          decoding="async"
-                          onError={(e) => {
-                            e.currentTarget.src =
-                              "https://picsum.photos/seed/fallback/800/600.jpg";
-                          }}
-                        />
-                      ) : post.media.type === "video" ? (
-                        <div
-                          className="w-full bg-[#2a2a2a] flex items-center justify-center rounded-3xl"
-                          style={{ height: "520px" }}
-                        >
-                          <span className="text-[#94a3b8] text-2xl">
-                            🎥 Video
-                          </span>
-                        </div>
-                      ) : (
-                        <div
-                          className="w-full bg-gradient-to-br from-[#4ade80]/10 via-[#22c55e]/10 to-[#16a34a]/10 flex items-center justify-center rounded-3xl"
-                          style={{ height: "520px" }}
-                        >
-                          <div className="text-center">
-                            <div className="w-16 h-16 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-2xl flex items-center justify-center mb-3 mx-auto">
-                              <Music size={28} className="text-black" />
-                            </div>
-                            <p className="text-white font-medium">Audio File</p>
-                            {post.media.duration && (
-                              <p className="text-[#94a3b8] text-sm mt-1">
-                                {post.media.duration}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      <HeartBurstLayer bursts={postBursts} />
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onNavigateToProfile && author.id) {
+                            onNavigateToProfile(author.id);
+                          }
+                        }}
+                        className={`min-w-0 text-left ${
+                          onNavigateToProfile && author.id
+                            ? "cursor-pointer"
+                            : "cursor-default"
+                        }`}
+                      >
+                        <h3 className="font-bold text-white text-base leading-tight">
+                          {author.name}
+                        </h3>
+                        <p className="text-[#4ade80] text-sm font-medium tracking-wide">
+                          {author.username}
+                        </p>
+                      </button>
                     </div>
                   </div>
-                )}
 
-                {/* Actions */}
-                <div className="px-2 pt-3">
-                  <div className="bg-[#1e1e1e] rounded-full flex items-center px-4 py-2.5">
-                    <button
-                      onClick={(e) => handleHeartIconClick(post.id, e)}
-                      className="group flex items-center space-x-2"
+                  {/* Media */}
+                  {post.media && post.media.url && (
+                    <div
+                      className="px-1"
+                      style={
+                        animatingPosts.has(post.id)
+                          ? {
+                              paddingBottom: "8px",
+                              paddingTop: "8px",
+                              border: "2px solid rgba(74, 222, 128, 0.5)",
+                              borderRadius: "1.5rem",
+                              animation:
+                                "premiumGlow 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards",
+                            }
+                          : {}
+                      }
                     >
-                      <Heart
-                        size={20}
-                        fill={liked ? "#ef4444" : "white"}
-                        strokeWidth={0}
-                        className={`transition-all duration-200 ${
-                          liked
-                            ? "text-red-500 scale-110 drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]"
-                            : "text-white group-hover:scale-110"
-                        }`}
-                      />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSelectedPostId(post.id);
-                        setShowLikesModal(true);
-                      }}
-                      className="text-white font-bold text-sm ml-1 hover:text-[#4ade80] transition-colors"
-                    >
-                      {formatNumber(likeCount)}
-                    </button>
-                    <div className="flex-1" />
-                    <button
-                      onClick={() => {
-                        setSelectedPostId(post.id);
-                        setShowCommentsModal(true);
-                      }}
-                      className="flex items-center space-x-2 text-white hover:text-[#4ade80] transition-colors"
-                    >
-                      <MessageCircle size={20} fill="white" strokeWidth={0} />
-                    </button>
-                    <span className="text-white font-bold text-sm ml-1">
-                      {formatNumber(post.comments_count)}
-                    </span>
-                    <div className="flex-1" />
-                    <button
-                      onClick={() => {
-                        setSelectedPostId(post.id);
-                        setSentTo(new Set());
-                        setShowShareModal(true);
-                      }}
-                      className="text-white hover:text-[#4ade80] transition-colors"
-                    >
-                      <Send size={18} fill="white" strokeWidth={0} />
-                    </button>
+                      <div
+                        id={`media-${post.id}`}
+                        className="w-full relative cursor-pointer rounded-3xl overflow-hidden"
+                        onClick={(e) => handleMediaTap(post.id, e)}
+                      >
+                        {post.media.type === "image" ? (
+                          <img
+                            src={post.media.url}
+                            alt="Post media"
+                            className="w-full object-cover"
+                            style={{ height: "500px" }}
+                            /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - draggable might block touch */
+                            /* DISABLED: draggable={false} */
+                            loading="lazy"
+                            decoding="async"
+                            onError={(e) => {
+                              e.currentTarget.src =
+                                "https://picsum.photos/seed/fallback/800/600.jpg";
+                            }}
+                          />
+                        ) : post.media.type === "video" ? (
+                          <div
+                            className="w-full bg-[#2a2a2a] flex items-center justify-center rounded-3xl"
+                            style={{ height: "500px" }}
+                          >
+                            <span className="text-[#94a3b8] text-2xl">
+                              🎥 Video
+                            </span>
+                          </div>
+                        ) : (
+                          <div
+                            className="w-full bg-gradient-to-br from-[#4ade80]/10 via-[#22c55e]/10 to-[#16a34a]/10 flex items-center justify-center rounded-3xl"
+                            style={{ height: "500px" }}
+                          >
+                            <div className="text-center">
+                              <div className="w-16 h-16 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-2xl flex items-center justify-center mb-3 mx-auto">
+                                <Music size={28} className="text-black" />
+                              </div>
+                              <p className="text-white font-medium">
+                                Audio File
+                              </p>
+                              {post.media.duration && (
+                                <p className="text-[#94a3b8] text-sm mt-1">
+                                  {post.media.duration}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <HeartBurstLayer bursts={postBursts} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="px-2 pt-3">
+                    <div className="bg-[#1e1e1e] rounded-full flex items-center px-4 py-2.5">
+                      <button
+                        onClick={(e) => handleHeartIconClick(post.id, e)}
+                        className="group flex items-center space-x-2"
+                      >
+                        <Heart
+                          size={20}
+                          fill={liked ? "#ef4444" : "white"}
+                          strokeWidth={0}
+                          className={`transition-all duration-200 ${
+                            liked
+                              ? "text-red-500 scale-110 drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]"
+                              : "text-white group-hover:scale-110"
+                          }`}
+                        />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedPostId(post.id);
+                          setShowLikesModal(true);
+                        }}
+                        className="text-white font-bold text-sm ml-1 hover:text-[#4ade80] transition-colors"
+                      >
+                        {formatNumber(likeCount)}
+                      </button>
+                      <div className="flex-1" />
+                      <button
+                        onClick={() => {
+                          setSelectedPostId(post.id);
+                          setShowCommentsModal(true);
+                        }}
+                        className="flex items-center space-x-2 text-white hover:text-[#4ade80] transition-colors"
+                      >
+                        <MessageCircle size={20} fill="white" strokeWidth={0} />
+                      </button>
+                      <span className="text-white font-bold text-sm ml-1">
+                        {formatNumber(post.comments_count)}
+                      </span>
+                      <div className="flex-1" />
+                      <button
+                        onClick={() => {
+                          setSelectedPostId(post.id);
+                          setSentTo(new Set());
+                          setShowShareModal(true);
+                        }}
+                        className="text-white hover:text-[#4ade80] transition-colors"
+                        aria-label="Share to DM"
+                      >
+                        <Send size={18} fill="white" strokeWidth={0} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Caption */}
+                  <div className="px-4 pt-3 pb-5">
+                    <p className="text-white text-base leading-snug">
+                      {post.content}
+                    </p>
+                    <p className="text-[#64748b] text-xs mt-2">
+                      {formatTimeAgo(post.timestamp)}
+                    </p>
                   </div>
                 </div>
-
-                {/* Caption */}
-                <div className="px-4 pt-3 pb-5">
-                  <p className="text-white text-base leading-snug">
-                    {post.content}
-                  </p>
-                  <p className="text-[#64748b] text-xs mt-2">
-                    {formatTimeAgo(post.timestamp)}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════
@@ -1213,7 +1523,7 @@ export function FeedScreen({
                   storeLikeComment(selectedPost.id, commentId)
                 }
                 onNavigateToProfile={onNavigateToProfile}
-                autoFocusInput={true}
+                autoFocusInput={false}
               />
             </div>
           </div>
@@ -1288,6 +1598,11 @@ export function FeedScreen({
                         alt={entry.name}
                         size="xl"
                         userId={entry.userId}
+                        forceGhostMode={
+                          entry.userId
+                            ? ghostModesByUserId[entry.userId]
+                            : undefined
+                        }
                       />
                       <div className="flex-1">
                         <p
@@ -1336,14 +1651,23 @@ export function FeedScreen({
       )}
 
       {/* ── Infinite Scroll Sentinel ── */}
-      {sortedPosts.length > 0 && (
-        <div ref={loadMoreRef} className="px-2 pb-6">
+      {sortedPosts.length > 0 && hasMorePosts && (
+        <>
+          <div
+            ref={loadMoreRef}
+            aria-hidden="true"
+            className="h-px w-full pointer-events-none"
+          />
           {isLoadingMore && (
-            <div className="flex items-center justify-center py-4">
-              <div className="w-6 h-6 border-2 border-[#4ade80] border-t-transparent rounded-full animate-spin"></div>
+            <div className="px-4 pb-6 pt-2">
+              <div className="flex items-center justify-center">
+                <div className="rounded-full border border-white/8 bg-[#111] px-5 py-3 shadow-[0_12px_28px_rgba(0,0,0,0.28)]">
+                  <div className="w-6 h-6 border-2 border-[#4ade80] border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              </div>
             </div>
           )}
-        </div>
+        </>
       )}
 
       {/* ══════════════════════════════════════════
@@ -1440,6 +1764,11 @@ export function FeedScreen({
                         }
                         size="xl"
                         userId={friend.user_id}
+                        forceGhostMode={
+                          friend.user_id
+                            ? ghostModesByUserId[friend.user_id]
+                            : undefined
+                        }
                       />
                       <div className="flex-1">
                         <p
@@ -1567,282 +1896,23 @@ export function FeedScreen({
       )}
 
       {/* ══════════════════════════════════════════
-          STORY VIEWER MODAL
+          STORY VIEWER
       ══════════════════════════════════════════ */}
-      {showStoryViewerModal && viewerStories[selectedStoryIndex] && (
+      {showStoryViewerModal && viewerStories.length > 0 && (
         <StoryViewer
-          key={viewerStories[selectedStoryIndex]?.id || selectedStoryIndex}
           stories={viewerStories}
-          currentIndex={selectedStoryIndex}
+          initialIndex={selectedStoryIndex}
           isOwner={viewerIsOwner}
           currentUserId={currentUser.userId}
-          onClose={() => setShowStoryViewerModal(false)}
-          onStoryChange={(index) => setSelectedStoryIndex(index)}
-          onDeleteStory={handleDeleteStory}
+          onClose={() => {
+            setShowStoryViewerModal(false);
+            onStoryViewerOpenChange?.(false);
+          }}
+          onDelete={viewerIsOwner ? handleDeleteStory : undefined}
+          onNavigateToProfile={onNavigateToProfile}
+          onReact={!viewerIsOwner ? handleStoryReact : undefined}
+          onReply={!viewerIsOwner ? handleStoryReply : undefined}
         />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Story Viewer Component
-// ---------------------------------------------------------------------------
-
-function StoryViewer({
-  stories,
-  currentIndex,
-  isOwner,
-  currentUserId,
-  onClose,
-  onStoryChange,
-  onDeleteStory,
-}: {
-  stories: StoryDTO[];
-  currentIndex: number;
-  isOwner: boolean;
-  currentUserId: string;
-  onClose: () => void;
-  onStoryChange: (index: number) => void;
-  onDeleteStory: (storyId: string) => void;
-}) {
-  const [progress, setProgress] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const currentStory = stories[currentIndex];
-  const animationFrameRef = useRef<number | null>(null);
-  const startTimeRef = useRef<number>(0);
-  const pausedElapsedRef = useRef<number>(0);
-  const isPausedRef = useRef(false);
-
-  const STORY_DURATION = 5000;
-
-  function animateProgress(now: number) {
-    if (isPausedRef.current) return;
-
-    const elapsed = pausedElapsedRef.current + (now - startTimeRef.current);
-    const newProgress = Math.min((elapsed / STORY_DURATION) * 100, 100);
-    setProgress(newProgress);
-
-    if (newProgress >= 100) {
-      if (currentIndex < stories.length - 1) {
-        onStoryChange(currentIndex + 1);
-      } else {
-        onClose();
-      }
-      return;
-    }
-
-    animationFrameRef.current = window.requestAnimationFrame(animateProgress);
-  }
-
-  useEffect(() => {
-    pausedElapsedRef.current = 0;
-    startTimeRef.current = performance.now();
-    isPausedRef.current = false;
-
-    animationFrameRef.current = window.requestAnimationFrame(animateProgress);
-
-    return () => {
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    };
-  }, [currentIndex, onClose, onStoryChange, stories.length]);
-
-  // Pause/resume on isPaused change
-  useEffect(() => {
-    isPausedRef.current = isPaused;
-    if (isPaused) {
-      pausedElapsedRef.current += performance.now() - startTimeRef.current;
-      if (animationFrameRef.current !== null) {
-        window.cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    } else {
-      startTimeRef.current = performance.now();
-      if (animationFrameRef.current === null) {
-        animationFrameRef.current =
-          window.requestAnimationFrame(animateProgress);
-      }
-    }
-  }, [isPaused, onClose, onStoryChange, currentIndex, stories.length]);
-
-  const handlePrevious = () => {
-    if (currentIndex > 0) onStoryChange(currentIndex - 1);
-  };
-
-  const handleNext = () => {
-    if (currentIndex < stories.length - 1) {
-      onStoryChange(currentIndex + 1);
-    } else {
-      onClose();
-    }
-  };
-
-  const handleDeletePress = () => {
-    setIsPaused(true);
-    setShowDeleteConfirm(true);
-  };
-
-  const handleConfirmDelete = () => {
-    onDeleteStory(currentStory.id);
-    setShowDeleteConfirm(false);
-  };
-
-  const handleCancelDelete = () => {
-    setShowDeleteConfirm(false);
-    setIsPaused(false);
-  };
-
-  if (!currentStory) return null;
-
-  const postedAgo = formatTimeAgo(currentStory.createdAt);
-
-  return (
-    <div
-      className="fixed inset-0 bg-black z-[100] flex items-center justify-center"
-      style={{ transform: "translateZ(0)" }}
-    >
-      {/* Progress bars for all stories */}
-      <div className="absolute top-4 left-4 right-4 flex space-x-1 z-20">
-        {stories.map((_, i) => (
-          <div
-            key={i}
-            className="flex-1 h-0.5 bg-white/30 rounded-full overflow-hidden"
-          >
-            <div
-              className="h-full origin-left rounded-full bg-white will-change-transform"
-              style={{
-                transform: `scaleX(${
-                  i < currentIndex ? 1 : i === currentIndex ? progress / 100 : 0
-                })`,
-              }}
-            />
-          </div>
-        ))}
-      </div>
-
-      {/* Media */}
-      <div className="relative w-full h-full flex items-center justify-center">
-        {currentStory.media.type === "image" ? (
-          <img
-            src={currentStory.media.url}
-            alt="Story"
-            className="max-w-full max-h-full object-contain"
-          />
-        ) : (
-          <video
-            src={currentStory.media.url}
-            className="max-w-full max-h-full object-contain"
-            autoPlay
-            controls={false}
-          />
-        )}
-      </div>
-
-      {/* Author bar */}
-      <div className="absolute top-10 left-4 right-4 flex items-center justify-between z-20">
-        <div className="flex items-center space-x-3">
-          <img
-            src={currentStory.author.avatar}
-            alt={currentStory.author.displayName}
-            className="w-10 h-10 rounded-full object-cover border-2 border-white"
-          />
-          <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-2 flex items-center space-x-2">
-            <p className="text-white font-semibold text-base">
-              {stripAtSymbol(currentStory.author.username)}
-            </p>
-            <span className="text-white/50 text-xs">· {postedAgo}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          {/* Delete button — only visible to the story owner */}
-          {isOwner && (
-            <button
-              onClick={handleDeletePress}
-              className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white/80 hover:text-red-400 hover:bg-black/70 transition-all"
-            >
-              <Trash2 size={18} />
-            </button>
-          )}
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-all"
-          >
-            <X size={20} />
-          </button>
-        </div>
-      </div>
-
-      {/* Caption */}
-      {currentStory.caption && (
-        <div className="absolute bottom-24 left-4 right-4 z-20">
-          <div className="bg-black/50 backdrop-blur-sm rounded-2xl px-4 py-3">
-            <p className="text-white text-sm">{currentStory.caption}</p>
-          </div>
-        </div>
-      )}
-
-      {/* View count (owner only) */}
-      {isOwner && (
-        <div className="absolute bottom-10 left-4 z-20">
-          <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center space-x-1.5">
-            <svg viewBox="0 0 24 24" fill="white" width={14} height={14}>
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" fill="black" />
-            </svg>
-            <span className="text-white text-xs font-medium">
-              {currentStory.viewCount} views
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Tap zones: left = previous, right = next */}
-      <button
-        onClick={handlePrevious}
-        className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-10"
-        disabled={currentIndex === 0}
-      />
-      <button
-        onClick={handleNext}
-        className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-10"
-      />
-
-      {/* Delete confirmation overlay */}
-      {showDeleteConfirm && (
-        <div className="absolute inset-0 bg-black/80 z-30 flex items-center justify-center px-6">
-          <div className="bg-[#1a1a1a] rounded-3xl p-6 w-full max-w-sm">
-            <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Trash2 size={22} className="text-red-400" />
-            </div>
-            <h3 className="text-white font-bold text-lg text-center mb-2">
-              Delete Story?
-            </h3>
-            <p className="text-[#94a3b8] text-sm text-center mb-6">
-              This story will be permanently removed and your friends won&apos;t
-              be able to see it anymore.
-            </p>
-            <div className="space-y-3">
-              <button
-                onClick={handleConfirmDelete}
-                className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3.5 rounded-2xl transition-colors"
-              >
-                Delete Story
-              </button>
-              <button
-                onClick={handleCancelDelete}
-                className="w-full bg-[#2a2a2a] hover:bg-[#333] text-white font-semibold py-3.5 rounded-2xl transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

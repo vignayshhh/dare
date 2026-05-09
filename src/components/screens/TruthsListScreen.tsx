@@ -207,7 +207,7 @@ export function TruthsListScreen({
               margin: 0,
             }}
           >
-            Truths will appear here
+            Truths you take part in will appear here
           </p>
         </div>
       ) : (

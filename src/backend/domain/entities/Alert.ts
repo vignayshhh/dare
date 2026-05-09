@@ -24,7 +24,9 @@ export type AlertType =
   | "SUS_MENTION_TALKING"
   | "SUS_CLOSE_FRIEND_ACTIVITY"
   | "COMMENT_RECEIVED"
-  | "COMMENT_REPLY";
+  | "COMMENT_REPLY"
+  | "STORY_REACTION"
+  | "STORY_REPLY";
 
 const SUS_ALERT_TYPES: Set<AlertType> = new Set([
   "SUS_REPEATED_LIKES",

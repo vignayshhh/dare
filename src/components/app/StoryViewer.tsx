@@ -16,10 +16,15 @@ import {
   Heart,
   ThumbsDown,
   Send,
+  Users,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { formatTimeAgo } from "../../utils/timeFormat";
-import type { StoryDTO } from "../../middleware/services/story.service";
+import {
+  storyService,
+  type StoryDTO,
+  type StoryAudienceDTO,
+} from "../../middleware/services/story.service";
 import { storyReactionService } from "../../middleware/services/story-reaction.service";
 
 const STORY_DURATION = 5000;
@@ -55,6 +60,7 @@ export function StoryViewer({
   onReact,
   onReply,
 }: StoryViewerProps) {
+  type AudienceTab = "views" | "likes" | "hates";
   const [currentIndex, setCurrentIndex] = useState(
     Math.max(0, Math.min(initialIndex, stories.length - 1)),
   );
@@ -65,7 +71,7 @@ export function StoryViewer({
   const [progressKey, setProgressKey] = useState(0);
   const [videoProgress, setVideoProgress] = useState(0);
   const [imageProgress, setImageProgress] = useState(0);
-  const [mediaLoaded, setMediaLoaded] = useState(false);
+  const [loadedMediaKey, setLoadedMediaKey] = useState<string | null>(null);
   const [reactionMap, setReactionMap] = useState<
     Record<string, "like" | "hate" | undefined>
   >({});
@@ -73,6 +79,12 @@ export function StoryViewer({
   const [replyText, setReplyText] = useState("");
   const [replyFocused, setReplyFocused] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
+  const [showAudienceSheet, setShowAudienceSheet] = useState(false);
+  const [audienceTab, setAudienceTab] = useState<AudienceTab>("views");
+  const [audienceLoading, setAudienceLoading] = useState(false);
+  const [audienceByStoryId, setAudienceByStoryId] = useState<
+    Record<string, StoryAudienceDTO | undefined>
+  >({});
 
   const replyInputRef = useRef<HTMLInputElement | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -100,7 +112,10 @@ export function StoryViewer({
     () => stories.map((item) => item.id).join("|"),
     [stories],
   );
+  const mediaKey = story ? `${story.id}:${story.media.type}:${story.media.url}` : null;
+  const mediaLoaded = mediaKey !== null && loadedMediaKey === mediaKey;
   const reaction = reactionMap[story?.id] ?? null;
+  const storyAudience = story ? audienceByStoryId[story.id] : undefined;
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setVisible(true));
@@ -152,7 +167,6 @@ export function StoryViewer({
   }, [isMuted, isPaused]);
 
   useEffect(() => {
-    setMediaLoaded(false);
     setReplyText("");
     setReplyFocused(false);
     setVideoProgress(0);
@@ -268,6 +282,10 @@ export function StoryViewer({
   useEffect(() => {
     setIsPaused(replyFocused);
   }, [replyFocused]);
+
+  useEffect(() => {
+    setShowAudienceSheet(false);
+  }, [story?.id]);
 
   const onTimeUpdate = () => {
     const video = videoRef.current;
@@ -409,9 +427,45 @@ export function StoryViewer({
     }
   }, [onReply, replyText, sendingReply, story]);
 
+  const openAudienceSheet = useCallback(
+    async (tab: AudienceTab = "views") => {
+      if (!story) return;
+
+      setAudienceTab(tab);
+      setShowAudienceSheet(true);
+
+      if (audienceByStoryId[story.id]) {
+        return;
+      }
+
+      setAudienceLoading(true);
+      try {
+        const audience = await storyService.getStoryAudience(story.id);
+        setAudienceByStoryId((prev) => ({
+          ...prev,
+          [story.id]: audience,
+        }));
+      } finally {
+        setAudienceLoading(false);
+      }
+    },
+    [audienceByStoryId, story],
+  );
+
   if (!story) return null;
 
   const isVideo = story.media.type === "video";
+  const audienceCounts = {
+    views: storyAudience?.viewers.length ?? story.viewCount,
+    likes: storyAudience?.likes.length ?? 0,
+    hates: storyAudience?.hates.length ?? 0,
+  };
+  const audienceEntries =
+    audienceTab === "likes"
+      ? storyAudience?.likes ?? []
+      : audienceTab === "hates"
+        ? storyAudience?.hates ?? []
+        : storyAudience?.viewers ?? [];
 
   return (
     <div
@@ -485,24 +539,49 @@ export function StoryViewer({
 
           {isVideo ? (
             <video
+              key={mediaKey ?? story.id}
               ref={videoRef}
               src={story.media.url || undefined}
               className="h-full max-h-full w-full max-w-full object-contain"
               autoPlay
               playsInline
               muted={isMuted}
-              onCanPlay={() => setMediaLoaded(true)}
+              onCanPlay={() => {
+                if (mediaKey) {
+                  setLoadedMediaKey(mediaKey);
+                }
+              }}
+              onLoadedData={() => {
+                if (mediaKey) {
+                  setLoadedMediaKey(mediaKey);
+                }
+              }}
+              onError={() => {
+                if (mediaKey) {
+                  setLoadedMediaKey(mediaKey);
+                }
+              }}
               onEnded={goNext}
               onTimeUpdate={onTimeUpdate}
               style={{ pointerEvents: "none" }}
             />
           ) : (
             <img
+              key={mediaKey ?? story.id}
               src={story.media.url || undefined}
               alt={story.caption ?? "Story"}
               className="h-full max-h-full w-full max-w-full object-contain"
               draggable={false}
-              onLoad={() => setMediaLoaded(true)}
+              onLoad={() => {
+                if (mediaKey) {
+                  setLoadedMediaKey(mediaKey);
+                }
+              }}
+              onError={() => {
+                if (mediaKey) {
+                  setLoadedMediaKey(mediaKey);
+                }
+              }}
               style={{ pointerEvents: "none" }}
             />
           )}
@@ -591,12 +670,19 @@ export function StoryViewer({
         >
           {isOwner ? (
             <div className="pointer-events-auto flex items-center justify-between pb-1">
-              <div className="flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void openAudienceSheet("views");
+                }}
+                className="flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm transition-transform active:scale-95"
+              >
                 <Eye size={13} style={{ color: "#00ff88" }} />
                 <span className="text-xs font-semibold text-white/80">
                   {story.viewCount} {story.viewCount === 1 ? "view" : "views"}
                 </span>
-              </div>
+              </button>
               {onDelete && (
                 <button
                   type="button"
@@ -745,6 +831,109 @@ export function StoryViewer({
               <div className="flex gap-[5px]">
                 <div className="h-5 w-[5px] rounded-full bg-white" />
                 <div className="h-5 w-[5px] rounded-full bg-white" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAudienceSheet && isOwner && (
+          <div
+            className="absolute inset-0 z-[70] flex items-end bg-black/70"
+            onClick={() => setShowAudienceSheet(false)}
+          >
+            <div
+              className="w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+18px)] pt-4 shadow-[0_-20px_40px_rgba(0,0,0,0.38)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/15" />
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-white">Story Activity</p>
+                  <p className="text-xs text-white/45">
+                    Views, likes, and hates for this story
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAudienceSheet(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/75"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                {(
+                  [
+                    ["views", "Views", audienceCounts.views, <Users size={13} key="views" />],
+                    ["likes", "Likes", audienceCounts.likes, <Heart size={13} key="likes" />],
+                    ["hates", "Hates", audienceCounts.hates, <ThumbsDown size={13} key="hates" />],
+                  ] as Array<[AudienceTab, string, number, React.ReactNode]>
+                ).map(([tabKey, label, count, icon]) => {
+                  const active = audienceTab === tabKey;
+                  return (
+                    <button
+                      key={tabKey}
+                      type="button"
+                      onClick={() => setAudienceTab(tabKey)}
+                      className={`rounded-[22px] border px-3 py-3 text-left transition-all ${
+                        active
+                          ? "border-[#4ade80]/30 bg-[#4ade80]/10"
+                          : "border-white/8 bg-white/[0.03]"
+                      }`}
+                    >
+                      <div className="mb-2 flex items-center gap-2 text-white/70">
+                        {icon}
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+                          {label}
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold text-white">{count}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="max-h-[42vh] overflow-y-auto">
+                {audienceLoading && !storyAudience ? (
+                  <div className="flex items-center justify-center py-10 text-sm text-white/55">
+                    Loading story activity...
+                  </div>
+                ) : audienceEntries.length === 0 ? (
+                  <div className="rounded-[24px] border border-white/8 bg-white/[0.03] px-4 py-8 text-center">
+                    <p className="text-sm font-semibold text-white/80">
+                      No {audienceTab} yet
+                    </p>
+                    <p className="mt-1 text-xs text-white/45">
+                      This story does not have any {audienceTab} to show right now.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {audienceEntries.map((entry) => (
+                      <div
+                        key={`${audienceTab}-${entry.userId}`}
+                        className="flex items-center gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] px-3.5 py-3"
+                      >
+                        <Avatar
+                          src={entry.avatar}
+                          alt={entry.displayName}
+                          userId={entry.userId}
+                          username={entry.username}
+                          size="sm"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-white">
+                            {entry.username}
+                          </p>
+                          <p className="truncate text-xs text-white/45">
+                            {entry.displayName}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

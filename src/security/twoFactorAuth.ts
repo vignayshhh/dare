@@ -20,8 +20,20 @@ interface TwoFactorSettings {
 
 /**
  * Two-Factor Authentication Service
- * Provides infrastructure for 2FA that can be enabled per user
- * Note: This is a foundation - full implementation requires Firebase Phone Auth setup
+ *
+ * ⚠️ SECURITY NOTICE (§2.5): This module is a SCAFFOLD ONLY.
+ * - `verifySetup` / `verifyCode` previously accepted ANY 6-digit numeric
+ *   string, which made 2FA worse than useless (users would believe they
+ *   were protected).
+ * - Real TOTP validation requires a server-trusted path (Cloud Function /
+ *   Next.js API route with a secret comparison via `otplib` or similar).
+ * - Until a real server verifier exists, both verify methods FAIL CLOSED
+ *   (reject every code). This guarantees that no flow in the app can be
+ *   gated behind a "verified 2FA" check that is actually verifiable by an
+ *   attacker just by typing 123456.
+ *
+ * Do NOT enable 2FA gating for any real security decision until this
+ * module is replaced with a server-trusted implementation.
  */
 class TwoFactorAuthService {
   private readonly COLLECTION = "two_factor_settings";
@@ -97,18 +109,16 @@ class TwoFactorAuthService {
         return { success: false, error: "2FA not enabled" };
       }
 
-      // In production, verify TOTP code against secret
-      // For now, accept any 6-digit code as placeholder
-      if (code.length === 6 && /^\d+$/.test(code)) {
-        const settingsRef = doc(db, this.COLLECTION, userId);
-        await updateDoc(settingsRef, {
-          verified: true,
-          lastUsedAt: Date.now(),
-        });
-        return { success: true };
-      }
-
-      return { success: false, error: "Invalid verification code" };
+      // SECURITY FIX (§2.5): Fail closed. Previously accepted any 6-digit
+      // code, which is worse than having no 2FA at all. Real verification
+      // needs a server-side TOTP comparison.
+      void code;
+      void settings;
+      return {
+        success: false,
+        error:
+          "2FA verification is not available (server-side verifier required)",
+      };
     } catch (error) {
       console.error("Error verifying 2FA setup:", error);
       return { success: false, error: "Verification failed" };
@@ -129,17 +139,13 @@ class TwoFactorAuthService {
         return { success: true };
       }
 
-      // In production, verify TOTP code against secret
-      // For now, accept any 6-digit code as placeholder
-      if (code.length === 6 && /^\d+$/.test(code)) {
-        const settingsRef = doc(db, this.COLLECTION, userId);
-        await updateDoc(settingsRef, {
-          lastUsedAt: Date.now(),
-        });
-        return { success: true };
-      }
-
-      return { success: false, error: "Invalid verification code" };
+      // SECURITY FIX (§2.5): Fail closed. See class-level notice.
+      void code;
+      return {
+        success: false,
+        error:
+          "2FA verification is not available (server-side verifier required)",
+      };
     } catch (error) {
       console.error("Error verifying 2FA code:", error);
       return { success: false, error: "Verification failed" };

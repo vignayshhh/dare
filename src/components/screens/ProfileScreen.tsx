@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Target,
   Eye,
@@ -31,22 +31,34 @@ import { ProfileEditScreen } from "./ProfileEditScreen";
 import { FriendsScreen } from "./FriendsScreen";
 import { Avatar } from "../ui/Avatar";
 import { useProfileDataStore } from "../../stores/profileDataStore";
-import { useContentStore } from "../../stores/useContentStore";
 import { friendsService } from "../../middleware/services/service-factory";
 import { closeFriendsService } from "../../middleware/services/service-factory";
 import { formatTimeAgo } from "../../utils/timeFormat";
 import { TruthsListScreen } from "./TruthsListScreen";
 import { DaresListScreen } from "./DaresListScreen";
+import {
+  dareService,
+  truthService,
+} from "../../middleware/services/service-factory";
 import type {
   TruthPost,
   DarePost,
 } from "../../middleware/adapters/data-adapters";
+import { resolveUserProfile } from "../../utils/profileResolver";
+import { db } from "../../backend/lib/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { TruthEntity } from "../../backend/domain/entities/Truth";
 
 interface ProfileStats {
   daresCompleted: number;
   daresSurrendered: number;
   friends: number;
 }
+
+type ProfileTabLoadState = {
+  truthsLoadedForUserId: string | null;
+  daresLoadedForUserId: string | null;
+};
 
 interface ProfileScreenProps {
   isActive?: boolean;
@@ -65,6 +77,148 @@ function toSafeCount(value: unknown): number {
         : 0;
 
   return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
+const profileCache = new Map<string, any>();
+
+async function fetchProfile(userId: string): Promise<any | null> {
+  if (!userId) return null;
+  if (profileCache.has(userId)) return profileCache.get(userId);
+
+  try {
+    const resolvedProfile = await resolveUserProfile(userId);
+    if (resolvedProfile) {
+      profileCache.set(userId, resolvedProfile);
+      return resolvedProfile;
+    }
+  } catch (_error) {
+    // Fall back to direct query when lookup strategy differs.
+  }
+
+  try {
+    const snapshot = await getDocs(
+      query(collection(db, "users"), where("user_id", "==", userId)),
+    );
+
+    if (!snapshot.empty) {
+      const data = snapshot.docs[0].data();
+      const docId = snapshot.docs[0].id;
+      const profile = {
+        id: data.user_id || docId,
+        userId: data.user_id || docId,
+        displayName: data.display_name,
+        username: data.username,
+        nickname: data.display_name || data.nickname,
+        avatarUrl: data.avatar_url,
+      };
+      profileCache.set(userId, profile);
+      return profile;
+    }
+  } catch (_error) {
+    // Keep null cache entry to avoid repeated failed reads in one session.
+  }
+
+  profileCache.set(userId, null);
+  return null;
+}
+
+function extractName(profile: any, userId: string): string {
+  if (profile && typeof profile === "object") {
+    const name =
+      profile.displayName ||
+      profile.username ||
+      profile.nickname ||
+      profile.display_name;
+
+    if (typeof name === "string" && name.trim().length > 0) {
+      return name.trim();
+    }
+  }
+
+  return userId || "Unknown";
+}
+
+function extractAvatar(profile: any): string {
+  if (profile && typeof profile === "object") {
+    const url = profile.avatarUrl || profile.avatar_url || profile.photoURL;
+    if (typeof url === "string" && url.trim().length > 0) {
+      return url.trim();
+    }
+  }
+
+  return "/default-avatar.png";
+}
+
+async function buildTruthPost(truth: TruthEntity): Promise<TruthPost | null> {
+  try {
+    const [challengerProfile, receiverProfile] = await Promise.all([
+      fetchProfile(truth.challengerId),
+      fetchProfile(truth.receiverId),
+    ]);
+
+    return {
+      id: truth.id,
+      challengerId: truth.challengerId,
+      receiverId: truth.receiverId,
+      challenger: {
+        nickname: extractName(challengerProfile, truth.challengerId),
+        avatar: extractAvatar(challengerProfile),
+        verified: false,
+      },
+      receiver: {
+        nickname: extractName(receiverProfile, truth.receiverId),
+        avatar: extractAvatar(receiverProfile),
+        verified: false,
+      },
+      question: truth.question,
+      state: truth.state as TruthPost["state"],
+      createdAt: truth.createdAt,
+      answer: truth.answer,
+    };
+  } catch (error) {
+    console.error(`[ProfileScreen] Failed to build truth ${truth.id}:`, error);
+    return null;
+  }
+}
+
+async function buildDarePost(dare: any): Promise<DarePost | null> {
+  try {
+    const [challengerProfile, receiverProfile] = await Promise.all([
+      fetchProfile(dare.challengerId),
+      fetchProfile(dare.receiverId),
+    ]);
+
+    return {
+      id: dare.id,
+      challengerId: dare.challengerId,
+      receiverId: dare.receiverId,
+      challenger: {
+        nickname: extractName(challengerProfile, dare.challengerId),
+        avatar: extractAvatar(challengerProfile),
+        verified: false,
+      },
+      receiver: {
+        nickname: extractName(receiverProfile, dare.receiverId),
+        avatar: extractAvatar(receiverProfile),
+        verified: false,
+      },
+      description: dare.description,
+      proof: dare.proofMediaUrl
+        ? {
+            type: (dare.proofMediaType === "VIDEO" ? "video" : "image") as
+              | "video"
+              | "image",
+            url: dare.proofMediaUrl,
+            thumbnail: dare.proofMediaUrl,
+          }
+        : undefined,
+      state: dare.state as DarePost["state"],
+      createdAt: dare.createdAt,
+    };
+  } catch (error) {
+    console.error(`[ProfileScreen] Failed to build dare ${dare.id}:`, error);
+    return null;
+  }
 }
 
 export function ProfileScreen({
@@ -101,27 +255,32 @@ export function ProfileScreen({
   const [initialDareId, setInitialDareId] = useState<string | undefined>(
     undefined,
   );
-
-  const {
-    truthPosts,
-    darePosts,
-    loadingTruth,
-    loadingDares,
-    loadTruthPosts,
-    loadDarePosts,
-  } = useContentStore();
+  const [truthPosts, setTruthPosts] = useState<TruthPost[]>([]);
+  const [darePosts, setDarePosts] = useState<DarePost[]>([]);
+  const [loadingTruth, setLoadingTruth] = useState(false);
+  const [loadingDares, setLoadingDares] = useState(false);
+  const [loadedState, setLoadedState] = useState<ProfileTabLoadState>({
+    truthsLoadedForUserId: null,
+    daresLoadedForUserId: null,
+  });
 
   // Handle logout
   const handleLogout = async () => {
-    setIsLoggingOut(true);
+    // TEMPORARILY DISABLED FOR MOBILE DEBUGGING - Remove isLoggingOut state to prevent button being stuck disabled
+    // DISABLED: setIsLoggingOut(true);
 
     try {
+      console.log("🚪 Attempting logout...");
       await signOut();
+      console.log("✅ Logout successful");
       // The app should automatically redirect to auth screen due to isAuthenticated change
     } catch (error) {
       console.error("❌ LOGOUT ERROR:", error);
+      alert(
+        `Logout failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     } finally {
-      setIsLoggingOut(false);
+      // DISABLED: setIsLoggingOut(false);
     }
   };
 
@@ -152,24 +311,107 @@ export function ProfileScreen({
     loadUserDares,
   ]);
 
-  // Load truth/dare posts when those tabs are activated
-  useEffect(() => {
-    if (!isActive) return;
-    if (activeTab === "truths" && truthPosts.length === 0 && !loadingTruth) {
-      loadTruthPosts();
+  const loadProfileTruthPosts = useCallback(async (userId: string) => {
+    setLoadingTruth(true);
+
+    try {
+      const response = await truthService.getUserTruths(userId, "all");
+      const rawTruths = (response.success ? response.truths : []) ?? [];
+      const uniqueTruths = rawTruths.filter((truth: TruthEntity, index) => {
+        return (
+          rawTruths.findIndex((candidate: TruthEntity) => {
+            return candidate?.id === truth?.id;
+          }) === index
+        );
+      });
+      const builtTruths = await Promise.all(uniqueTruths.map(buildTruthPost));
+
+      setTruthPosts(
+        builtTruths.filter((truth): truth is TruthPost => truth !== null),
+      );
+      setLoadedState((current) => ({
+        ...current,
+        truthsLoadedForUserId: userId,
+      }));
+    } catch (error) {
+      console.error("[ProfileScreen] Failed to load profile truths:", error);
+      setTruthPosts([]);
+      setLoadedState((current) => ({
+        ...current,
+        truthsLoadedForUserId: userId,
+      }));
+    } finally {
+      setLoadingTruth(false);
     }
-    if (activeTab === "dares" && darePosts.length === 0 && !loadingDares) {
-      loadDarePosts();
+  }, []);
+
+  const loadProfileDarePosts = useCallback(async (userId: string) => {
+    setLoadingDares(true);
+
+    try {
+      const response = await dareService.getDaresForUser(userId);
+      const rawDares = (response.success ? response.dares : []) ?? [];
+      const uniqueDares = rawDares.filter((dare: any, index: number) => {
+        return (
+          rawDares.findIndex((candidate: any) => {
+            return candidate?.id === dare?.id;
+          }) === index
+        );
+      });
+
+      uniqueDares.sort(
+        (a: any, b: any) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+
+      const builtDares = await Promise.all(uniqueDares.map(buildDarePost));
+
+      setDarePosts(
+        builtDares.filter((dare): dare is DarePost => dare !== null),
+      );
+      setLoadedState((current) => ({
+        ...current,
+        daresLoadedForUserId: userId,
+      }));
+    } catch (error) {
+      console.error("[ProfileScreen] Failed to load profile dares:", error);
+      setDarePosts([]);
+      setLoadedState((current) => ({
+        ...current,
+        daresLoadedForUserId: userId,
+      }));
+    } finally {
+      setLoadingDares(false);
+    }
+  }, []);
+
+  // Load truth/dare posts when those tabs are activated without sharing feed state.
+  useEffect(() => {
+    if (!isActive || !user?.id) return;
+    if (
+      activeTab === "truths" &&
+      !loadingTruth &&
+      loadedState.truthsLoadedForUserId !== user.id
+    ) {
+      void loadProfileTruthPosts(user.id);
+    }
+    if (
+      activeTab === "dares" &&
+      !loadingDares &&
+      loadedState.daresLoadedForUserId !== user.id
+    ) {
+      void loadProfileDarePosts(user.id);
     }
   }, [
     activeTab,
     isActive,
-    truthPosts.length,
-    darePosts.length,
+    user?.id,
     loadingTruth,
     loadingDares,
-    loadTruthPosts,
-    loadDarePosts,
+    loadedState.truthsLoadedForUserId,
+    loadedState.daresLoadedForUserId,
+    loadProfileTruthPosts,
+    loadProfileDarePosts,
   ]);
 
   // Handler for opening friends screen
@@ -237,6 +479,18 @@ export function ProfileScreen({
     return timestampB - timestampA;
   });
 
+  const userTruthPosts = truthPosts.filter(
+    (truth) =>
+      !user?.id ||
+      truth.challengerId === user.id ||
+      truth.receiverId === user.id,
+  );
+
+  const userDarePosts = darePosts.filter(
+    (dare) =>
+      !user?.id || dare.challengerId === user.id || dare.receiverId === user.id,
+  );
+
   if (showPostsScreen) {
     return (
       <PostsScreen
@@ -259,7 +513,7 @@ export function ProfileScreen({
           setShowTruthsListScreen(false);
           setInitialTruthId(undefined);
         }}
-        truthPosts={truthPosts}
+        truthPosts={userTruthPosts}
         loading={loadingTruth}
         initialTruthId={initialTruthId}
         onSelectTruth={(truth) => {
@@ -279,7 +533,7 @@ export function ProfileScreen({
           setShowDaresListScreen(false);
           setInitialDareId(undefined);
         }}
-        darePosts={darePosts}
+        darePosts={userDarePosts}
         loading={loadingDares}
         initialDareId={initialDareId}
         onSelectDare={(dare) => {
@@ -578,7 +832,7 @@ export function ProfileScreen({
     <div
       style={{
         minHeight: "100vh",
-        background: "#000",
+        background: "#0a0f0a",
         fontFamily:
           "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
         paddingBottom: "100px",
@@ -590,9 +844,15 @@ export function ProfileScreen({
       <style>{`
         .profile-posts-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 3px;
-          margin-bottom: 12px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 0;
+        }
+        @media (max-width: 480px) {
+          .profile-posts-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px;
+          }
         }
         @keyframes fadeInUp {
           from { opacity: 0; transform: translateY(20px); }
@@ -627,103 +887,17 @@ export function ProfileScreen({
       <div
         style={{
           position: "fixed",
-          top: "-200px",
+          top: "-240px",
           left: "50%",
           transform: "translateX(-50%)",
-          width: "100%",
-          height: "400px",
+          width: "110%",
+          height: "320px",
           background:
-            "radial-gradient(ellipse 80% 40% at 50% -10%, rgba(74,222,128,0.15) 0%, transparent 100%)",
+            "radial-gradient(ellipse 70% 32% at 50% 0%, rgba(74,222,128,0.035) 0%, transparent 100%)",
           pointerEvents: "none",
           zIndex: -1,
         }}
       />
-
-      {/* Top Nav */}
-      <div
-        className="animate-fade-in-up"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "16px 20px 14px",
-          position: "relative",
-          zIndex: 1,
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          backdropFilter: "blur(20px)",
-          background: "rgba(0,0,0,0.3)",
-        }}
-      >
-        <h1
-          style={{
-            color: "#fff",
-            fontSize: "22px",
-            fontWeight: 800,
-            margin: 0,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          DARE
-        </h1>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            onClick={() => setIsGhostMode(!isGhostMode)}
-            style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "50%",
-              border: isGhostMode
-                ? "1.5px solid rgba(74,222,128,0.4)"
-                : "1px solid rgba(255,255,255,0.08)",
-              background: isGhostMode
-                ? "rgba(74,222,128,0.15)"
-                : "rgba(255,255,255,0.04)",
-              color: isGhostMode ? "#4ade80" : "rgba(255,255,255,0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
-              boxShadow: isGhostMode ? "0 0 20px rgba(74,222,128,0.2)" : "none",
-            }}
-          >
-            <Shield size={16} strokeWidth={2} />
-          </button>
-
-          <button
-            onClick={() => {
-              setShowEditProfile(true);
-            }}
-            style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "50%",
-              border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.04)",
-              color: "rgba(255,255,255,0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              position: "relative",
-              zIndex: 100,
-              transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "rgba(74,222,128,0.3)";
-              e.currentTarget.style.background = "rgba(74,222,128,0.1)";
-              e.currentTarget.style.color = "#4ade80";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
-              e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-              e.currentTarget.style.color = "rgba(255,255,255,0.5)";
-            }}
-          >
-            <Settings size={16} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
 
       {/* Profile Header — horizontal layout like reference */}
       <div
@@ -732,42 +906,47 @@ export function ProfileScreen({
           padding: "24px 20px 16px",
           position: "relative",
           zIndex: 1,
-          maxWidth: "920px",
+          maxWidth: "1100px",
           margin: "0 auto",
         }}
       >
-        {/* Gradient banner behind avatar area */}
-        <div
-          style={{
-            position: "absolute",
-            top: "-24px",
-            left: "-20px",
-            right: "-20px",
-            height: "350px",
-            background:
-              "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(74,222,128,0.18) 0%, transparent 80%)",
-            pointerEvents: "none",
-            zIndex: -1,
-          }}
-        />
-
         <div
           style={{
             display: "flex",
             alignItems: "flex-start",
             gap: "20px",
             marginBottom: "18px",
+            padding: "22px",
+            borderRadius: "30px",
+            border: "1px solid rgba(255,255,255,0.06)",
+            background:
+              "linear-gradient(180deg, rgba(19,22,19,0.98), rgba(11,13,11,0.98))",
+            boxShadow:
+              "0 20px 60px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
+            overflow: "hidden",
+            position: "relative",
           }}
         >
+          <div
+            style={{
+              position: "absolute",
+              inset: "0 0 auto 0",
+              height: "1px",
+              background:
+                "linear-gradient(90deg, transparent 0%, rgba(74,222,128,0.32) 50%, transparent 100%)",
+              pointerEvents: "none",
+            }}
+          />
           {/* Avatar */}
           <div style={{ position: "relative", flexShrink: 0 }}>
             <div
               style={{
-                padding: "3px",
+                padding: "2px",
                 borderRadius: "50%",
                 background:
-                  "linear-gradient(135deg, #4ade80, #22c55e, #4ade80)",
-                boxShadow: "0 0 20px rgba(74,222,128,0.25)",
+                  "linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))",
+                boxShadow:
+                  "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
                 width: "88px",
                 height: "88px",
                 display: "flex",
@@ -790,13 +969,14 @@ export function ProfileScreen({
                 width: "26px",
                 height: "26px",
                 borderRadius: "50%",
-                background: "#1a1a1a",
-                border: "2px solid #000",
+                background: "#141714",
+                border: "2px solid #0b100b",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: "pointer",
                 color: "#fff",
+                boxShadow: "0 8px 18px rgba(0,0,0,0.22)",
               }}
             >
               <Camera size={13} />
@@ -812,12 +992,13 @@ export function ProfileScreen({
                   height: "26px",
                   borderRadius: "50%",
                   background: "#4ade80",
-                  border: "2px solid #000",
+                  border: "2px solid #0b100b",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
                   color: "#000",
+                  boxShadow: "0 10px 22px rgba(74,222,128,0.26)",
                 }}
               >
                 <Activity size={13} />
@@ -827,6 +1008,92 @@ export function ProfileScreen({
 
           {/* Name + username + bio */}
           <div style={{ flex: 1, minWidth: 0, paddingTop: "4px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "8px",
+              }}
+            >
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 10px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(74,222,128,0.18)",
+                  background: "rgba(74,222,128,0.1)",
+                  color: "#86efac",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Profile
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => setIsGhostMode(!isGhostMode)}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "50%",
+                    border: isGhostMode
+                      ? "1.5px solid rgba(74,222,128,0.4)"
+                      : "1px solid rgba(255,255,255,0.08)",
+                    background: isGhostMode
+                      ? "rgba(74,222,128,0.15)"
+                      : "rgba(255,255,255,0.04)",
+                    color: isGhostMode ? "#4ade80" : "rgba(255,255,255,0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
+                    boxShadow: isGhostMode
+                      ? "0 0 20px rgba(74,222,128,0.2)"
+                      : "0 8px 18px rgba(0,0,0,0.18)",
+                  }}
+                >
+                  <Shield size={14} strokeWidth={2} />
+                </button>
+                <button
+                  onClick={() => {
+                    setShowEditProfile(true);
+                  }}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "50%",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(255,255,255,0.04)",
+                    color: "rgba(255,255,255,0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
+                    boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(74,222,128,0.3)";
+                    e.currentTarget.style.background = "rgba(74,222,128,0.1)";
+                    e.currentTarget.style.color = "#4ade80";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor =
+                      "rgba(255,255,255,0.08)";
+                    e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                    e.currentTarget.style.color = "rgba(255,255,255,0.5)";
+                  }}
+                >
+                  <Settings size={14} strokeWidth={2} />
+                </button>
+              </div>
+            </div>
             <h2
               style={{
                 color: "#fff",
@@ -863,73 +1130,86 @@ export function ProfileScreen({
           </div>
         </div>
 
-        {/* Stats — horizontal scrolling pill row */}
+        {/* Stats */}
         <div
           style={{
-            display: "flex",
-            gap: "10px",
-            overflowX: "auto",
-            paddingBottom: "6px",
-            WebkitOverflowScrolling: "touch",
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: "12px",
             marginBottom: "0px",
           }}
         >
           {[
             {
-              label: "Friends",
+              label: "Circle",
+              sublabel: "Friends",
               value: profileStats.friends,
               onClick: handleFriendsClick,
+              accent: "#4ade80",
             },
             {
-              label: "Completed",
+              label: "Dares",
+              sublabel: "Completed",
               value: profileStats.daresCompleted,
               onClick: undefined,
+              accent: "#22c55e",
             },
             {
-              label: "Surrendered",
+              label: "Dares",
+              sublabel: "Surrendered",
               value: profileStats.daresSurrendered,
               onClick: undefined,
+              accent: "#f59e0b",
             },
-          ].map(({ label, value, onClick }, index) => (
+          ].map(({ label, sublabel, value, onClick, accent }) => (
             <div
-              key={label}
+              key={`${label}-${sublabel}`}
               onClick={onClick}
               style={{
-                flexShrink: 0,
                 background:
-                  "linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
-                border: "none",
-                borderRadius: "999px",
-                padding: "12px 24px",
+                  "linear-gradient(180deg, rgba(24,29,24,0.98), rgba(17,20,17,0.98))",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "24px",
+                padding: "16px 12px 14px",
                 textAlign: "center",
                 cursor: onClick ? "pointer" : "default",
                 transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
                 boxShadow:
-                  "0 2px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
+                  "0 14px 34px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
               }}
               onMouseEnter={(e) => {
                 if (onClick) {
-                  e.currentTarget.style.borderColor = "rgba(74,222,128,0.4)";
+                  e.currentTarget.style.borderColor = "rgba(74,222,128,0.24)";
                   e.currentTarget.style.background =
-                    "linear-gradient(135deg, rgba(74,222,128,0.12) 0%, rgba(74,222,128,0.04) 100%)";
+                    "linear-gradient(180deg, rgba(28,34,28,0.98), rgba(18,22,18,0.98))";
                   e.currentTarget.style.transform = "translateY(-2px)";
                 }
               }}
               onMouseLeave={(e) => {
                 if (onClick) {
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)";
                   e.currentTarget.style.background =
-                    "linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)";
+                    "linear-gradient(180deg, rgba(24,29,24,0.98), rgba(17,20,17,0.98))";
                   e.currentTarget.style.transform = "translateY(0)";
                 }
               }}
             >
+              <div
+                style={{
+                  width: "30px",
+                  height: "4px",
+                  borderRadius: "999px",
+                  background: accent,
+                  margin: "0 auto 12px",
+                  boxShadow: `0 0 14px ${accent}55`,
+                }}
+              />
               <p
                 style={{
                   color: "#fff",
                   fontWeight: 800,
-                  fontSize: "22px",
-                  margin: 0,
+                  fontSize: "24px",
+                  margin: "0 0 6px",
                   letterSpacing: "-0.02em",
                 }}
               >
@@ -937,15 +1217,26 @@ export function ProfileScreen({
               </p>
               <p
                 style={{
-                  color: "rgba(255,255,255,0.45)",
-                  fontSize: "11px",
+                  color: "#fff",
+                  fontSize: "12px",
+                  margin: "0 0 2px",
+                  letterSpacing: "0.04em",
+                  fontWeight: 700,
+                }}
+              >
+                {label}
+              </p>
+              <p
+                style={{
+                  color: "rgba(255,255,255,0.42)",
+                  fontSize: "10px",
                   margin: 0,
-                  letterSpacing: "0.08em",
+                  letterSpacing: "0.12em",
                   textTransform: "uppercase",
                   fontWeight: 600,
                 }}
               >
-                {label}
+                {sublabel}
               </p>
             </div>
           ))}
@@ -956,14 +1247,15 @@ export function ProfileScreen({
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr 1fr",
-            background: "rgba(255,255,255,0.03)",
+            background:
+              "linear-gradient(180deg, rgba(24,29,24,0.98), rgba(17,21,17,0.98))",
             borderRadius: "999px",
             padding: "5px",
             marginTop: "30px",
             marginBottom: "20px",
-            border: "none",
+            border: "1px solid rgba(255,255,255,0.06)",
             boxShadow:
-              "0 2px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
+              "0 16px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.05)",
           }}
         >
           {(["posts", "truths", "dares"] as const).map((tab) => (
@@ -998,192 +1290,292 @@ export function ProfileScreen({
 
         {/* Tab Content */}
         {activeTab === "posts" && (
-          <div>
-            {/* 3x3 Grid for Posts */}
-            <div className="profile-posts-grid">
-              {sortedPosts.slice(0, 9).map((post) => (
-                <div
-                  key={post.id}
+          <div
+            style={{
+              padding: "20px",
+              borderRadius: "28px",
+              border: "1px solid rgba(255,255,255,0.06)",
+              background:
+                "linear-gradient(180deg, rgba(18,20,18,0.98), rgba(10,12,10,0.98))",
+              boxShadow:
+                "0 20px 56px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                marginBottom: "16px",
+              }}
+            >
+              <div>
+                <p
                   style={{
-                    width: "100%",
-                    aspectRatio: "5/6",
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                    border: "none",
-                    cursor: "pointer",
-                    position: "relative",
-                    transition: "border 0.15s ease, transform 0.15s ease",
-                    backdropFilter: "blur(10px)",
-                    background: "rgba(255,255,255,0.03)",
-                    WebkitUserSelect: "none",
-                    userSelect: "none",
-                    WebkitTapHighlightColor: "transparent",
-                    touchAction: "manipulation",
-                    pointerEvents: "auto",
-                    zIndex: 1,
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                    color: "#fff",
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    margin: "0 0 4px",
+                    letterSpacing: "-0.01em",
                   }}
                 >
-                  {/* Invisible button overlay for clicks */}
-                  <button
-                    onClick={() => {
-                      setShowPostsScreen(true);
-                    }}
-                    onMouseDown={(e) => {
-                      const parent = e.currentTarget.parentElement;
-                      if (parent) {
-                        parent.style.borderColor = "rgba(74,222,128,0.7)";
-                        parent.style.transform = "scale(0.98)";
-                      }
-                    }}
-                    onMouseUp={(e) => {
-                      const parent = e.currentTarget.parentElement;
-                      if (parent) {
-                        parent.style.borderColor = "rgba(255,255,255,0.08)";
-                        parent.style.transform = "scale(1)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      const parent = e.currentTarget.parentElement;
-                      if (parent) {
-                        parent.style.borderColor = "rgba(255,255,255,0.08)";
-                        parent.style.transform = "scale(1)";
-                      }
-                    }}
+                  Post Grid
+                </p>
+                <p
+                  style={{
+                    color: "rgba(255,255,255,0.42)",
+                    fontSize: "12px",
+                    margin: 0,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    fontWeight: 600,
+                  }}
+                >
+                  {sortedPosts.length} published moments
+                </p>
+              </div>
+              {sortedPosts.length > 0 && (
+                <button
+                  onClick={() => setShowPostsScreen(true)}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(255,255,255,0.03)",
+                    color: "#fff",
+                    padding: "10px 14px",
+                    borderRadius: "999px",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  View All
+                </button>
+              )}
+            </div>
+            {sortedPosts.length === 0 ? (
+              <div
+                style={{
+                  minHeight: "220px",
+                  borderRadius: "22px",
+                  border: "1px dashed rgba(255,255,255,0.12)",
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                  padding: "28px",
+                }}
+              >
+                <div>
+                  <p
                     style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      zIndex: 2,
-                      padding: 0,
-                      margin: 0,
-                    }}
-                  />
-                  {post.media ? (
-                    <img
-                      src={post.media.url}
-                      alt="Post"
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        borderRadius: "12px",
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        background:
-                          "linear-gradient(135deg, rgba(74,222,128,0.1), rgba(34,197,94,0.05))",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "8px",
-                        textAlign: "center",
-                        borderRadius: "12px",
-                      }}
-                    >
-                      <p
-                        style={{
-                          color: "rgba(255,255,255,0.6)",
-                          fontSize: "11px",
-                          lineHeight: "1.4",
-                          margin: 0,
-                        }}
-                      >
-                        {post.content.slice(0, 40)}
-                        {post.content.length > 40 ? "..." : ""}
-                      </p>
-                    </div>
-                  )}
-                  {/* Dark overlay with stats on each grid item */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      background:
-                        "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)",
-                      display: "flex",
-                      alignItems: "flex-end",
-                      padding: "8px",
-                      opacity: 0,
-                      transition: "opacity 0.2s ease",
-                      borderRadius: "12px",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.opacity = "1";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.opacity = "0";
+                      color: "#fff",
+                      fontSize: "15px",
+                      fontWeight: 700,
+                      margin: "0 0 6px",
                     }}
                   >
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <span
+                    No posts yet
+                  </p>
+                  <p
+                    style={{
+                      color: "rgba(255,255,255,0.42)",
+                      fontSize: "13px",
+                      margin: 0,
+                    }}
+                  >
+                    Your photo and video moments will appear here in a clean
+                    grid.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="profile-posts-grid">
+                {sortedPosts.slice(0, 4).map((post) => (
+                  <div
+                    key={post.id}
+                    style={{
+                      width: "100%",
+                      aspectRatio: "1/1",
+                      borderRadius: "16px",
+                      overflow: "hidden",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      cursor: "pointer",
+                      position: "relative",
+                      transition: "all 0.2s cubic-bezier(0.32, 0.72, 0, 1)",
+                      backdropFilter: "blur(10px)",
+                      background: "rgba(20,20,20,0.95)",
+                      WebkitUserSelect: "none",
+                      userSelect: "none",
+                      WebkitTapHighlightColor: "transparent",
+                      touchAction: "manipulation",
+                      zIndex: 1,
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        setShowPostsScreen(true);
+                      }}
+                      onMouseDown={(e) => {
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          parent.style.borderColor = "rgba(74,222,128,0.7)";
+                          parent.style.transform = "scale(0.98)";
+                        }
+                      }}
+                      onMouseUp={(e) => {
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          parent.style.borderColor = "rgba(255,255,255,0.08)";
+                          parent.style.transform = "scale(1)";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          parent.style.borderColor = "rgba(255,255,255,0.08)";
+                          parent.style.transform = "scale(1)";
+                        }
+                      }}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        zIndex: 2,
+                        padding: 0,
+                        margin: 0,
+                      }}
+                    />
+                    {post.media ? (
+                      <img
+                        src={post.media.url}
+                        alt="Post"
                         style={{
-                          color: "#fff",
-                          fontSize: "11px",
-                          fontWeight: 700,
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          borderRadius: "16px",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          background:
+                            "linear-gradient(135deg, rgba(74,222,128,0.15), rgba(34,197,94,0.08))",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "12px",
+                          textAlign: "center",
+                          borderRadius: "16px",
                         }}
                       >
-                        ♥ {Object.keys(post.likesByUser || {}).length}
-                      </span>
-                      <span
-                        style={{
-                          color: "#fff",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                        }}
-                      >
-                        💬 {post.comments_count || 0}
-                      </span>
-                    </div>
-                  </div>
-
-                  {post.media && post.media.type === "video" && (
+                        <p
+                          style={{
+                            color: "rgba(255,255,255,0.6)",
+                            fontSize: "11px",
+                            lineHeight: "1.4",
+                            margin: 0,
+                          }}
+                        >
+                          {post.content.slice(0, 40)}
+                          {post.content.length > 40 ? "..." : ""}
+                        </p>
+                      </div>
+                    )}
+                    {/* Dark overlay with stats on each grid item */}
                     <div
                       style={{
                         position: "absolute",
-                        bottom: "0",
-                        left: "0",
-                        right: "0",
+                        inset: 0,
                         background:
-                          "linear-gradient(to top, rgba(0,0,0,0.8), transparent)",
-                        padding: "10px",
+                          "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%)",
                         display: "flex",
-                        alignItems: "center",
-                        borderRadius: "0 0 12px 12px",
+                        alignItems: "flex-end",
+                        padding: "10px",
+                        opacity: 0,
+                        transition: "opacity 0.2s ease",
+                        borderRadius: "16px",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = "1";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = "0";
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "3px",
-                        }}
-                      >
-                        <Play size={10} color="#fff" strokeWidth={2} />
+                      <div style={{ display: "flex", gap: "8px" }}>
                         <span
                           style={{
                             color: "#fff",
                             fontSize: "11px",
-                            fontWeight: 600,
+                            fontWeight: 700,
                           }}
                         >
-                          {post.stats.views}
+                          ♥ {Object.keys(post.likesByUser || {}).length}
+                        </span>
+                        <span
+                          style={{
+                            color: "#fff",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          💬 {post.comments_count || 0}
                         </span>
                       </div>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
+
+                    {post.media && post.media.type === "video" && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: "0",
+                          left: "0",
+                          right: "0",
+                          background:
+                            "linear-gradient(to top, rgba(0,0,0,0.8), transparent)",
+                          padding: "10px",
+                          display: "flex",
+                          alignItems: "center",
+                          borderRadius: "0 0 20px 20px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "3px",
+                          }}
+                        >
+                          <Play size={10} color="#fff" strokeWidth={2} />
+                          <span
+                            style={{
+                              color: "#fff",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {post.stats.views}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1208,6 +1600,8 @@ export function ProfileScreen({
                     borderTopColor: "#60a5fa",
                     borderRadius: "50%",
                     animation: "spin 0.8s linear infinite",
+                    willChange: "transform",
+                    transformStyle: "preserve-3d",
                   }}
                 />
                 <span
@@ -1220,7 +1614,7 @@ export function ProfileScreen({
                   Loading truths...
                 </span>
               </div>
-            ) : truthPosts.length === 0 ? (
+            ) : userTruthPosts.length === 0 ? (
               <div style={{ padding: "64px 24px", textAlign: "center" }}>
                 <MessageSquare
                   size={36}
@@ -1244,7 +1638,7 @@ export function ProfileScreen({
                     margin: 0,
                   }}
                 >
-                  Truths will appear here
+                  Truths you take part in will appear here
                 </p>
               </div>
             ) : (
@@ -1255,7 +1649,7 @@ export function ProfileScreen({
                   gap: "22px",
                 }}
               >
-                {truthPosts.map((truth, index) => {
+                {userTruthPosts.map((truth, index) => {
                   const badge =
                     truth.state === "APPROVED"
                       ? { label: "Approved", color: "#4ade80" }
@@ -1501,6 +1895,8 @@ export function ProfileScreen({
                     borderTopColor: "#4ade80",
                     borderRadius: "50%",
                     animation: "spin 0.8s linear infinite",
+                    willChange: "transform",
+                    transformStyle: "preserve-3d",
                   }}
                 />
                 <span
@@ -1513,7 +1909,7 @@ export function ProfileScreen({
                   Loading dares...
                 </span>
               </div>
-            ) : darePosts.length === 0 ? (
+            ) : userDarePosts.length === 0 ? (
               <div style={{ padding: "64px 24px", textAlign: "center" }}>
                 <Target
                   size={36}
@@ -1537,7 +1933,7 @@ export function ProfileScreen({
                     margin: 0,
                   }}
                 >
-                  Dares will appear here
+                  Dares you take part in will appear here
                 </p>
               </div>
             ) : (
@@ -1548,7 +1944,7 @@ export function ProfileScreen({
                   gap: "22px",
                 }}
               >
-                {darePosts.map((dare, index) => {
+                {userDarePosts.map((dare, index) => {
                   const badge =
                     dare.state === "ACCEPTED_REAL"
                       ? { label: "Completed", color: "#4ade80" }
@@ -1777,10 +2173,9 @@ export function ProfileScreen({
           </div>
         )}
 
-        {/* Logout */}
+        {/* Logout button */}
         <button
           onClick={handleLogout}
-          disabled={isLoggingOut}
           style={{
             width: "100%",
             display: "flex",
@@ -1791,19 +2186,15 @@ export function ProfileScreen({
             borderRadius: "0",
             border: "none",
             background: "transparent",
-            color: isLoggingOut
-              ? "rgba(239,68,68,0.5)"
-              : "rgba(255,255,255,0.25)",
-            cursor: isLoggingOut ? "not-allowed" : "pointer",
+            color: "rgba(255,255,255,0.25)",
+            cursor: "pointer",
             fontSize: "13px",
             fontWeight: 500,
             marginTop: "8px",
             transition: "all 0.2s",
           }}
           onMouseEnter={(e) => {
-            if (!isLoggingOut) {
-              (e.currentTarget as HTMLButtonElement).style.color = "#ef4444";
-            }
+            (e.currentTarget as HTMLButtonElement).style.color = "#ef4444";
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLButtonElement).style.color =
@@ -1811,7 +2202,7 @@ export function ProfileScreen({
           }}
         >
           <LogOut size={14} />
-          <span>{isLoggingOut ? "Logging out..." : "Logout"}</span>
+          <span>Logout</span>
         </button>
       </div>
 
@@ -1824,7 +2215,7 @@ export function ProfileScreen({
             left: 0,
             right: 0,
             bottom: 0,
-            zIndex: 9999,
+            zIndex: 1000,
             backgroundColor: "#0a0f0a",
           }}
         >
@@ -1844,7 +2235,9 @@ export function ProfileScreen({
             left: 0,
             right: 0,
             bottom: 0,
-            zIndex: 9999,
+            /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - Reduce zIndex to prevent blocking */
+            /* DISABLED: zIndex: 9999, */
+            zIndex: 1000,
             backgroundColor: "#0a0a0a",
           }}
         >

@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { ref, onValue, get, set, onDisconnect, push } from "firebase/database";
 import { friendsService } from "./friends.service";
+import { ghostModeService } from "./ghost-mode.service";
 import {
   getCachedResolvedUserProfile,
   primeResolvedUserProfile,
@@ -47,6 +48,8 @@ export interface Conversation {
   last_message_at?: string;
   last_message_content?: string;
   unread_count_by_user?: Record<string, number>;
+  cleared_at?: string | null;
+  cleared_at_by_user?: Record<string, string | null>;
 }
 
 export interface MessageEvent {
@@ -148,6 +151,15 @@ class MessagingService {
   // In-memory profile cache to avoid repeated Firestore reads for the same
   // user. Entries expire after 5 minutes.
   private profileCache = new Map<string, any>();
+
+  private async isGhostModeActive(userId: string): Promise<boolean> {
+    try {
+      return await ghostModeService.shouldSuppressAlerts(userId);
+    } catch (error) {
+      console.error("❌ isGhostModeActive:", error);
+      return false;
+    }
+  }
 
   private async getCachedUserProfile(userId: string): Promise<any> {
     const sharedCachedProfile = getCachedResolvedUserProfile(userId);
@@ -276,6 +288,12 @@ class MessagingService {
         this.getLastMessage(conversationId),
         this.getConversationUnreadCount(conversation, userId),
       ]);
+      const effectiveClearedAt =
+        conversation.cleared_at_by_user?.[userId] ?? conversation.cleared_at ?? null;
+      const lastMessageVisible =
+        !effectiveClearedAt ||
+        !lastMessage ||
+        this.toMillis(lastMessage.created_at) > this.toMillis(effectiveClearedAt);
 
       let typingStatus = null;
       try {
@@ -286,6 +304,7 @@ class MessagingService {
 
       return {
         ...conversation,
+        cleared_at: effectiveClearedAt,
         other_user: {
           id: otherUser.id,
           user_id: otherUser.user_id || otherUser.id,
@@ -293,8 +312,8 @@ class MessagingService {
           display_name: otherUser.display_name,
           avatar_url: otherUser.avatar_url,
         },
-        last_message: lastMessage,
-        unread_count: unreadCount,
+        last_message: lastMessageVisible ? lastMessage : undefined,
+        unread_count: lastMessageVisible ? unreadCount : 0,
         is_online: typingStatus?.is_online || false,
         is_typing: typingStatus?.is_typing || false,
         typing_speed: typingStatus?.typing_speed,
@@ -772,6 +791,26 @@ class MessagingService {
         });
       }
 
+      otherUserIds.forEach((id) => {
+        const sharedProfile = getCachedResolvedUserProfile(id);
+        if (!sharedProfile) return;
+
+        const existingProfile = profileMap.get(id);
+        const existingLooksFallback =
+          !existingProfile?.username ||
+          existingProfile.username === `user_${id.slice(-6)}` ||
+          existingProfile.username === "someone";
+
+        if (
+          existingLooksFallback ||
+          existingProfile?.username !== sharedProfile.username ||
+          existingProfile?.display_name !== sharedProfile.display_name ||
+          existingProfile?.avatar_url !== sharedProfile.avatar_url
+        ) {
+          profileMap.set(id, sharedProfile);
+        }
+      });
+
       // Build result directly from raw doc data — zero extra Firestore reads
       const result: ConversationWithUser[] = entries.map(([id, data]) => {
         const otherUserId =
@@ -783,6 +822,20 @@ class MessagingService {
           return cachedConversation.conversation;
         }
 
+        const effectiveClearedAt =
+          data.cleared_at_by_user?.[userId]?.toDate?.().toISOString() ??
+          data.cleared_at_by_user?.[userId] ??
+          data.cleared_at?.toDate?.().toISOString() ??
+          data.cleared_at ??
+          null;
+        const lastMessageAt =
+          data.last_message_at?.toDate?.().toISOString() ??
+          data.last_message_at ??
+          "";
+        const lastMessageVisible =
+          !effectiveClearedAt ||
+          this.toMillis(lastMessageAt) > this.toMillis(effectiveClearedAt);
+
         const conversation: ConversationWithUser = {
           id,
           user1_id: data.user1_id,
@@ -791,10 +844,11 @@ class MessagingService {
             data.created_at?.toDate?.().toISOString() ?? data.created_at ?? "",
           updated_at:
             data.updated_at?.toDate?.().toISOString() ?? data.updated_at ?? "",
-          last_message_at:
-            data.last_message_at?.toDate?.().toISOString() ??
-            data.last_message_at,
-          last_message_content: data.last_message_content ?? "",
+          last_message_at: lastMessageVisible ? lastMessageAt : "",
+          last_message_content: lastMessageVisible
+            ? data.last_message_content ?? ""
+            : "",
+          cleared_at: effectiveClearedAt,
           other_user: {
             id: p.id,
             user_id: p.user_id || p.id,
@@ -802,7 +856,7 @@ class MessagingService {
             display_name: p.display_name ?? null,
             avatar_url: p.avatar_url ?? null,
           },
-          unread_count: unreadCounts.get(id) ?? 0,
+          unread_count: lastMessageVisible ? (unreadCounts.get(id) ?? 0) : 0,
           is_online: false,
           is_typing: false,
         };
@@ -869,23 +923,36 @@ class MessagingService {
     isTyping: boolean,
     typingSpeed?: "slow" | "normal" | "fast" | "furious",
   ): void {
-    try {
-      const typingRef = ref(realtimeDb, `typing/${conversationId}/${userId}`);
-      set(typingRef, {
-        is_typing: isTyping,
-        typing_speed: typingSpeed || "normal",
-        last_seen: new Date().toISOString(),
-      });
-      if (isTyping) {
-        onDisconnect(typingRef).set({
-          is_typing: false,
-          typing_speed: "normal",
+    void (async () => {
+      try {
+        const typingRef = ref(realtimeDb, `typing/${conversationId}/${userId}`);
+        const ghostModeActive = await this.isGhostModeActive(userId);
+
+        if (ghostModeActive) {
+          await set(typingRef, {
+            is_typing: false,
+            typing_speed: "normal",
+            last_seen: new Date().toISOString(),
+          });
+          return;
+        }
+
+        await set(typingRef, {
+          is_typing: isTyping,
+          typing_speed: typingSpeed || "normal",
           last_seen: new Date().toISOString(),
         });
+        if (isTyping) {
+          await onDisconnect(typingRef).set({
+            is_typing: false,
+            typing_speed: "normal",
+            last_seen: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        console.error("❌ setTypingIndicator:", error);
       }
-    } catch (error) {
-      console.error("❌ setTypingIndicator:", error);
-    }
+    })();
   }
 
   // ── Live draft text (letter-by-letter real-time preview) ──────────────────
@@ -895,25 +962,37 @@ class MessagingService {
    * Path: drafts/{conversationId}/{userId}
    */
   setDraftText(conversationId: string, userId: string, text: string): void {
-    try {
-      const path = `drafts/${conversationId}/${userId}`;
-      console.log("[draft service] Writing to RTDB path:", path, "text:", text);
-      const draftRef = ref(realtimeDb, path);
-      set(draftRef, {
-        text,
-        updated_at: Date.now(),
-      })
-        .then(() => {
-          console.log("[draft service] Write SUCCESS to:", path);
+    void (async () => {
+      try {
+        const path = `drafts/${conversationId}/${userId}`;
+        console.log("[draft service] Writing to RTDB path:", path, "text:", text);
+        const draftRef = ref(realtimeDb, path);
+        const ghostModeActive = await this.isGhostModeActive(userId);
+
+        if (ghostModeActive) {
+          await set(draftRef, {
+            text: "",
+            updated_at: Date.now(),
+          });
+          return;
+        }
+
+        set(draftRef, {
+          text,
+          updated_at: Date.now(),
         })
-        .catch((err) => {
-          console.error("[draft service] Write FAILED:", err);
-        });
-      // Auto-clear on disconnect (tab close, network loss)
-      onDisconnect(draftRef).remove();
-    } catch (error) {
-      console.error("❌ setDraftText:", error);
-    }
+          .then(() => {
+            console.log("[draft service] Write SUCCESS to:", path);
+          })
+          .catch((err) => {
+            console.error("[draft service] Write FAILED:", err);
+          });
+        // Auto-clear on disconnect (tab close, network loss)
+        onDisconnect(draftRef).remove();
+      } catch (error) {
+        console.error("❌ setDraftText:", error);
+      }
+    })();
   }
 
   /**
@@ -1193,6 +1272,10 @@ class MessagingService {
     recipientUserId?: string,
   ): Promise<void> {
     try {
+      if (await this.isGhostModeActive(userId)) {
+        return;
+      }
+
       await this.createMessageEvent({
         conversation_id: conversationId,
         user_id: userId,
@@ -1217,6 +1300,10 @@ class MessagingService {
     recipientUserId?: string,
   ): Promise<void> {
     try {
+      if (await this.isGhostModeActive(userId)) {
+        return;
+      }
+
       const signalsRef = ref(
         realtimeDb,
         `chat_switch_signals/${conversationId}`,
@@ -1286,6 +1373,10 @@ class MessagingService {
     userId: string,
   ): Promise<void> {
     try {
+      if (await this.isGhostModeActive(userId)) {
+        return;
+      }
+
       await this.createMessageEvent({
         conversation_id: conversationId,
         user_id: userId,
@@ -1303,6 +1394,10 @@ class MessagingService {
     content: string,
   ): Promise<void> {
     try {
+      if (await this.isGhostModeActive(userId)) {
+        return;
+      }
+
       await this.createMessageEvent({
         conversation_id: conversationId,
         user_id: userId,
@@ -1321,6 +1416,10 @@ class MessagingService {
     mentionedUsername: string,
   ): Promise<void> {
     try {
+      if (await this.isGhostModeActive(userId)) {
+        return;
+      }
+
       console.log(
         "[@mention service] Writing mention doc:",
         conversationId,
@@ -1352,6 +1451,10 @@ class MessagingService {
     ignoredUserName?: string,
   ): Promise<void> {
     try {
+      if (await this.isGhostModeActive(userId)) {
+        return;
+      }
+
       console.log(
         "[@ignored service] Writing ignored event:",
         conversationId,
@@ -1554,14 +1657,33 @@ class MessagingService {
     const otherUserId =
       data.user1_id === userId ? data.user2_id : data.user1_id;
     const unreadCount = data?.unread_count_by_user?.[userId];
+    const effectiveClearedAt =
+      data?.cleared_at_by_user?.[userId] ?? data?.cleared_at;
+    const sharedProfile = getCachedResolvedUserProfile(otherUserId);
+    const profileFingerprint = [
+      sharedProfile?.username || "",
+      sharedProfile?.display_name || "",
+      sharedProfile?.avatar_url || "",
+    ].join("~");
 
     return [
       otherUserId || "",
+      profileFingerprint,
       this.normalizeCacheTimestamp(data.updated_at),
       this.normalizeCacheTimestamp(data.last_message_at),
       data.last_message_content || "",
+      this.normalizeCacheTimestamp(effectiveClearedAt),
       typeof unreadCount === "number" ? unreadCount : "fallback",
     ].join("|");
+  }
+
+  private toMillis(raw: any): number {
+    if (!raw) return 0;
+    if (typeof raw === "object" && "toDate" in raw) {
+      return raw.toDate().getTime();
+    }
+    const parsed = new Date(String(raw)).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   private getUnreadFallbackCacheKey(data: any): string {
@@ -1632,6 +1754,49 @@ class MessagingService {
     } catch (error) {
       console.error("❌ getUserProfile:", error);
       return null;
+    }
+  }
+
+  async clearMessages(
+    conversationId: string,
+    userId: string,
+    clearedAt: string,
+  ): Promise<void> {
+    try {
+      console.log(
+        `[messagingService] clearMessages called for conversation: ${conversationId}`,
+      );
+      const conversationRef = doc(db, "conversations", conversationId);
+      const conversationSnap = await getDoc(conversationRef);
+      if (conversationSnap.exists()) {
+        const conversationData = conversationSnap.data() as Conversation;
+        const unreadCountByUser = {
+          ...(conversationData.unread_count_by_user || {}),
+          [userId]: 0,
+        };
+        const clearedAtByUser = {
+          ...(conversationData.cleared_at_by_user || {}),
+          [userId]: clearedAt,
+        };
+
+        await updateDoc(conversationRef, {
+          unread_count_by_user: unreadCountByUser,
+          cleared_at_by_user: clearedAtByUser,
+          updated_at: serverTimestamp(),
+        });
+      }
+
+      console.log(
+        `[messagingService] Stored personal clear timestamp for user ${userId} in conversation ${conversationId}`,
+      );
+      const messagesToDelete = { length: 0 };
+
+      console.log(
+        `✅ Cleared ${messagesToDelete.length} messages from conversation ${conversationId}`,
+      );
+    } catch (error) {
+      console.error("❌ clearMessages:", error);
+      throw error;
     }
   }
 }

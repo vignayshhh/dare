@@ -16,7 +16,6 @@ import {
   Timestamp,
   documentId,
 } from "firebase/firestore";
-import { redisCache } from "@/services/redisCache.server";
 import { aggregatedCounters } from "@/services/aggregatedCounters";
 
 export interface PostComment {
@@ -52,44 +51,35 @@ class CommentService {
   private readonly enableAggregatedCounters = true; // Set to true to enable
   private authorCache = new Map<string, CommentWithAuthor["author"] | null>();
 
+  // SECURITY FIX (§1.6): Comment creation runs through the server API
+  // route. Firestore rules deny client writes to `post_comments` so
+  // this is the only path. The Cloud Function trigger keeps
+  // `posts.comments_count` in sync, so the old manual increment is
+  // removed. Realtime listeners (`onSnapshot` elsewhere in this file)
+  // pick the new comment up instantly.
   async createComment(request: CreateCommentRequest): Promise<PostComment> {
     try {
-      const commentRef = doc(collection(db, "post_comments"));
-      const commentData: Record<string, any> = {
+      const { apiFetch } = await import("@/lib/apiClient");
+      const res = await apiFetch<{ ok: boolean; id: string }>(
+        `/api/posts/${encodeURIComponent(request.post_id)}/comment`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            content: request.text,
+            parent_id: request.parent_id ?? null,
+          }),
+        },
+      );
+      const now = new Date().toISOString();
+      return {
+        id: res.id,
         post_id: request.post_id,
         user_id: request.user_id,
         text: request.text,
         likes: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      if (request.parent_id) {
-        commentData.parent_id = request.parent_id;
-      }
-
-      await setDoc(commentRef, commentData);
-
-      // Keep denormalized count in sync on the post document
-      try {
-        await updateDoc(doc(db, "posts", request.post_id), {
-          comments_count: increment(1),
-        });
-      } catch {
-        /* non-fatal — count sync failure must not block comment creation */
-      }
-
-      // Also update aggregated counter if enabled
-      if (this.enableAggregatedCounters) {
-        aggregatedCounters
-          .incrementCounter(request.post_id, "comments")
-          .catch(() => {});
-      }
-
-      // Don't invalidate Redis cache on comment creation - this causes comments to disappear
-      // The real-time listener will update the engagement data naturally
-
-      return { id: commentRef.id, ...commentData } as PostComment;
+        created_at: now,
+        updated_at: now,
+      } as PostComment;
     } catch (error) {
       console.error("Error creating comment:", error);
       throw error;
@@ -141,12 +131,7 @@ class CommentService {
         const { getStoredAvatar } = useAvatarStore.getState();
         const storedAvatar = getStoredAvatar(userId);
 
-        const { DirectAvatarSync } = require("../../utils/directAvatarSync");
-        const directAvatar = await DirectAvatarSync.getDirectAvatar(userId);
-
-        if (directAvatar && directAvatar !== avatarUrl) {
-          avatarUrl = directAvatar;
-        } else if (storedAvatar && storedAvatar !== avatarUrl) {
+        if (storedAvatar && storedAvatar !== avatarUrl) {
           avatarUrl = storedAvatar;
         }
       } catch (error) {

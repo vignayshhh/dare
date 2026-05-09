@@ -1,6 +1,7 @@
 # Production Deployment Guide
 
 ## Overview
+
 This guide covers deploying the DARE app to production with all mock data removed and full Firebase integration.
 
 ## Prerequisites
@@ -47,6 +48,7 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
 ### 3. Security Rules
 
 #### Firestore Rules
+
 ```javascript
 rules_version = '2';
 service cloud.firestore {
@@ -55,14 +57,14 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-    
+
     // Dares and truths with proper access control
     match /dares/{dareId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth != null;
     }
-    
+
     match /truths/{truthId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
@@ -73,6 +75,7 @@ service cloud.firestore {
 ```
 
 #### Storage Rules
+
 ```javascript
 rules_version = '2';
 service firebase.storage {
@@ -106,9 +109,87 @@ npm run build:production
 # Deploy to Firebase Hosting
 firebase deploy --only hosting
 
-# Or deploy to Vercel/Netlify
+# Or deploy to Vercel
 vercel --prod
 ```
+
+## Vercel Deployment
+
+### Prerequisites
+
+1. Install Vercel CLI:
+
+```bash
+npm install -g vercel
+```
+
+2. Login to Vercel:
+
+```bash
+vercel login
+```
+
+### Environment Variables Setup
+
+Set your environment variables in Vercel:
+
+```bash
+# Set Firebase configuration
+vercel env add NEXT_PUBLIC_FIREBASE_API_KEY production
+vercel env add NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN production
+vercel env add NEXT_PUBLIC_FIREBASE_PROJECT_ID production
+vercel env add NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET production
+vercel env add NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID production
+vercel env add NEXT_PUBLIC_FIREBASE_APP_ID production
+vercel env add NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID production
+vercel env add NEXT_PUBLIC_FIREBASE_DATABASE_URL production
+
+# Set server-side secrets
+vercel env add FIREBASE_SERVICE_ACCOUNT_JSON production
+vercel env add UPSTASH_REDIS_REST_URL production
+vercel env add UPSTASH_REDIS_REST_TOKEN production
+
+# Optional: Add other environment variables from .env.production.example
+```
+
+### Deployment Commands
+
+```bash
+# Deploy to preview environment
+vercel
+
+# Deploy to production
+vercel --prod
+
+# Or use the npm script
+npm run deploy:vercel
+```
+
+### Vercel Configuration
+
+The `vercel.json` file includes:
+
+- Security headers for all routes
+- CORS headers for API routes
+- Production environment variables
+- Regional deployment (US East)
+- API route rewrites
+
+### Firebase Functions Deployment
+
+Note that Firebase functions in the `functions/` directory are deployed separately:
+
+```bash
+cd functions
+npm run deploy
+```
+
+These functions handle:
+
+- Counter aggregation
+- Content moderation
+- Email PII redaction
+- Rate limiting
 
 ## Production Features Enabled
 
@@ -182,6 +263,7 @@ If issues occur:
 ## Support
 
 For production issues:
+
 1. Check Firebase console logs
 2. Review browser console errors
 3. Verify environment variables

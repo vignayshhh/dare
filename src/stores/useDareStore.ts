@@ -8,7 +8,6 @@ import {
 } from "@/middleware/services/dare.service";
 import { friendsService } from "@/middleware/services/friends.service";
 import { alertService } from "@/middleware/services/service-factory";
-import { useGhostModeStore } from "./useGhostModeStore";
 
 interface DareStore {
   // State
@@ -420,12 +419,6 @@ export const useDareStore = create<DareStore>((set, get) => ({
       const newState =
         decision === "ACCEPT" ? "ACCEPTED_REAL" : "REJECTED_FAKE";
 
-      // Get the dare to find the receiver ID for ghost mode activation
-      const { sentDares, receivedDares } = get();
-      const dare = [...sentDares, ...receivedDares].find(
-        (d) => d.id === dareId,
-      );
-
       set((state) => ({
         sentDares: state.sentDares.map((dare) =>
           dare.id === dareId
@@ -446,19 +439,6 @@ export const useDareStore = create<DareStore>((set, get) => ({
             : dare,
         ),
       }));
-
-      // Activate ghost mode for receiver if dare was accepted
-      if (decision === "ACCEPT" && dare) {
-        const receiverId = dare.receiver?.id;
-        if (receiverId) {
-          console.log(
-            `[@ghostmode] Activating ghost mode for receiver ${receiverId} after dare approval`,
-          );
-          await useGhostModeStore
-            .getState()
-            .activateGhostMode(receiverId, dareId, 15);
-        }
-      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to review dare";

@@ -66,6 +66,7 @@ interface PostsScreenProps {
   userName?: string;
   targetUserId?: string;
   initialPostId?: string;
+  initialCommentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +75,7 @@ interface PostsScreenProps {
 
 function HeartBurstLayer({ bursts }: { bursts: HeartBurst[] }) {
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
+    <div className="absolute inset-0 overflow-hidden z-10">
       <style>{`
         @keyframes hbFloat {
           0%   { opacity: 0;    transform: scale(0.15) translateY(0px) rotate(-8deg); }
@@ -107,7 +108,8 @@ function HeartBurstLayer({ bursts }: { bursts: HeartBurst[] }) {
               top: burst.y - size / 2,
               width: size,
               height: size,
-              pointerEvents: "none",
+              /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+              /* DISABLED: pointerEvents: "none", */
             }}
           >
             {/* Glow halo */}
@@ -243,6 +245,7 @@ export function PostsScreen({
   userName,
   targetUserId,
   initialPostId,
+  initialCommentId,
 }: PostsScreenProps) {
   const { user } = useAuthStore();
   const userProfiles = useProfileDataStore((s) => s.userProfiles);
@@ -333,6 +336,7 @@ export function PostsScreen({
   const [friends, setFriends] = useState<any[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
   const postRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const consumedInitialCommentLinkRef = useRef<string | null>(null);
 
   // ── Heart burst state — EXACT copy from FeedScreen ──
   const [bursts, setBursts] = useState<Record<string, HeartBurst[]>>({});
@@ -424,6 +428,20 @@ export function PostsScreen({
 
     return () => window.clearTimeout(timer);
   }, [initialPostId, optimizedPosts]);
+
+  useEffect(() => {
+    if (!initialPostId || !initialCommentId) return;
+    if (!optimizedPosts.some((post) => post.id === initialPostId)) return;
+    const linkKey = `${initialPostId}:${initialCommentId}`;
+    if (consumedInitialCommentLinkRef.current === linkKey) return;
+    consumedInitialCommentLinkRef.current = linkKey;
+
+    const timer = window.setTimeout(() => {
+      setShowCommentsModal(initialPostId);
+    }, 260);
+
+    return () => window.clearTimeout(timer);
+  }, [initialCommentId, initialPostId, optimizedPosts]);
 
   const openCommentsModal = useCallback((postId: string) => {
     setShowCommentsModal(postId);
@@ -585,7 +603,7 @@ export function PostsScreen({
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-8">
         <div className="px-2 py-6 space-y-5">
           {optimizedPosts.length === 0 ? (
             <div className="text-center py-12">
@@ -654,7 +672,7 @@ export function PostsScreen({
                     <div className="px-2">
                       <div
                         id={`media-${post.id}`}
-                        className="w-full relative select-none cursor-pointer rounded-3xl overflow-hidden"
+                        className="w-full relative cursor-pointer rounded-3xl overflow-hidden" /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - select-none removed */
                         onClick={(e) => handleMediaTap(post.id, e)}
                       >
                         {post.media.type === "image" ? (
@@ -663,7 +681,8 @@ export function PostsScreen({
                             alt="Post media"
                             className="w-full object-cover"
                             style={{ height: "520px" }}
-                            draggable={false}
+                            /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - draggable might block touch */
+                            /* DISABLED: draggable={false} */
                             loading="lazy"
                             decoding="async"
                             onError={(e) => {

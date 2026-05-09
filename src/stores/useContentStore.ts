@@ -19,13 +19,19 @@ interface ContentState {
   darePosts: DarePost[];
   loadingTruth: boolean;
   loadingDares: boolean;
+  hasLoadedTruth: boolean;
+  hasLoadedDares: boolean;
+  truthPostsUserId: string | null;
+  darePostsUserId: string | null;
+  truthPostsScope: "feed" | "profile" | null;
+  darePostsScope: "feed" | "profile" | null;
   refreshing: boolean;
   truthError: string | null;
   dareError: string | null;
   hasMoreTruth: boolean;
   hasMoreDares: boolean;
-  loadTruthPosts: (refresh?: boolean) => Promise<void>;
-  loadDarePosts: (refresh?: boolean) => Promise<void>;
+  loadTruthPosts: (refresh?: boolean, scope?: "feed" | "profile") => Promise<void>;
+  loadDarePosts: (refresh?: boolean, scope?: "feed" | "profile") => Promise<void>;
   addDarePost: (dare: DarePost) => void;
   addTruthPost: (truth: TruthPost) => void;
   voteOnDare: (dareId: string, vote: "real" | "fake") => Promise<void>;
@@ -223,6 +229,12 @@ export const useContentStore = create<ContentState>((set, get) => ({
   darePosts: [],
   loadingTruth: false,
   loadingDares: false,
+  hasLoadedTruth: false,
+  hasLoadedDares: false,
+  truthPostsUserId: null,
+  darePostsUserId: null,
+  truthPostsScope: null,
+  darePostsScope: null,
   refreshing: false,
   truthError: null,
   dareError: null,
@@ -233,17 +245,20 @@ export const useContentStore = create<ContentState>((set, get) => ({
   // getUserTruths returns ALL truths the user is involved in (sent + received).
   // This is the correct source for the Truth feed — friends' truths involving
   // the current user show up here naturally.
-  loadTruthPosts: async (refresh = false) => {
+  loadTruthPosts: async (refresh = false, scope = "profile") => {
     const { loadingTruth } = get();
     if (loadingTruth && !refresh) return;
+    const currentUser = useAuthStore.getState().user;
 
     set({ loadingTruth: true, truthError: null, refreshing: refresh });
 
     try {
-      const currentUser = useAuthStore.getState().user;
       if (!currentUser) throw new Error("User not authenticated");
 
-      const response = await truthService.getUserTruths(currentUser.id, "all");
+      const response =
+        scope === "feed"
+          ? await truthService.getFriendsTruths(currentUser.id)
+          : await truthService.getUserTruths(currentUser.id, "all");
 
       // getUserTruths returns { success: false } when user has no truths at all
       // — treat that as an empty list, not a hard error
@@ -255,6 +270,9 @@ export const useContentStore = create<ContentState>((set, get) => ({
         set({
           truthPosts: [],
           loadingTruth: false,
+          hasLoadedTruth: true,
+          truthPostsUserId: currentUser.id,
+          truthPostsScope: scope,
           refreshing: false,
           hasMoreTruth: false,
         });
@@ -278,6 +296,9 @@ export const useContentStore = create<ContentState>((set, get) => ({
       set({
         truthPosts,
         loadingTruth: false,
+        hasLoadedTruth: true,
+        truthPostsUserId: currentUser.id,
+        truthPostsScope: scope,
         refreshing: false,
         hasMoreTruth: truthPosts.length > 0,
       });
@@ -287,86 +308,49 @@ export const useContentStore = create<ContentState>((set, get) => ({
         truthError:
           error instanceof Error ? error.message : "Failed to load truth posts",
         loadingTruth: false, // ← always cleared — prevents infinite loading
+        hasLoadedTruth: true,
+        truthPostsUserId: currentUser?.id ?? null,
+        truthPostsScope: scope,
         refreshing: false,
       });
     }
   },
 
   // ── Load dare posts ───────────────────────────────────────────────────────
-  // Uses getFriendsDares which fetches dares involving the user AND their friends.
-  // Falls back to getDaresForUser (own sent/received) if getFriendsDares fails
-  // or returns empty, so accounts with no friends still see their own cards.
-  loadDarePosts: async (refresh = false) => {
+  // For profile screen: only load dares the user is involved in (sent + received).
+  // Uses getDaresForUser which returns the user's own sent/received dares.
+  loadDarePosts: async (refresh = false, scope = "profile") => {
     const { loadingDares } = get();
     if (loadingDares && !refresh) return;
+    const currentUser = useAuthStore.getState().user;
 
     set({ loadingDares: true, dareError: null, refreshing: refresh });
 
     try {
-      const currentUser = useAuthStore.getState().user;
       if (!currentUser) throw new Error("User not authenticated");
 
-      // Primary: friends' dares (the intended feature)
-      let rawDares: any[] = [];
-      try {
-        const friendsResponse = await dareService.getFriendsDares(
-          currentUser.id,
-        );
-        if (
-          friendsResponse.success &&
-          friendsResponse.dares &&
-          friendsResponse.dares.length > 0
-        ) {
-          rawDares = friendsResponse.dares;
-          console.log(
-            "[useContentStore] getFriendsDares returned",
-            rawDares.length,
-            "dares",
-          );
-        }
-      } catch (e) {
-        console.warn(
-          "[useContentStore] getFriendsDares failed, trying fallback:",
-          e,
-        );
-      }
+      // Only load dares the current user is involved in (as challenger or receiver)
+      const response =
+        scope === "feed"
+          ? await dareService.getFriendsDares(currentUser.id)
+          : await dareService.getDaresForUser(currentUser.id);
 
-      // Fallback: own sent + received dares (for accounts with no friends yet,
-      // or when getFriendsDares fails)
-      if (rawDares.length === 0) {
-        try {
-          const ownResponse = await dareService.getDaresForUser(currentUser.id);
-          if (
-            ownResponse.success &&
-            ownResponse.dares &&
-            ownResponse.dares.length > 0
-          ) {
-            rawDares = ownResponse.dares;
-            console.log(
-              "[useContentStore] getDaresForUser fallback returned",
-              rawDares.length,
-              "dares",
-            );
-          }
-        } catch (e) {
-          console.warn(
-            "[useContentStore] getDaresForUser fallback also failed:",
-            e,
-          );
-        }
-      }
-
-      if (rawDares.length === 0) {
+      if (!response.success || !response.dares || response.dares.length === 0) {
         set({
           darePosts: [],
           loadingDares: false,
+          hasLoadedDares: true,
+          darePostsUserId: currentUser.id,
+          darePostsScope: scope,
           refreshing: false,
           hasMoreDares: false,
         });
         return;
       }
 
-      // Deduplicate by ID (friends' dares + own dares may overlap)
+      const rawDares = response.dares;
+
+      // Deduplicate by ID
       const seen = new Set<string>();
       const uniqueDares = rawDares.filter((d: any) => {
         if (!d?.id || seen.has(d.id)) return false;
@@ -387,6 +371,9 @@ export const useContentStore = create<ContentState>((set, get) => ({
       set({
         darePosts,
         loadingDares: false,
+        hasLoadedDares: true,
+        darePostsUserId: currentUser.id,
+        darePostsScope: scope,
         refreshing: false,
         hasMoreDares: darePosts.length > 0,
       });
@@ -395,7 +382,10 @@ export const useContentStore = create<ContentState>((set, get) => ({
       set({
         dareError:
           error instanceof Error ? error.message : "Failed to load dare posts",
-        loadingDares: false, // ← always cleared — prevents infinite loading
+        loadingDares: false,
+        hasLoadedDares: true,
+        darePostsUserId: currentUser?.id ?? null,
+        darePostsScope: scope,
         refreshing: false,
       });
     }

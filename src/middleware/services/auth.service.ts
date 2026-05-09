@@ -9,6 +9,7 @@ import {
   isSignInWithEmailLink,
   setPersistence,
   browserLocalPersistence,
+  inMemoryPersistence,
 } from "firebase/auth";
 import {
   doc,
@@ -110,17 +111,26 @@ class AuthService {
     }
 
     firebaseOnAuthStateChanged(auth, async (user) => {
+      console.log(
+        "🔐 Auth state changed:",
+        user ? `User: ${user.email}` : "No user",
+      );
       if (user) {
         this.updateAuthState({ loading: true, error: null });
 
         try {
           const profile = await this.getUserProfile(user.uid);
+          console.log("✅ User profile loaded:", profile?.username);
           this.updateAuthState({
             user: profile,
             loading: false,
             error: null,
           });
         } catch (error) {
+          console.log(
+            "⚠️ Profile not found, creating new profile for:",
+            user.email,
+          );
           // SECURITY FIX: Create profile with consent set to FALSE by default.
           // User must complete explicit consent flow before accessing the app.
           // This prevents silent consent bypass while not breaking the auth flow.
@@ -142,6 +152,7 @@ class AuthService {
           });
 
           const profile = await this.getUserProfile(user.uid);
+          console.log("✅ New profile created:", profile?.username);
           this.updateAuthState({
             user: profile,
             loading: false,
@@ -149,6 +160,7 @@ class AuthService {
           });
         }
       } else {
+        console.log("🚪 User signed out, clearing auth state");
         this.updateAuthState({
           user: null,
           loading: false,
@@ -427,18 +439,105 @@ class AuthService {
   async signOut(): Promise<void> {
     // Check if Firebase Auth is available
     if (!auth) {
+      console.log(
+        "🚪 Sign out called but Firebase Auth not available (mock mode)",
+      );
       this.updateAuthState({
         user: null,
         loading: false,
         error: null,
       });
+      console.log("✅ Auth state cleared");
+
+      // Clear browser storage to prevent Firebase from re-authenticating
+      // This is especially important on mobile where persistence can cause issues
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.clear();
+          sessionStorage.clear();
+          console.log("✅ Browser storage cleared");
+
+          // Also clear IndexedDB where Firebase stores auth persistence
+          const databases = await indexedDB.databases();
+          for (const db of databases) {
+            if (db.name && db.name.includes("firebase")) {
+              indexedDB.deleteDatabase(db.name);
+              console.log(`✅ Deleted IndexedDB: ${db.name}`);
+            }
+          }
+        }
+      } catch (storageError) {
+        console.error("⚠️ Failed to clear browser storage:", storageError);
+      }
       return;
     }
 
     try {
+      console.log("🚪 Calling Firebase signOut...");
       await firebaseSignOut(auth);
+      console.log("✅ Firebase signOut successful");
+
+      // Force clear auth state immediately after Firebase signOut
+      // This prevents race conditions where Firebase might re-authenticate
+      this.updateAuthState({
+        user: null,
+        loading: false,
+        error: null,
+      });
+      console.log("✅ Auth state cleared");
+
+      // Clear browser storage to prevent Firebase from re-authenticating
+      // This is especially important on mobile where persistence can cause issues
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.clear();
+          sessionStorage.clear();
+          console.log("✅ Browser storage cleared");
+
+          // Also clear IndexedDB where Firebase stores auth persistence
+          const databases = await indexedDB.databases();
+          for (const db of databases) {
+            if (db.name && db.name.includes("firebase")) {
+              indexedDB.deleteDatabase(db.name);
+              console.log(`✅ Deleted IndexedDB: ${db.name}`);
+            }
+          }
+        }
+      } catch (storageError) {
+        console.error("⚠️ Failed to clear browser storage:", storageError);
+      }
     } catch (error) {
-      console.error("Sign out error:", error);
+      console.error("❌ Firebase signOut error:", error);
+      // Force clear state even if Firebase fails
+      this.updateAuthState({
+        user: null,
+        loading: false,
+        error: null,
+      });
+      console.log("✅ Auth state force-cleared due to error");
+
+      // Still try to clear storage even if signOut fails
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.clear();
+          sessionStorage.clear();
+          console.log("✅ Browser storage cleared (fallback)");
+
+          // Also clear IndexedDB where Firebase stores auth persistence
+          const databases = await indexedDB.databases();
+          for (const db of databases) {
+            if (db.name && db.name.includes("firebase")) {
+              indexedDB.deleteDatabase(db.name);
+              console.log(`✅ Deleted IndexedDB: ${db.name} (fallback)`);
+            }
+          }
+        }
+      } catch (storageError) {
+        console.error(
+          "⚠️ Failed to clear browser storage (fallback):",
+          storageError,
+        );
+      }
     }
   }
 

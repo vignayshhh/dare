@@ -45,6 +45,6 @@ export interface IStoryRepository {
   getFriendsStories(userId: string): Promise<StoryWithViewerInfo[]>; // Stories from friends only
   markStoryAsViewed(storyId: string, viewerId: string): Promise<void>;
   deleteStory(storyId: string): Promise<void>;
-  deleteExpiredStories(): Promise<void>; // Cleanup function
+  deleteExpiredStories(userId: string): Promise<void>; // Cleanup function
   isUserViewerOfStory(storyId: string, viewerId: string): Promise<boolean>;
 }

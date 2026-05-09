@@ -103,93 +103,34 @@ function rankDeckByVoteState<T extends { id: string; createdAt: unknown }>(
   return [...unvotedPosts, ...votedPosts];
 }
 
-// ─── PostAvatar — inline avatar with error handling ─────────────────────────
+// ─── PostAvatar — now uses global Avatar component for consistent avatar handling ─────────────────────────
 function PostAvatar({
   src,
   name,
   size,
   style,
   className,
+  userId,
+  username,
 }: {
   src?: string;
   name?: string;
   size: number;
   style?: React.CSSProperties;
   className?: string;
+  userId?: string;
+  username?: string;
 }) {
-  const [error, setError] = React.useState(false);
-
-  React.useEffect(() => {
-    setError(false);
-  }, [src]);
-
-  if (!src || error) {
-    if (className) {
-      return (
-        <div
-          className={className}
-          style={{
-            backgroundColor: "#4ade80",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#000",
-            fontSize: Math.max(Math.round(size * 0.38), 12),
-            fontWeight: 700,
-            ...style,
-          }}
-        >
-          {name?.charAt(0)?.toUpperCase() || "?"}
-        </div>
-      );
-    }
-    return (
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          backgroundColor: "#4ade80",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#000",
-          fontSize: Math.max(Math.round(size * 0.38), 12),
-          fontWeight: 700,
-          flexShrink: 0,
-          ...style,
-        }}
-      >
-        {name?.charAt(0)?.toUpperCase() || "?"}
-      </div>
-    );
-  }
-
-  if (className) {
-    return (
-      <img
-        src={src}
-        alt={name || ""}
-        onError={() => setError(true)}
-        className={className}
-        style={style}
-      />
-    );
-  }
-
   return (
-    <img
+    <Avatar
       src={src}
       alt={name || ""}
-      onError={() => setError(true)}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        objectFit: "cover" as const,
-        flexShrink: 0,
-        ...style,
-      }}
+      size={size}
+      fallbackText={name?.charAt(0)?.toUpperCase()}
+      style={style}
+      className={className}
+      userId={userId}
+      username={username}
     />
   );
 }
@@ -223,7 +164,8 @@ function AnimatedModalWrapper({
         position: "fixed",
         inset: 0,
         zIndex: 1999,
-        pointerEvents: "none",
+        /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+        /* DISABLED: pointerEvents: "none", */
       }}
     >
       <style>{`
@@ -1153,7 +1095,8 @@ function DoubleTapLike({ trigger }: { trigger: number }) {
             left: `${h.x}%`,
             top: `${h.y}%`,
             zIndex: 50,
-            pointerEvents: "none",
+            /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+            /* DISABLED: pointerEvents: "none", */
             animation: "heartPop 0.85s cubic-bezier(0.34,1.56,0.64,1) forwards",
           }}
         >
@@ -1253,7 +1196,8 @@ const AnimatedDareCapsule = React.memo(
           alignItems: "center",
           opacity: showAll && !fading ? 1 : 0,
           transition: fading ? "opacity 1.4s ease" : "opacity 0.6s ease",
-          pointerEvents: "none",
+          /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+          /* DISABLED: pointerEvents: "none", */
           willChange: "opacity, transform",
           backfaceVisibility: "hidden",
           WebkitBackfaceVisibility: "hidden",
@@ -1674,7 +1618,8 @@ function ReelCommentsModal({
         <div
           className="rc-list"
           onWheel={(e) => e.stopPropagation()}
-          onTouchMove={(e) => e.stopPropagation()}
+          // TEMPORARILY DISABLED FOR MOBILE DEBUGGING - onTouchMove stopPropagation blocking touch events
+          // DISABLED: onTouchMove={(e) => e.stopPropagation()}
           style={{
             flex: 1,
             minHeight: 0,
@@ -2241,7 +2186,9 @@ export function DareCard({
   );
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
+  const [exiting, setExiting] = useState(false);
   const btnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipVoteUntilRef = useRef<number>(0);
 
   useEffect(() => {
     if (dare.id) {
@@ -2290,9 +2237,14 @@ export function DareCard({
   }, [isActive, dare.id]);
 
   const handleVote = (choice: "real" | "fake") => {
-    if (phase !== "idle") return;
-    setVote(choice);
-    setPhase("confirming");
+    if (phase !== "idle" || exiting || Date.now() < skipVoteUntilRef.current)
+      return;
+    setExiting(true);
+    setTimeout(() => {
+      setVote(choice);
+      setExiting(false);
+      setPhase("confirming");
+    }, 260);
   };
 
   const handleConfirm = () => {
@@ -2362,7 +2314,8 @@ export function DareCard({
                 height: "35%",
                 background:
                   "linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)",
-                pointerEvents: "none",
+                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                /* DISABLED: pointerEvents: "none", */
               }}
             />
             <div
@@ -2374,7 +2327,8 @@ export function DareCard({
                 height: "45%",
                 background:
                   "linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 100%)",
-                pointerEvents: "none",
+                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                /* DISABLED: pointerEvents: "none", */
               }}
             />
             {dare.proof.type === "video" && (
@@ -2385,7 +2339,8 @@ export function DareCard({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  pointerEvents: "none",
+                  /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                  /* DISABLED: pointerEvents: "none", */
                 }}
               >
                 <div
@@ -2537,6 +2492,7 @@ export function DareCard({
         {!hasVoted && !buttonsVisible && phase === "idle" && (
           <div
             onClick={(e) => {
+              skipVoteUntilRef.current = Date.now() + 400;
               const container = e.currentTarget as HTMLElement; // capture immediately
               const rect = container.getBoundingClientRect();
               const pct = (e.clientX - rect.left) / rect.width;
@@ -2580,6 +2536,7 @@ export function DareCard({
               background: "rgba(255,255,255,0.10)",
               overflow: "hidden",
               cursor: "pointer",
+              touchAction: "manipulation",
             }}
           >
             <div
@@ -2592,7 +2549,8 @@ export function DareCard({
                   "linear-gradient(90deg, rgba(74,222,128,0.5), #4ade80)",
                 width: timerRunning ? "100%" : "0%",
                 transition: timerRunning ? `width 10s linear` : "none",
-                pointerEvents: "none",
+                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                /* DISABLED: pointerEvents: "none", */
               }}
             />
           </div>
@@ -2653,8 +2611,19 @@ export function DareCard({
                 </button>
               </div>
             ) : phase === "idle" ? (
-              <div style={{ display: "flex", gap: "12px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  opacity: exiting ? 0 : 1,
+                  transform: exiting
+                    ? "scale(0.93) translateY(5px)"
+                    : "scale(1) translateY(0)",
+                  transition: "opacity 0.22s ease, transform 0.22s ease",
+                }}
+              >
                 <button
+                  className="dare-real-btn"
                   onClick={() => handleVote("real")}
                   style={{
                     flex: 1,
@@ -2666,12 +2635,15 @@ export function DareCard({
                     fontWeight: 800,
                     fontSize: "18px",
                     cursor: "pointer",
+                    touchAction: "manipulation",
+                    WebkitTapHighlightColor: "transparent",
                     animation: "btnPulseReal 6s ease-in-out infinite",
                   }}
                 >
                   Real
                 </button>
                 <button
+                  className="dare-fake-btn"
                   onClick={() => handleVote("fake")}
                   style={{
                     flex: 1,
@@ -2684,6 +2656,8 @@ export function DareCard({
                     fontSize: "18px",
                     cursor: "pointer",
                     backdropFilter: "blur(8px)",
+                    touchAction: "manipulation",
+                    WebkitTapHighlightColor: "transparent",
                     animation: "btnPulseFake 6s ease-in-out infinite",
                   }}
                 >
@@ -2725,6 +2699,10 @@ export function DareCard({
 
         <style>{`
           @keyframes expandBtn { from { width: 50%; opacity: 0.5; transform: scale(0.93); } to { width: 80%; opacity: 1; transform: scale(1); } }
+          .dare-real-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+          .dare-real-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
+          .dare-fake-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+          .dare-fake-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
           @keyframes btnPulseReal { 0%{box-shadow:0 0 0px 0px rgba(74,222,128,0);opacity:0.72} 15%{box-shadow:0 0 22px 6px rgba(74,222,128,0.4);opacity:1} 35%{box-shadow:0 0 0px 0px rgba(74,222,128,0);opacity:0.72} 100%{box-shadow:0 0 0px 0px rgba(74,222,128,0);opacity:0.72} }
           @keyframes btnPulseFake { 0%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} 55%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} 70%{box-shadow:0 0 22px 6px rgba(255,255,255,0.18);opacity:1} 88%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} 100%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} }
         `}</style>
@@ -2951,8 +2929,19 @@ export function DareCard({
             </button>
           </div>
         ) : phase === "idle" ? (
-          <div style={{ display: "flex", gap: "12px" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "12px",
+              opacity: exiting ? 0 : 1,
+              transform: exiting
+                ? "scale(0.93) translateY(5px)"
+                : "scale(1) translateY(0)",
+              transition: "opacity 0.22s ease, transform 0.22s ease",
+            }}
+          >
             <button
+              className="dare-real-btn"
               onClick={() => handleVote("real")}
               style={{
                 flex: 1,
@@ -2964,11 +2953,14 @@ export function DareCard({
                 fontWeight: 800,
                 fontSize: "17px",
                 cursor: "pointer",
+                touchAction: "manipulation",
+                WebkitTapHighlightColor: "transparent",
               }}
             >
               Real
             </button>
             <button
+              className="dare-fake-btn"
               onClick={() => handleVote("fake")}
               style={{
                 flex: 1,
@@ -2980,6 +2972,8 @@ export function DareCard({
                 fontWeight: 800,
                 fontSize: "17px",
                 cursor: "pointer",
+                touchAction: "manipulation",
+                WebkitTapHighlightColor: "transparent",
               }}
             >
               Fake
@@ -3048,12 +3042,17 @@ export function SwipeableTruthCard({
   const [phase, setPhase] = useState<"idle" | "confirming" | "voted">(
     priorVote ? "voted" : "idle",
   );
+  const [exiting, setExiting] = useState(false);
   const isActive = cardIndex === currentIndex;
 
   const handleVote = (choice: "truth" | "lie") => {
-    if (phase !== "idle") return;
-    setVote(choice);
-    setPhase("confirming");
+    if (phase !== "idle" || exiting) return;
+    setExiting(true);
+    setTimeout(() => {
+      setVote(choice);
+      setExiting(false);
+      setPhase("confirming");
+    }, 260);
   };
 
   const handleConfirm = () => {
@@ -3104,6 +3103,10 @@ export function SwipeableTruthCard({
           100% { background-position: 0% 50%; }
         }
         @keyframes expandBtn { from { width:50%;opacity:0.5;transform:scale(0.93);} to {width:80%;opacity:1;transform:scale(1);} }
+        .truth-vote-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+        .truth-vote-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
+        .lie-vote-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+        .lie-vote-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
         @keyframes btnPulseTruth {
           0%{box-shadow:0 6px 24px rgba(74,222,128,0.3);opacity:0.88}
           18%{box-shadow:0 6px 36px rgba(74,222,128,0.65);opacity:1}
@@ -3374,7 +3377,8 @@ export function SwipeableTruthCard({
                 color: "rgba(74,222,128,0.15)",
                 fontWeight: 900,
                 userSelect: "none",
-                pointerEvents: "none",
+                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                /* DISABLED: pointerEvents: "none", */
               }}
             >
               "
@@ -3584,8 +3588,19 @@ export function SwipeableTruthCard({
           )}
 
           {phase === "idle" ? (
-            <div style={{ display: "flex", gap: "10px" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                opacity: exiting ? 0 : 1,
+                transform: exiting
+                  ? "scale(0.93) translateY(5px)"
+                  : "scale(1) translateY(0)",
+                transition: "opacity 0.22s ease, transform 0.22s ease",
+              }}
+            >
               <button
+                className="truth-vote-btn"
                 onClick={() => handleVote("truth")}
                 style={{
                   flex: 1,
@@ -3598,6 +3613,8 @@ export function SwipeableTruthCard({
                   fontSize: "16px",
                   cursor: "pointer",
                   letterSpacing: "0.02em",
+                  touchAction: "manipulation",
+                  WebkitTapHighlightColor: "transparent",
                   animation: "btnPulseTruth 6s ease-in-out infinite",
                   display: "flex",
                   alignItems: "center",
@@ -3608,6 +3625,7 @@ export function SwipeableTruthCard({
                 <span style={{ fontSize: "18px" }}>✓</span> Truth
               </button>
               <button
+                className="lie-vote-btn"
                 onClick={() => handleVote("lie")}
                 style={{
                   flex: 1,
@@ -3620,6 +3638,8 @@ export function SwipeableTruthCard({
                   fontSize: "16px",
                   cursor: "pointer",
                   letterSpacing: "0.02em",
+                  touchAction: "manipulation",
+                  WebkitTapHighlightColor: "transparent",
                   animation: "btnPulseLie 6s ease-in-out infinite",
                   display: "flex",
                   alignItems: "center",
@@ -4007,11 +4027,13 @@ const formatTimestamp = (timestamp: any): string => {
 
 // ─── MainScreen ───────────────────────────────────────────────────────────────
 export function MainScreen({
+  isActive,
   onDaresClick,
   onNavigateToChat,
   onNavigateToProfile: _onNavigateToProfile,
   focusRequest,
 }: {
+  isActive?: boolean;
   onDaresClick: () => void;
   onNavigateToChat: () => void;
   onNavigateToProfile?: (userId: string) => void;
@@ -4028,9 +4050,12 @@ export function MainScreen({
     darePosts,
     loadingTruth,
     loadingDares,
+    truthPostsUserId,
+    darePostsUserId,
+    truthPostsScope,
+    darePostsScope,
     loadTruthPosts,
     loadDarePosts,
-    refreshContent,
     voteOnDare,
     voteOnTruth,
   } = useContentStore();
@@ -4070,13 +4095,30 @@ export function MainScreen({
   const minSwipeDistance = 20;
 
   const displayTruthPosts = React.useMemo(() => {
-    const seen = new Set<string>();
+    const seenIds = new Set<string>();
+    const seenPublishedTruths = new Set<string>();
     const focusedTruth =
       focusRequest?.view === "truth" ? (focusRequest.post as TruthPost) : null;
 
+    const isPublishableTruth = (post: TruthPost) =>
+      post.state === "APPROVED" && Boolean(post.answer?.trim());
+
     return [focusedTruth, ...truthPosts].filter((post): post is TruthPost => {
-      if (!post?.id || seen.has(post.id)) return false;
-      seen.add(post.id);
+      if (!post?.id || seenIds.has(post.id) || !isPublishableTruth(post)) {
+        return false;
+      }
+
+      seenIds.add(post.id);
+
+      const signature = [
+        post.challengerId || "",
+        post.receiverId || "",
+        post.question.trim().toLowerCase(),
+        post.answer?.trim().toLowerCase() || "",
+      ].join("::");
+
+      if (seenPublishedTruths.has(signature)) return false;
+      seenPublishedTruths.add(signature);
       return true;
     });
   }, [focusRequest, truthPosts]);
@@ -4288,14 +4330,31 @@ export function MainScreen({
 
   useEffect(() => {
     if (!userId) return;
-    loadTruthPosts();
-    loadDarePosts();
-  }, [userId]);
+    const shouldLoadTruths =
+      truthPostsUserId !== userId || truthPostsScope !== "feed";
+    const shouldLoadDares =
+      darePostsUserId !== userId || darePostsScope !== "feed";
+
+    if (shouldLoadTruths) {
+      void loadTruthPosts(false, "feed");
+    }
+    if (shouldLoadDares) {
+      void loadDarePosts(false, "feed");
+    }
+  }, [
+    userId,
+    truthPostsUserId,
+    darePostsUserId,
+    truthPostsScope,
+    darePostsScope,
+    loadTruthPosts,
+    loadDarePosts,
+  ]);
 
   useEffect(() => {
     if (!userId) return;
     return subscribeToAlerts(userId);
-  }, [subscribeToAlerts, userId]);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId || alerts.length === 0) return;
@@ -4317,8 +4376,11 @@ export function MainScreen({
     relevantAlerts.forEach((alert) =>
       handledRealtimeAlertIds.current.add(alert.id),
     );
-    void refreshContent();
-  }, [alerts, refreshContent, userId]);
+    void Promise.all([
+      loadTruthPosts(true, "feed"),
+      loadDarePosts(true, "feed"),
+    ]);
+  }, [alerts, loadDarePosts, loadTruthPosts, userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -4335,10 +4397,10 @@ export function MainScreen({
       publishedRealtimeDareIds.current = new Set(publishedDareIds);
 
       if (hasNewPublishedDare) {
-        void refreshContent();
+        void loadDarePosts(true, "feed");
       }
     });
-  }, [refreshContent, userId]);
+  }, [loadDarePosts, userId]);
 
   const handleVoteClick = React.useCallback((dare: DarePost) => {
     setSelectedDare(dare);
@@ -4399,6 +4461,7 @@ export function MainScreen({
     showTruthModal
   );
   const reelContainerRef = useRef<HTMLDivElement>(null);
+  const isDareScreenVisible = Boolean(isActive) && activeView === "dares";
   useEffect(() => {
     const el = reelContainerRef.current;
     if (!el) return;
@@ -4506,9 +4569,19 @@ export function MainScreen({
   }, [activeView]);
 
   useEffect(() => {
+    if (!isActive) return;
+
     window.scrollTo(0, 0);
-    if (reelContainerRef.current) reelContainerRef.current.scrollTop = 0;
-  }, []);
+
+    if (activeView === "dares") {
+      setActiveReelIndex(0);
+      if (reelContainerRef.current) reelContainerRef.current.scrollTop = 0;
+      return;
+    }
+
+    setCurrentTruthIndex(0);
+    setTruthDeckDrag(0);
+  }, [activeView, isActive, setTruthDeckDrag]);
 
   const onTouchStart = (e: React.TouchEvent) => {
     setTouchEnd(null);
@@ -4602,7 +4675,7 @@ export function MainScreen({
                 <DareCard
                   dare={sortedDarePosts[0]}
                   reelMode
-                  isActive={activeReelIndex === 0}
+                  isActive={isDareScreenVisible && activeReelIndex === 0}
                   onVoteClick={handleVoteClick}
                   onFullscreenMedia={handleFullscreenMedia}
                   onOpenComments={handleOpenComments}
@@ -4642,7 +4715,7 @@ export function MainScreen({
                 <DareCard
                   dare={dare}
                   reelMode
-                  isActive={activeReelIndex === i + 1}
+                  isActive={isDareScreenVisible && activeReelIndex === i + 1}
                   onVoteClick={handleVoteClick}
                   onFullscreenMedia={handleFullscreenMedia}
                   onOpenComments={handleOpenComments}
@@ -4714,7 +4787,9 @@ export function MainScreen({
                     margin: 0,
                   }}
                 >
-                  Loading truth questions...
+                  {loadingTruth
+                    ? "Loading truth questions..."
+                    : "No approved truths yet"}
                 </p>
                 <p
                   style={{
@@ -4723,7 +4798,9 @@ export function MainScreen({
                     margin: 0,
                   }}
                 >
-                  Dare someone to reveal their truth
+                  {loadingTruth
+                    ? "Dare someone to reveal their truth"
+                    : "Approved truth answers will appear here"}
                 </p>
               </div>
             )}

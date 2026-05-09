@@ -34,14 +34,17 @@ service firebase.storage {
         && !request.resource.contentType.matches('(application|text)/');
     }
 
-    // SECURITY FIX: Validate filename to prevent path traversal
-    // Allows timestamps and random prefixes in filenames
+    // SECURITY FIX (§1.11): Validate filename to prevent path traversal.
+    // Previous regex required the userId segment to be strictly [a-zA-Z0-9]+
+    // which rejects real Firebase UIDs containing `_` or `-`, breaking
+    // legitimate uploads. UIDs (and folder names) may contain
+    // [A-Za-z0-9_-]. The file basename must NOT start with a dot and must
+    // have one of the allowed media extensions. `..` segments are blocked.
     function isSafeFileName() {
-      // Match the full path pattern: folder/timestamp-random-filename.ext
-      return (request.resource.name.matches('^[a-zA-Z0-9_-]+/[a-zA-Z0-9]+/[0-9]+-[a-f0-9]+-[a-zA-Z0-9_-]+\\.(jpg|jpeg|png|webp|mp4|webm|mov)$')
-        || request.resource.name.matches('^[a-zA-Z0-9_-]+/[a-zA-Z0-9]+/[a-zA-Z0-9_-]+\\.(jpg|jpeg|png|webp|mp4|webm|mov)$'))
-        && !request.resource.name.matches('\\.\\.\\/')
-        && !request.resource.name.matches('^[.]');
+      return (request.resource.name.matches('^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/[0-9]+-[a-f0-9]+-[a-zA-Z0-9_-]+\\.(jpg|jpeg|png|webp|mp4|webm|mov)$')
+        || request.resource.name.matches('^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.(jpg|jpeg|png|webp|mp4|webm|mov)$'))
+        && !request.resource.name.matches('.*\\.\\..*')
+        && !request.resource.name.matches('.*/[.].*');
     }
 
     // ═════════════════════════════════════════════════════════════════

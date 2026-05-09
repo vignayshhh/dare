@@ -39,6 +39,8 @@ export interface Post {
   media_url?: string;
   media_type?: "TEXT" | "PHOTO" | "VIDEO" | "AUDIO";
   view_count: number;
+  likes_count?: number;
+  comments_count?: number;
   created_at: string | Timestamp | any;
   updated_at: string | Timestamp | any;
 }
@@ -392,14 +394,7 @@ class FeedService {
         const { getStoredAvatar } = useAvatarStore.getState();
         const storedAvatar = getStoredAvatar(authorId);
 
-        // Also check for direct avatar sync
-        const { DirectAvatarSync } = require("../../utils/directAvatarSync");
-        const directAvatar = await DirectAvatarSync.getDirectAvatar(authorId);
-
-        // Priority: Direct from Firebase > Stored avatar > Firebase avatar
-        if (directAvatar && directAvatar !== avatarUrl) {
-          avatarUrl = directAvatar;
-        } else if (storedAvatar && storedAvatar !== avatarUrl) {
+        if (storedAvatar && storedAvatar !== avatarUrl) {
           avatarUrl = storedAvatar;
         }
       } catch (error) {}
@@ -424,70 +419,46 @@ class FeedService {
     }
   }
 
+  // SECURITY FIX (§1.6): Likes/unlikes are written server-side via the
+  // Next.js API route. The client no longer touches `post_likes` or
+  // `posts.likes_count` directly — Firestore rules block both. The
+  // Cloud Function trigger aggregates the authoritative count, and
+  // existing onSnapshot listeners on the client pick up the change
+  // automatically so realtime feels unchanged.
   async likePost(postId: string, userId: string): Promise<boolean> {
     try {
       requireAuthenticatedUser(userId);
-      // Check if already liked
-      const existingLike = await this.getPostLike(postId, userId);
-
-      if (existingLike) {
-        // Increment tap count for multi-like support
-        const likeRef = doc(db, "post_likes", existingLike.id);
-        const currentTapCount = existingLike.tap_count || 1;
-        await updateDoc(likeRef, {
-          tap_count: currentTapCount + 1,
-          updated_at: new Date().toISOString(),
-        });
-        return true;
-      }
-
-      // Create new like with tap_count = 1
-      const likeRef = doc(collection(db, "post_likes"));
-      await setDoc(likeRef, {
-        post_id: postId,
-        user_id: userId,
-        tap_count: 1,
-        created_at: new Date().toISOString(),
+      const { apiFetch } = await import("@/lib/apiClient");
+      await apiFetch(`/api/posts/${encodeURIComponent(postId)}/like`, {
+        method: "POST",
       });
-
-      // Keep denormalized count in sync on the post document
-      const postRef = doc(db, "posts", postId);
-      await updateDoc(postRef, { likes_count: increment(1) });
-
-      // Also update aggregated counter if enabled
-      if (this.enableAggregatedCounters) {
-        aggregatedCounters.incrementCounter(postId, "likes").catch(() => {});
-      }
-
       this.postEnrichmentCache.delete(postId);
       return true;
     } catch (error) {
+      // CRITICAL: re-throw so the caller can roll back the optimistic UI.
+      // Previously this swallowed the error and returned false, which made
+      // failed likes appear successful in the UI until the user refreshed
+      // and saw the heart vanish (because nothing was ever written to
+      // Firestore).
       secureLogError("likePost failed", error);
-      return false;
+      console.error("❌ [LIKE API] failed:", postId, error);
+      throw error;
     }
   }
 
   async unlikePost(postId: string, userId: string): Promise<boolean> {
     try {
       requireAuthenticatedUser(userId);
-      const like = await this.getPostLike(postId, userId);
-      if (like) {
-        const likeRef = doc(db, "post_likes", like.id);
-        await deleteDoc(likeRef);
-        // Keep denormalized count in sync on the post document
-        const postRef = doc(db, "posts", postId);
-        await updateDoc(postRef, { likes_count: increment(-1) });
-
-        // Also update aggregated counter if enabled
-        if (this.enableAggregatedCounters) {
-          aggregatedCounters.decrementCounter(postId, "likes").catch(() => {});
-        }
-      }
+      const { apiFetch } = await import("@/lib/apiClient");
+      await apiFetch(`/api/posts/${encodeURIComponent(postId)}/like`, {
+        method: "DELETE",
+      });
       this.postEnrichmentCache.delete(postId);
       return true;
     } catch (error) {
       secureLogError("unlikePost failed", error);
-      return false;
+      console.error("❌ [UNLIKE API] failed:", postId, error);
+      throw error;
     }
   }
 
@@ -542,30 +513,20 @@ class FeedService {
     }
   }
 
+  // SECURITY FIX (§1.6): View tracking is server-side. The API route
+  // writes `post_views/${postId}_${uid}` idempotently and the trigger
+  // aggregates `view_count`. `skipCsrf` is set server-side for this
+  // endpoint so sendBeacon() can be used for page-unload flushes.
   async trackPostView(postId: string, userId: string): Promise<boolean> {
     try {
       requireAuthenticatedUser(userId);
       const sessionKey = `${postId}:${userId}`;
       if (this.viewedPostsThisSession.has(sessionKey)) return true;
 
-      const existingView = await this.getPostView(postId, userId);
-      if (existingView) {
-        this.viewedPostsThisSession.add(sessionKey);
-        return true;
-      }
-
-      const viewRef = doc(collection(db, "post_views"));
-      await setDoc(viewRef, {
-        post_id: postId,
-        user_id: userId,
-        viewed_at: new Date().toISOString(),
+      const { apiFetch } = await import("@/lib/apiClient");
+      await apiFetch(`/api/posts/${encodeURIComponent(postId)}/view`, {
+        method: "POST",
       });
-
-      const postRef = doc(db, "posts", postId);
-      await updateDoc(postRef, {
-        view_count: increment(1),
-      });
-
       this.viewedPostsThisSession.add(sessionKey);
       return true;
     } catch (error) {
@@ -782,9 +743,19 @@ class FeedService {
               });
             }
 
-            // Step 4: Assemble enriched posts from cache (no extra reads)
+            // Step 4: Assemble enriched posts from cache (no extra reads).
+            // Use Math.max(raw, cached) so that:
+            //   a) realtime CF-incremented counts supersede a stale cache, and
+            //   b) legacy posts where likes_count=0 on the doc (pre-CF) still
+            //      show the actual count from the batchGetPostLikes query.
             const posts: PostWithAuthor[] = rawPosts.map((post) => {
               const enrichment = this.postEnrichmentCache.get(post.id);
+              const rawLikes =
+                typeof post.likes_count === "number" ? post.likes_count : 0;
+              const rawComments =
+                typeof post.comments_count === "number"
+                  ? post.comments_count
+                  : 0;
               return {
                 ...post,
                 author: authorsMap.get(post.author_id) || {
@@ -794,8 +765,11 @@ class FeedService {
                   display_name: null,
                   avatar_url: "",
                 },
-                likes_count: enrichment?.likesCount ?? 0,
-                comments_count: enrichment?.commentsCount ?? 0,
+                likes_count: Math.max(rawLikes, enrichment?.likesCount ?? 0),
+                comments_count: Math.max(
+                  rawComments,
+                  enrichment?.commentsCount ?? 0,
+                ),
                 is_liked_by_user: enrichment?.isLikedByUser ?? false,
               };
             });
@@ -1260,19 +1234,17 @@ class FeedService {
         const authorIds = [...new Set(rawLikes.map((like) => like.user_id))];
         const authorsMap = await this.batchGetAuthors(authorIds);
 
-        const likes = rawLikes.flatMap((like) => {
+        const likes = rawLikes.map((like) => {
           const author = authorsMap.get(like.user_id);
-          return author
-            ? [
-                {
-                  userId: like.user_id,
-                  name: author.display_name || author.username,
-                  username: author.username,
-                  avatar: author.avatar_url || "",
-                  tapCount: like.tap_count || 1,
-                },
-              ]
-            : [];
+          const fallbackUsername = `user_${like.user_id.slice(0, 8)}`;
+
+          return {
+            userId: like.user_id,
+            name: author?.display_name || author?.username || fallbackUsername,
+            username: author?.username || fallbackUsername,
+            avatar: author?.avatar_url || "",
+            tapCount: like.tap_count || 1,
+          };
         });
 
         callback(likes);

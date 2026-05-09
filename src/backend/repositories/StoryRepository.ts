@@ -14,6 +14,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { auth } from "@/backend/lib/firebase";
 import {
   IStoryRepository,
   Story,
@@ -26,6 +27,66 @@ import { FriendshipRepository } from "./FriendshipRepository";
 
 export class StoryRepository implements IStoryRepository {
   private friendshipRepository: IFriendshipRepository;
+
+  private async fetchFriendsStoriesFromApi(): Promise<StoryWithViewerInfo[]> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("User must be authenticated to fetch friends stories");
+    }
+
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch("/api/stories/friends", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+      credentials: "same-origin",
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error ||
+          payload?.message ||
+          "Failed to fetch friends stories from server",
+      );
+    }
+
+    if (Array.isArray(payload?.data)) {
+      return payload.data as StoryWithViewerInfo[];
+    }
+
+    if (Array.isArray(payload)) {
+      return payload as StoryWithViewerInfo[];
+    }
+
+    return [];
+  }
+
+  private async postStoryViewToApi(storyId: string): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("User must be authenticated to mark story as viewed");
+    }
+
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(`/api/stories/${storyId}/view`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+      credentials: "same-origin",
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error ||
+          payload?.message ||
+          "Failed to mark story as viewed on server",
+      );
+    }
+  }
 
   constructor() {
     this.friendshipRepository = new FriendshipRepository();
@@ -167,6 +228,15 @@ export class StoryRepository implements IStoryRepository {
 
   async getFriendsStories(userId: string): Promise<StoryWithViewerInfo[]> {
     try {
+      return await this.fetchFriendsStoriesFromApi();
+    } catch (serverError) {
+      console.warn(
+        "Falling back to direct Firestore friends stories fetch:",
+        serverError,
+      );
+    }
+
+    try {
       // Get user's friends
       const friendships =
         await this.friendshipRepository.getAcceptedFriends(userId);
@@ -256,6 +326,16 @@ export class StoryRepository implements IStoryRepository {
 
   async markStoryAsViewed(storyId: string, viewerId: string): Promise<void> {
     try {
+      await this.postStoryViewToApi(storyId);
+      return;
+    } catch (serverError) {
+      console.warn(
+        "Falling back to direct Firestore story view update:",
+        serverError,
+      );
+    }
+
+    try {
       const storyRef = doc(db, "stories", storyId);
       const storyDoc = await getDoc(storyRef);
 
@@ -288,11 +368,12 @@ export class StoryRepository implements IStoryRepository {
     }
   }
 
-  async deleteExpiredStories(): Promise<void> {
+  async deleteExpiredStories(userId: string): Promise<void> {
     try {
       const now = new Date();
       const q = query(
         collection(db, "stories"),
+        where("userId", "==", userId),
         where("expiresAt", "<=", Timestamp.fromDate(now)),
       );
 

@@ -64,6 +64,15 @@ export interface MarkReadResponse {
 export class AlertService {
   constructor(private alertRepository: AlertRepository) {}
 
+  private isPermissionDenied(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+
+    const message =
+      "message" in error ? String((error as { message?: unknown }).message) : "";
+
+    return message.includes("Missing or insufficient permissions");
+  }
+
   // Create a new alert
   async createAlert(request: CreateAlertRequest): Promise<AlertResponse> {
     try {
@@ -249,9 +258,152 @@ export class AlertService {
       SUS_CLOSE_FRIEND_ACTIVITY: "has suspicious close friend activity",
       COMMENT_RECEIVED: "commented on your post",
       COMMENT_REPLY: "replied to your comment",
+      STORY_REACTION: "liked your story",
+      STORY_REPLY: "replied to your story",
     };
 
     return messageMap[type] || "System notification";
+  }
+
+  // Create or update aggregated alert for story reactions
+  async handleStoryReactionAlert(
+    userId: string,
+    storyAuthorId: string,
+    actorId: string,
+    actorName: string,
+    actorUsername: string,
+    actorAvatar: string,
+    reactionType: "like" | "hate",
+    storyId: string,
+  ): Promise<void> {
+    try {
+      // Check if there's an existing aggregated alert for this story
+      let existingAlerts: AlertEntity[] = [];
+      try {
+        existingAlerts = await this.alertRepository.getAlertsForUser(
+          storyAuthorId,
+          100,
+          0,
+          false,
+        );
+      } catch (error) {
+        if (!this.isPermissionDenied(error)) {
+          throw error;
+        }
+
+        await this.createAlert({
+          userId: storyAuthorId,
+          type: "STORY_REACTION",
+          entityId: storyId,
+          actorId,
+          actorName,
+          actorUsername,
+          actorAvatar,
+          metadata: {
+            reactionType,
+          },
+        });
+        return;
+      }
+
+      // Find existing STORY_REACTION alert for this story
+      const existingAlert = existingAlerts.find(
+        (alert) =>
+          alert.type === "STORY_REACTION" &&
+          alert.entityId === storyId &&
+          !alert.isRead,
+      );
+
+      if (existingAlert) {
+        // Update existing alert with new actor info
+        const actors = [...(existingAlert.metadata.actors || [])];
+        const actorIndex = actors.findIndex((actor: any) => actor.id === actorId);
+
+        if (actorIndex >= 0) {
+          actors[actorIndex] = {
+            ...actors[actorIndex],
+            name: actorName,
+            username: actorUsername,
+            avatar: actorAvatar,
+            reactionType,
+          };
+        } else {
+          actors.push({
+            id: actorId,
+            name: actorName,
+            username: actorUsername,
+            avatar: actorAvatar,
+            reactionType,
+          });
+        }
+
+        const reactionCounts = {
+          likes: actors.filter((a: any) => a.reactionType === "like").length,
+          hates: actors.filter((a: any) => a.reactionType === "hate").length,
+        };
+
+        const message =
+          this.generateAggregatedReactionMessage(reactionCounts);
+
+        await this.updateAlert(existingAlert.id, storyAuthorId, {
+          metadata: {
+            ...existingAlert.metadata,
+            actors,
+            reactionCounts,
+            lastReactionAt: new Date().toISOString(),
+          },
+          message,
+        });
+      } else {
+        // Create new alert
+        await this.createAlert({
+          userId: storyAuthorId,
+          type: "STORY_REACTION",
+          entityId: storyId,
+          actorId,
+          actorName,
+          actorUsername,
+          actorAvatar,
+          metadata: {
+            actors: [
+              {
+                id: actorId,
+                name: actorName,
+                username: actorUsername,
+                avatar: actorAvatar,
+                reactionType,
+              },
+            ],
+            reactionCounts: {
+              likes: reactionType === "like" ? 1 : 0,
+              hates: reactionType === "hate" ? 1 : 0,
+            },
+            lastReactionAt: new Date().toISOString(),
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error handling story reaction alert:", error);
+    }
+  }
+
+  // Generate aggregated reaction message
+  private generateAggregatedReactionMessage(counts: {
+    likes: number;
+    hates: number;
+  }): string {
+    if (counts.likes > 0 && counts.hates > 0) {
+      return `${counts.likes} liked your story and ${counts.hates} hated your story`;
+    } else if (counts.likes > 0) {
+      return counts.likes === 1
+        ? "liked your story"
+        : `${counts.likes} people liked your story`;
+    } else if (counts.hates > 0) {
+      return counts.hates === 1
+        ? "hated your story"
+        : `${counts.hates} people hated your story`;
+    }
+    return "liked your story";
   }
 }
 

@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const TOTAL_DURATION = 4500;
-const PHASE_ARRIVAL_END = 1200;
-const PHASE_FOCUS_END = 3200;
+const TOTAL_DURATION = 7500;
+const PHASE_ARRIVAL_END = 2000;
+const PHASE_FOCUS_END = 5500;
 const PARTICLE_COUNT = 100;
 const STORAGE_KEY = "dare_intro_played";
 
@@ -194,60 +194,142 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
 
   return (
     <div
-      className={`launch-screen ${dismissed ? "launch-screen--dismissed" : ""}`}
-      aria-hidden="true"
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999,
+        background: "#000",
+        overflow: "hidden",
+        width: "100vw",
+        height: "100vh",
+        display: dismissed ? "none" : "block",
+      }}
     >
-      <canvas ref={canvasRef} className="launch-canvas" />
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          display: dismissed ? "none" : "block",
+          zIndex: 1,
+        }}
+      />
 
       {/* DARE wordmark */}
       <div
-        className={`launch-wordmark ${
-          phase === "focus" || phase === "release"
-            ? "launch-wordmark--visible"
-            : ""
-        } ${phase === "release" ? "launch-wordmark--fade" : ""}`}
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform:
+            phase === "arrival"
+              ? "translate(-50%, -50%) scale(0.8)"
+              : phase === "focus"
+                ? "translate(-50%, -50%) scale(1)"
+                : phase === "release"
+                  ? "translate(-50%, -50%) scale(1.1)"
+                  : "translate(-50%, -50%) scale(0.8)",
+          transition: "transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
       >
-        <h1 className="launch-title">DARE</h1>
+        <h1
+          style={{
+            fontSize: "clamp(2.5rem, 18vw, 9rem)",
+            color: "#ffffff",
+            fontWeight: "800",
+            letterSpacing: "0.1em",
+            margin: 0,
+            padding: 0,
+            textShadow:
+              "0 0 20px rgba(255, 255, 255, 0.5), 0 0 40px rgba(255, 255, 255, 0.3), 0 0 60px rgba(255, 255, 255, 0.2)",
+            opacity:
+              phase === "arrival"
+                ? 0
+                : phase === "focus"
+                  ? 1
+                  : phase === "release"
+                    ? 0
+                    : 0,
+            transition:
+              "opacity 2s cubic-bezier(0.4, 0, 0.2, 1), transform 2s cubic-bezier(0.4, 0, 0.2, 1)",
+            textAlign: "center",
+            position: "relative",
+          }}
+        >
+          DAR
+          <span style={{ position: "relative" }}>
+            E{/* Green dot */}
+            <span
+              style={{
+                position: "absolute",
+                bottom: "18%",
+                right: "-8%",
+                width: "clamp(0.5rem, 3vw, 1.5rem)",
+                height: "clamp(0.5rem, 3vw, 1.5rem)",
+                background:
+                  "linear-gradient(to bottom right, #4ade80, #22c55e)",
+                borderRadius: "50%",
+                border: "2px solid #000",
+                boxShadow: "0 0 10px rgba(74, 222, 128, 0.5)",
+              }}
+            />
+          </span>
+        </h1>
       </div>
     </div>
   );
 }
 
 export function LaunchGate({ children }: { children: React.ReactNode }) {
-  const [showIntro, setShowIntro] = useState<boolean | null>(null);
+  const [showIntro, setShowIntro] = useState<boolean>(false);
+  const [introDone, setIntroDone] = useState<boolean>(false);
 
   useEffect(() => {
-    try {
-      const played = sessionStorage.getItem(STORAGE_KEY);
-      setShowIntro(played !== "1");
-    } catch {
-      setShowIntro(false);
+    // Check if intro has already been played
+    if (typeof window === "undefined") return;
+    const hasPlayed = localStorage.getItem(STORAGE_KEY) === "1";
+    if (!hasPlayed) {
+      setShowIntro(true);
     }
   }, []);
 
-  // Not yet determined — render nothing briefly to prevent flash
-  if (showIntro === null) {
-    return (
-      <div
-        style={{
-          background: "#0B0F0C",
-          position: "fixed",
-          inset: 0,
-          zIndex: 9999,
-        }}
-      />
-    );
-  }
+  useEffect(() => {
+    // Lock body scroll when launch screen is active
+    if (typeof document === "undefined") return;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.inset = "0";
 
-  if (showIntro) {
-    return (
-      <LaunchScreenWrapper onComplete={() => setShowIntro(false)}>
+    return () => {
+      // Restore body scroll when launch screen is dismissed
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.inset = "";
+    };
+  }, []);
+
+  const handleComplete = useCallback(() => {
+    setIntroDone(true);
+    setTimeout(() => setShowIntro(false), 100);
+  }, []);
+
+  return (
+    <>
+      {showIntro && !introDone && <LaunchScreen onComplete={handleComplete} />}
+      <div style={{ visibility: introDone ? "visible" : "hidden" }}>
         {children}
-      </LaunchScreenWrapper>
-    );
-  }
-
-  return <>{children}</>;
+      </div>
+    </>
+  );
 }
 
 function LaunchScreenWrapper({

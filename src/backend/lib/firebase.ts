@@ -82,8 +82,17 @@ let auth: any = null;
 let db: any = null;
 let realtimeDb: any = null;
 let storage: any = null;
+let firebaseInitialized = false;
+let firebaseInitError: Error | null = null;
+const appCheckDebugSetting =
+  process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_DEBUG?.trim() || "";
 
-if (firebaseConfig) {
+// Lazy initialization function to prevent module-level hanging on mobile
+function initializeFirebase() {
+  if (firebaseInitialized || !firebaseConfig) {
+    return;
+  }
+
   try {
     if (!getApps().length) {
       app = initializeApp(firebaseConfig);
@@ -95,16 +104,27 @@ if (firebaseConfig) {
     // Enable by setting NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY in your env after
     // configuring App Check in Firebase Console -> App Check -> Register app.
     // Until the env var is set, this is a silent no-op.
+    // Skip on mobile to prevent hanging on reCAPTCHA loading (mobile browsers can
+    // have issues with reCAPTCHA v3, and the allowedDevOrigins fix in next.config.js
+    // resolves the real mobile touch issue)
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent,
+      );
     if (
       typeof window !== "undefined" &&
-      process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY
+      process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY &&
+      !isMobile
     ) {
       try {
         // Debug token for local development — set window.FIREBASE_APPCHECK_DEBUG_TOKEN
         // to true before this runs, then copy the token printed in console to the
         // Firebase Console -> App Check -> Debug tokens list.
-        if (process.env.NODE_ENV === "development") {
-          (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        if (process.env.NODE_ENV === "development" && appCheckDebugSetting) {
+          (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN =
+            appCheckDebugSetting === "true"
+              ? true
+              : appCheckDebugSetting;
         }
         initializeAppCheck(app, {
           provider: new ReCaptchaV3Provider(
@@ -135,17 +155,30 @@ if (firebaseConfig) {
 
     realtimeDb = getDatabase(app);
     storage = getStorage(app);
+    firebaseInitialized = true;
   } catch (error) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("Firebase initialization error:", error);
-    } else {
-      console.error("Firebase initialization failed");
-    }
-    throw error;
+    console.error("Firebase initialization error:", error);
+    firebaseInitError = error as Error;
+    firebaseInitialized = true; // Mark as initialized even if failed
   }
-} else {
-  console.warn("⚠️ Firebase not configured. Running in mock mode.");
 }
 
-export { auth, db, realtimeDb, storage, app };
+// Initialize Firebase
+if (firebaseConfig) {
+  initializeFirebase();
+} else {
+  console.warn("⚠️ Firebase not configured. Running in mock mode.");
+  firebaseInitialized = true;
+}
+
+export {
+  auth,
+  db,
+  realtimeDb,
+  storage,
+  app,
+  initializeFirebase,
+  firebaseInitialized,
+  firebaseInitError,
+};
 export default app;
