@@ -88,14 +88,21 @@ service cloud.firestore {
         && !displayName.matches('[<>\\\\/"\\x27]');
     }
 
-    // Firestore-based rate limiting check
+    // Firestore-based rate limiting check.
+    // SECURITY FIX (§1.5): Production rate limiting is enforced by the
+    // Next.js API routes against Redis (see src/app/api/_lib/rateLimit.ts).
+    // This Firestore-rule version is a second defense layer for writes
+    // that still go direct-to-Firestore (reports, profile views, etc.).
+    // It's based on a count stored in /rate_limits/{uid}_{action} and
+    // allows when: (a) no doc, (b) count<max, or (c) window expired.
     function isUnderRateLimit(action, maxAttempts, windowMs) {
-      let rateLimitDoc = get(/databases/$(database)/documents/rate_limits/$(request.auth.uid + '_' + action));
-      let now = request.time.toMillis();
-      let windowStart = now - windowMs;
-      
-      // Simplified check: just verify document exists (full rate limiting requires Cloud Functions)
-      return !rateLimitDoc.exists();
+      let path = /databases/$(database)/documents/rate_limits/$(request.auth.uid + '_' + action);
+      return !exists(path)
+        || get(path).data.count == null
+        || get(path).data.count < maxAttempts
+        || (get(path).data.window_start != null
+            && get(path).data.window_start is timestamp
+            && (request.time.toMillis() - get(path).data.window_start.toMillis()) > windowMs);
     }
 
     // Check if user already voted (composite key validation)
@@ -167,24 +174,42 @@ service cloud.firestore {
         // SECURITY: Enforce username uniqueness via separate usernames collection
         && !exists(/databases/$(database)/documents/usernames/$(request.resource.data.username));
 
+      // SECURITY FIX (§1.1): email is server-owned after the Cloud Function
+      //   migrates it into /users/{uid}/private/contact. Clients cannot
+      //   set it via an update. Moderation fields (is_banned, banned_at,
+      //   banned_by, muted_until) are also server-only.
       allow update: if isOwner(userId)
-        && doesNotChange(['dares_completed', 'dares_refused', 'ghost_mode_active', 'user_id'])
+        && doesNotChange([
+             'dares_completed', 'dares_refused',
+             'user_id', 'email', 'is_banned', 'banned_at', 'banned_by',
+             'muted_until'
+           ])
         && (request.resource.data.username == null || isValidUsername(request.resource.data.username))
         && (request.resource.data.display_name == null || isValidDisplayName(request.resource.data.display_name))
-        && (request.resource.data.email == null || isValidEmail(request.resource.data.email))
         && stringUnder('bio', 500)
         && stringUnder('avatar', 2000)
         && stringUnder('avatar_url', 2000)
+        && (
+             !changedKeys().hasAny(['ghost_mode_active', 'ghost_mode_expires_at'])
+             || onlyChanges(['ghost_mode_active', 'ghost_mode_expires_at', 'updated_at'])
+           )
         // SECURITY: If username is changing, check uniqueness
         && (request.resource.data.username == null || request.resource.data.username == resource.data.username
             || !exists(/databases/$(database)/documents/usernames/$(request.resource.data.username)))
         // SECURITY: Critical fields must not be set to null/empty on update
-        && (request.resource.data.username == null || request.resource.data.username.size() > 0)
-        && (request.resource.data.email == null || request.resource.data.email.size() > 0);
-        // TEMPORARILY DISABLED: Rate limit profile updates (requires rate_limits collection setup)
-        // && isUnderRateLimit('profile_update', 10, 900000);
+        && (request.resource.data.username == null || request.resource.data.username.size() > 0);
 
       allow delete: if isOwner(userId);
+    }
+
+    // ─── USER PRIVATE SUBCOLLECTION (email PII, §1.1) ────────────────
+    // Email and other PII live here after server-side migration
+    // (functions/src/triggers/onUserCreated.ts). Only the owner may
+    // read. Writes are server-only so even the owner cannot forge
+    // their own email value.
+    match /users/{userId}/private/{docId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
     }
 
     // ─── USERNAMES COLLECTION (for uniqueness enforcement) ─────────────
@@ -205,19 +230,32 @@ service cloud.firestore {
     }
 
     // ─── RATE LIMITS COLLECTION ─────────────────────────────────────────
-    // Stores rate limit data for user actions
+    // Secondary Firestore-side rate-limit counters (the primary system is
+    // Redis-backed in the API routes). Counter tamper-resistance:
+    //   * create must start at count == 1
+    //   * update may only increment by 1 OR start a fresh window
+    //   * delete disabled so an attacker can't wipe their own counter
     match /rate_limits/{rateLimitId} {
-      // Users can read their own rate limit documents
       allow read: if isSignedIn()
         && rateLimitId.startsWith(request.auth.uid + '_');
 
-      // Users can create/update their own rate limit documents
-      allow create, update: if isSignedIn()
-        && rateLimitId.startsWith(request.auth.uid + '_');
+      allow create: if isSignedIn()
+        && rateLimitId.startsWith(request.auth.uid + '_')
+        && request.resource.data.count is number
+        && request.resource.data.count == 1;
 
-      // Users can delete their own rate limit documents
-      allow delete: if isSignedIn()
-        && rateLimitId.startsWith(request.auth.uid + '_');
+      allow update: if isSignedIn()
+        && rateLimitId.startsWith(request.auth.uid + '_')
+        && request.resource.data.count is number
+        && (
+          request.resource.data.count == resource.data.count + 1
+          || (
+            request.resource.data.count == 1
+            && request.resource.data.window_start != resource.data.window_start
+          )
+        );
+
+      allow delete: if false;
     }
 
     // ─── BLOCK LISTS COLLECTION ─────────────────────────────────────────
@@ -262,123 +300,87 @@ service cloud.firestore {
 
     // ─── POSTS COLLECTION ───────────────────────────────────────────────
     // Posts are public feed content among authenticated users.
+    // SECURITY FIX (§1.6): All counter fields (likes_count, comments_count,
+    // view_count) are server-owned — mutated only by Cloud Function
+    // triggers using the Admin SDK which bypasses these rules. Clients
+    // cannot seed non-zero counts at create time or touch them on update.
     match /posts/{postId} {
       allow read: if isSignedIn();
 
       allow create: if isSignedIn()
         && request.resource.data.author_id == request.auth.uid
         && stringUnder('content', 10000)
-        && stringUnder('media_url', 2000);
+        && stringUnder('media_url', 2000)
+        && (!('likes_count' in request.resource.data) || request.resource.data.likes_count == 0)
+        && (!('comments_count' in request.resource.data) || request.resource.data.comments_count == 0)
+        && (!('view_count' in request.resource.data) || request.resource.data.view_count == 0)
+        && (!('auto_flagged' in request.resource.data) || request.resource.data.auto_flagged == false);
 
-      // Author can update their own post (any field except author_id).
-      // SECURITY: Restrict counter mutations - only allow increments by 1 to prevent manipulation
-      // Non-authors can only increment counters by 1 — needed for like/view/comment flows.
-      allow update: if isSignedIn() && (
-        (
-          resource.data.author_id == request.auth.uid
-          && doesNotChange(['author_id', 'likes_count', 'comments_count', 'view_count'])
-          && stringUnder('content', 10000)
-        )
-        ||
-        (
-          onlyChanges(['likes_count', 'updated_at'])
-          && request.resource.data.likes_count == resource.data.likes_count + 1
-        )
-        ||
-        (
-          onlyChanges(['comments_count', 'updated_at'])
-          && request.resource.data.comments_count == resource.data.comments_count + 1
-        )
-        ||
-        (
-          onlyChanges(['view_count', 'updated_at'])
-          && request.resource.data.view_count == resource.data.view_count + 1
-        )
-      );
+      // Author-only update; counters + auto_flagged are server-owned.
+      allow update: if isSignedIn()
+        && resource.data.author_id == request.auth.uid
+        && doesNotChange([
+             'author_id', 'likes_count', 'comments_count', 'view_count',
+             'auto_flagged', 'auto_flagged_at'
+           ])
+        && stringUnder('content', 10000);
 
       allow delete: if isSignedIn()
         && resource.data.author_id == request.auth.uid;
     }
 
     // ─── POST LIKES ─────────────────────────────────────────────────────
+    // SECURITY FIX (§1.6): Writes go through the server API route
+    // (POST/DELETE /api/posts/[postId]/like) using the Admin SDK, which
+    // bypasses these rules. Doc id is `${postId}_${uid}` so duplicate
+    // likes are impossible. The Cloud Function aggregates likes_count.
+    // Reads stay open so `onSnapshot` realtime remains unchanged.
     match /post_likes/{likeId} {
       allow read: if isSignedIn();
-
-      // Create only your own like
-      allow create: if isSignedIn()
-        && request.resource.data.user_id == request.auth.uid;
-
-      // Update only your own like (for tap_count increments)
-      allow update: if isSignedIn()
-        && resource.data.user_id == request.auth.uid
-        && doesNotChange(['user_id', 'post_id']);
-
-      // Delete only your own like (unlike)
-      allow delete: if isSignedIn()
-        && resource.data.user_id == request.auth.uid;
+      allow write: if false;
     }
 
     // ─── POST COMMENTS ──────────────────────────────────────────────────
+    // SECURITY FIX (§1.6): Creation goes through POST /api/posts/[id]/comment.
+    // Author can still edit their own text client-side, but the `likes`
+    // counter is server-owned — aggregated from the /likes subcollection
+    // by a Cloud Function trigger. Subcollection doc id == liker uid so
+    // double-liking is structurally impossible.
     match /post_comments/{commentId} {
       allow read: if isSignedIn();
 
-      allow create: if isSignedIn()
-        && request.resource.data.user_id == request.auth.uid
+      allow create: if false; // server-only (API route)
+
+      allow update: if isSignedIn()
+        && resource.data.user_id == request.auth.uid
+        && doesNotChange(['user_id', 'post_id', 'likes'])
         && stringUnder('content', 2000)
         && stringUnder('text', 2000);
 
-      // Comment author can edit their text; anyone signed in can increment
-      // the `likes` counter by 1 only (matches existing likeComment flow).
-      // SECURITY: Restrict counter mutations - only allow increments by 1 to prevent manipulation
-      allow update: if isSignedIn() && (
-        (
-          resource.data.user_id == request.auth.uid
-          && doesNotChange(['user_id', 'post_id', 'likes'])
-          && stringUnder('content', 2000)
-          && stringUnder('text', 2000)
-        )
-        ||
-        (
-          onlyChanges(['likes', 'updated_at'])
-          && request.resource.data.likes == resource.data.likes + 1
-        )
-      );
-
       allow delete: if isSignedIn()
         && resource.data.user_id == request.auth.uid;
+
+      match /likes/{likerUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == likerUid;
+        allow update: if false;
+      }
     }
 
     // ─── POST VIEWS ─────────────────────────────────────────────────────
+    // SECURITY FIX (§1.6): Writes go through POST /api/posts/[id]/view.
+    // Doc id = `${postId}_${uid}` so the same user cannot inflate
+    // view_count. Counter trigger fires exactly once per pair.
     match /post_views/{viewId} {
       allow read: if isSignedIn();
-
-      allow create: if isSignedIn()
-        && request.resource.data.user_id == request.auth.uid;
-
-      // Views are immutable once recorded
-      allow update, delete: if false;
+      allow write: if false;
     }
 
     // ─── POST COUNTERS (aggregated) ─────────────────────────────────────
-    // Denormalized counters like "post_counters/{postId}_likes".
-    // Reads open to signed-in users; writes limited to {count, lastUpdated}
-    // shape so attackers can't stuff arbitrary data.
-    // SECURITY: Restrict counter mutations - only allow increments by 1 to prevent manipulation
+    // SECURITY FIX (§1.6): Server-owned. Clients read only.
     match /post_counters/{counterId} {
       allow read: if isSignedIn();
-
-      // Create must match expected shape only
-      allow create: if isSignedIn()
-        && request.resource.data.keys().hasOnly(['count', 'lastUpdated'])
-        && request.resource.data.count is number
-        && request.resource.data.count == 1;
-
-      // Update may only increment count by 1 and update lastUpdated
-      allow update: if isSignedIn()
-        && onlyChanges(['count', 'lastUpdated'])
-        && request.resource.data.count == resource.data.count + 1;
-
-      allow delete: if false;
+      allow write: if false;
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -394,12 +396,13 @@ service cloud.firestore {
       // friends, etc.). Writes are still strictly participant-scoped.
       allow read: if isSignedIn();
 
-      // Requester creates the friendship; cannot forge someone else's request
+      // SECURITY FIX (§3.11): Requester cannot auto-accept — status must
+      // be 'pending' on create. Only the addressee may flip it to
+      // 'accepted' (rule below).
       allow create: if isSignedIn()
         && request.resource.data.requester_id == request.auth.uid
-        && request.resource.data.requester_id != request.resource.data.addressee_id;
-        // TEMPORARILY DISABLED: Status validation
-        // && request.resource.data.status == 'pending';
+        && request.resource.data.requester_id != request.resource.data.addressee_id
+        && request.resource.data.status == 'pending';
 
       // SECURITY FIX: Only addressee can accept/reject status. Requester can only cancel.
       allow update: if isSignedIn() && (
@@ -483,8 +486,10 @@ service cloud.firestore {
           && request.resource.data.likes == resource.data.likes + 1
         )
       );
+      // SECURITY FIX (§1.10): request.resource.data is null on delete;
+      // must use resource.data.
       allow delete: if isSignedIn()
-        && request.resource.data.user_id == request.auth.uid;
+        && resource.data.user_id == request.auth.uid;
     }
 
     // ─── TRUTHS ─────────────────────────────────────────────────────────
@@ -633,19 +638,22 @@ service cloud.firestore {
       // have size caps to prevent DOS / cost attacks.
       // SECURITY FIX: Enforce exactly 2 participants matching conversation users
       // SECURITY: Enforce media_url host allow-list (Firebase Storage only)
+      // SECURITY FIX (§1.8): Re-enable cross-conversation check and
+      // media URL allow-list so users cannot inject messages into
+      // conversations they don't belong to or smuggle attacker-hosted
+      // media URLs.
       allow create: if isSignedIn()
         && request.resource.data.sender_id == request.auth.uid
         && request.resource.data.participants.size() == 2
         && request.auth.uid in request.resource.data.participants
-        && stringUnder('content', 10000);
-        // TEMPORARILY DISABLED: Cross-document conversation check
-        // && isConversationParticipant(request.resource.data.conversation_id)
-        // && request.resource.data.participants.hasAll([
-        //      get(/databases/$(database)/documents/conversations/$(request.resource.data.conversation_id)).data.user1_id,
-        //      get(/databases/$(database)/documents/conversations/$(request.resource.data.conversation_id)).data.user2_id
-        //    ])
-        // TEMPORARILY DISABLED: Media URL validation
-        // && isAllowedMediaUrl('media_url');
+        && stringUnder('content', 10000)
+        && stringUnder('media_url', 2000)
+        && isAllowedMediaUrl('media_url')
+        && isConversationParticipant(request.resource.data.conversation_id)
+        && request.resource.data.participants.hasAll([
+             get(/databases/$(database)/documents/conversations/$(request.resource.data.conversation_id)).data.user1_id,
+             get(/databases/$(database)/documents/conversations/$(request.resource.data.conversation_id)).data.user2_id
+           ]);
 
       // SECURITY: Only recipient can mark message as delivered/seen, and only sender can delete
       // This prevents participants from forging read receipts or deleting messages they didn't send
@@ -703,25 +711,57 @@ service cloud.firestore {
     }
 
     // ─── ALERTS (notifications to a specific user) ──────────────────────
-    // Fields: userId (camelCase! — recipient), type, createdAt, read, etc.
+    // Fields: userId (recipient), actorId (originator), type, entityId,
+    //         message, metadata, isRead, createdAt, updatedAt.
+    // SECURITY FIX (§1.9): Strict field whitelist, enumerated types, size
+    // caps, isRead=false on create, and update rule no longer lets a
+    // random user hijack somebody else's alert by setting actorId=self.
     match /alerts/{alertId} {
-      // Allow both recipient and actor to read alerts (for social features)
       allow read: if isSignedIn() && (
         resource.data.userId == request.auth.uid
         || resource.data.actorId == request.auth.uid
       );
 
-      // Alert creation: actor must be authenticated and cannot target themselves
       allow create: if isSignedIn()
         && request.resource.data.actorId == request.auth.uid
-        && request.resource.data.userId != request.auth.uid;
+        && request.resource.data.userId != request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'userId', 'actorId', 'type', 'entityId', 'message',
+             'metadata', 'isRead', 'createdAt', 'updatedAt'
+           ])
+        && request.resource.data.type in [
+             'FRIEND_REQUEST', 'FRIEND_ACCEPTED',
+             'DARE_RECEIVED', 'DARE_ACCEPTED', 'DARE_COMPLETED', 'DARE_REFUSED',
+             'DARE_APPROVED', 'DARE_REJECTED',
+             'TRUTH_RECEIVED', 'TRUTH_ANSWERED', 'TRUTH_REFUSED', 'TRUTH_COMPLETED',
+             'MESSAGE_RECEIVED',
+             'POST_LIKE', 'POST_LIKED', 'POST_COMMENT', 'COMMENT_RECEIVED', 'COMMENT_REPLY', 'COMMENT_LIKE',
+             'STORY_VIEW',
+             'PROFILE_VIEW',
+             'SUS_REPEATED_LIKES', 'SUS_PROFILE_VIEWING', 'SUS_PHOTO_VIEWS',
+             'SUS_MENTION_TALKING', 'SUS_CLOSE_FRIEND_ACTIVITY',
+             'MENTION', 'SYSTEM', 'SYSTEM_NOTIFICATION'
+           ]
+        && requiredString('userId', 128)
+        && requiredString('actorId', 128)
+        && stringUnder('entityId', 256)
+        && stringUnder('message', 500)
+        && (request.resource.data.isRead == false || request.resource.data.isRead == null);
 
-      // Recipient can mark as read/dismiss; actor can update/overwrite their own alerts
-      // (supports setDoc() calls for live profile viewing alerts that refresh)
       allow update: if isSignedIn() && (
-        resource.data.userId == request.auth.uid
-        || resource.data.actorId == request.auth.uid
-        || request.resource.data.actorId == request.auth.uid
+        // Recipient flipping isRead
+        (
+          resource.data.userId == request.auth.uid
+          && doesNotChange(['userId', 'actorId', 'type', 'entityId', 'createdAt'])
+        )
+        ||
+        // Original actor refreshing their own live alert
+        (
+          resource.data.actorId == request.auth.uid
+          && request.resource.data.actorId == request.auth.uid
+          && doesNotChange(['userId', 'actorId', 'type', 'createdAt'])
+          && stringUnder('message', 500)
+        )
       );
 
       allow delete: if isSignedIn() && (
@@ -730,8 +770,70 @@ service cloud.firestore {
       );
     }
 
+    // ─── CLOSE FRIENDS ──────────────────────────────────────────────────
+    // Maps "X has Y as a close friend". Doc id: `${owner_id}__${close_friend_id}`
+    // (URL-encoded). Read access is scoped so a user can either list their
+    // own close friends (owner_id == uid) OR find who has THEM marked as
+    // a close friend (close_friend_id == uid). The latter is needed by
+    // CloseFriendsService.getWatcherIdsForActor so the like-tracker can
+    // notify watchers; the query is filtered by close_friend_id == uid
+    // so a caller can never enumerate someone else's watcher graph.
+    match /close_friends/{relationId} {
+      allow read: if isSignedIn() && (
+        resource == null
+        || resource.data.owner_id == request.auth.uid
+        || resource.data.close_friend_id == request.auth.uid
+      );
+
+      allow create: if isSignedIn()
+        && request.resource.data.owner_id == request.auth.uid
+        && request.resource.data.owner_id != request.resource.data.close_friend_id
+        && requiredString('close_friend_id', 128);
+
+      // Only timestamp metadata may be touched after creation; the
+      // relationship endpoints themselves are immutable.
+      allow update: if isSignedIn()
+        && resource.data.owner_id == request.auth.uid
+        && doesNotChange(['owner_id', 'close_friend_id', 'created_at']);
+
+      allow delete: if isSignedIn()
+        && resource.data.owner_id == request.auth.uid;
+    }
+
+    // ─── CLOSE FRIEND ACTIVITY ───────────────────────────────────────────
+    // Tracks close friend interactions (e.g., repeated likes on same user's posts)
+    // Fields: actor_id, target_user_id, likedPostIds, likedPostsCount, updated_at
+    match /close_friend_activity/{activityId} {
+      // SECURITY FIX: allow `transaction.get` on a non-existent doc so the
+      // upsert flow in CloseFriendsService.trackPostLikeActivity can run.
+      // When the doc does not exist, `resource` is null and the existing
+      // owner-scoped check threw `permission-denied`, blocking the very
+      // first like. Reading a missing doc reveals no data, so this is
+      // safe; existing-doc reads remain owner-scoped.
+      allow read: if isSignedIn() && (
+        resource == null
+        || resource.data.actor_id == request.auth.uid
+        || resource.data.target_user_id == request.auth.uid
+      );
+
+      allow create: if isSignedIn()
+        && request.resource.data.actor_id == request.auth.uid
+        && stringUnder('target_user_id', 128);
+
+      allow update: if isSignedIn()
+        && resource.data.actor_id == request.auth.uid
+        && doesNotChange(['actor_id', 'target_user_id']);
+      allow delete: if isSignedIn()
+        && resource.data.actor_id == request.auth.uid;
+    }
+
     // ─── STORIES ────────────────────────────────────────────────────────
     // Fields: userId, mediaUrl, mediaType, caption, expiresAt, viewCount, viewers
+    // READ: Open to all signed-in users (matches posts/dares/friendships pattern).
+    // The isFriend() document-ID check was brittle for legacy friendships that
+    // pre-date canonical sorted IDs, causing onSnapshot queries to fail with
+    // "Missing or insufficient permissions". Friends-only access is enforced
+    // at the app layer: queries always filter by friend IDs from getAcceptedFriends().
     match /stories/{storyId} {
       allow read: if isSignedIn();
 
@@ -759,17 +861,21 @@ service cloud.firestore {
     }
 
     // ─── PRESENCE ───────────────────────────────────────────────────────
-    // Doc ID == userId. Fields: is_online, last_seen, etc.
+    // Doc ID == userId. Fields: online, last_seen, current_chat_user_id, etc.
+    // Read is open to all signed-in users so MessagingScreen can detect if
+    // a conversation partner is online / chatting elsewhere (chat-switch
+    // feature). Only the owning user may write their own presence doc.
     match /presence/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId);
-      allow delete: if isOwner(userId);
+      allow create, update, delete: if isOwner(userId);
     }
 
     // ─── GHOST MODE ─────────────────────────────────────────────────────
     // Doc ID == userId.
+    // SECURITY FIX (§3.10): Owner-only read — nobody else should be able
+    // to detect whether a user has ghost mode enabled.
     match /ghost_mode/{userId} {
-      allow read: if isSignedIn();
+      allow read: if isOwner(userId);
       allow create, update, delete: if isOwner(userId);
     }
 
@@ -825,11 +931,20 @@ service cloud.firestore {
     }
 
     match /moderation_actions/{actionId} {
-      // Target user can see actions against them (for UI "you are muted"
-      // banners, etc.). Moderator-side listing must go via backend.
+      // SECURITY FIX (§2.10): Target user can see actions against them.
+      // All writes are server-only (Admin SDK via `/api/admin/moderation`
+      // or the `moderationAction` Cloud Function).
       allow read: if isSignedIn()
         && resource.data.target_user_id == request.auth.uid;
       allow create, update, delete: if false;
+    }
+
+    // ─── IP BLOCKS (§2.8) ───────────────────────────────────────────────
+    // Audit log for admin-blocked IPs. Edge middleware + Redis is the
+    // fast-path enforcement; this is the long-lived record. Clients
+    // never read or write — only the admin API route via Admin SDK.
+    match /ip_blocks/{ip} {
+      allow read, write: if false;
     }
 
     match /override_votes/{voteId} {
@@ -885,6 +1000,27 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ─── SECURITY LOGS (centralized security event logging) ───────────
+    // SECURITY FIX: Added for centralized security monitoring and alerting
+    // Only admins can read logs for audit purposes
+    match /security_logs/{logId} {
+      allow read: if isSignedIn() && request.auth.token.admin == true;
+      allow create: if false; // Only server-side (via Admin SDK)
+      allow update, delete: if false;
+    }
+
+    // ─── SECURITY ALERTS (real-time critical security event alerts) ─────
+    // SECURITY FIX: Added for real-time alerting of critical security events
+    // Admins can read and acknowledge alerts
+    match /security_alerts/{alertId} {
+      allow read: if isSignedIn() && request.auth.token.admin == true;
+      allow update: if isSignedIn()
+        && request.auth.token.admin == true
+        && doesNotChange(['event', 'severity', 'userId', 'details', 'timestamp'])
+        && request.resource.data.acknowledged == true;
+      allow create, delete: if false; // Only server-side (via Admin SDK)
+    }
+
     // ═════════════════════════════════════════════════════════════════
     // EXPLICIT SUBCOLLECTIONS
     // Firestore rules OR together, so keeping a permissive catch-all
@@ -901,5 +1037,6 @@ service cloud.firestore {
         && request.resource.data.count is number;
       allow delete: if false;
     }
+
   }
 }
