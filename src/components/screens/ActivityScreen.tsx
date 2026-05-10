@@ -52,6 +52,8 @@ function typeLabel(type: ActivityType, count: number): string {
       return plural ? `Received ${count} dares` : "Received a dare";
     case "shared_post":
       return plural ? `Shared ${count} posts` : "Shared a post";
+    case "dedicated_story":
+      return plural ? `Dedicated ${count} stories` : "Dedicated a story";
     case "truth_sent":
       return plural ? `Sent ${count} truths` : "Sent a truth";
     case "truth_received":
@@ -95,6 +97,12 @@ const TYPE_META: Record<
     bg: "linear-gradient(135deg, rgba(192,132,252,0.22), rgba(126,34,206,0.08))",
     glow: "rgba(192,132,252,0.28)",
   },
+  dedicated_story: {
+    Icon: Sparkles,
+    color: "#facc15",
+    bg: "linear-gradient(135deg, rgba(250,204,21,0.24), rgba(74,222,128,0.08))",
+    glow: "rgba(250,204,21,0.28)",
+  },
   truth_sent: {
     Icon: HelpCircle,
     color: "#22d3ee",
@@ -136,6 +144,14 @@ function extractSnippet(item: ActivityItem) {
       : truncate(item.post?.content || "Commented on a post", 72);
   }
 
+  if (item.type === "dedicated_story") {
+    const targetName =
+      item.story?.dedicated_to?.display_name || item.other_user?.display_name;
+    const targetUsername =
+      item.story?.dedicated_to?.username || item.other_user?.username;
+    return `Dedicated a story to ${targetName || (targetUsername ? `@${targetUsername.replace(/^@/, "")}` : "someone")}`;
+  }
+
   if (item.truth?.question) return truncate(item.truth.question, 72);
   if (item.dare?.description) return truncate(item.dare.description, 72);
   if (item.post?.content) return truncate(item.post.content, 72);
@@ -147,7 +163,7 @@ function extractSnippet(item: ActivityItem) {
 }
 
 function postThumb(item: ActivityItem) {
-  return item.post?.media_url || "";
+  return item.post?.media_url || item.story?.media_url || "";
 }
 
 function itemTargetType(item: ActivityItem) {
@@ -601,6 +617,7 @@ export function ActivityScreen({
       liked_post: 0,
       commented_post: 0,
       shared_post: 0,
+      dedicated_story: 0,
       dare_sent: 0,
       dare_received: 0,
       truth_sent: 0,
@@ -622,7 +639,10 @@ export function ActivityScreen({
       base,
       photoActions,
       highlights:
-        base.liked_post + base.commented_post + base.shared_post,
+        base.liked_post +
+        base.commented_post +
+        base.shared_post +
+        base.dedicated_story,
     };
   }, [items]);
 
@@ -643,7 +663,7 @@ export function ActivityScreen({
           position: "sticky",
           top: 0,
           zIndex: 40,
-          padding: "18px 16px 16px",
+          padding: "calc(18px + env(safe-area-inset-top, 0px)) 16px 16px",
           background:
             "linear-gradient(180deg, rgba(3,3,3,0.98) 0%, rgba(3,3,3,0.92) 78%, rgba(3,3,3,0.82) 100%)",
           backdropFilter: "blur(18px)",
@@ -657,7 +677,7 @@ export function ActivityScreen({
             alignItems: "center",
             justifyContent: "space-between",
             marginBottom: "14px",
-            paddingTop: "28px",
+            paddingTop: 0,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>

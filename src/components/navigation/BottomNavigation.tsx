@@ -23,7 +23,7 @@ export function BottomNavigation({
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 bg-[#0a0f0a]/95 backdrop-blur-lg border-t border-[#2a2a2a] safe-area-bottom z-9999"
+      className="app-bottom-nav-motion fixed bottom-0 left-0 right-0 safe-area-x bg-[#0a0f0a]/95 backdrop-blur-lg border-t border-[#2a2a2a] z-9999"
       style={{
         position: "fixed",
         bottom: 0,
@@ -32,11 +32,15 @@ export function BottomNavigation({
         zIndex: 9999,
         background: "rgba(10, 15, 10, 0.95)",
         backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
         borderTop: "1px solid rgba(42, 42, 42, 1)",
-        paddingBottom: "env(safe-area-inset-bottom, 0)",
+        paddingBottom: "var(--safe-area-bottom)",
       }}
     >
-      <div className="flex items-center justify-around py-2">
+      <div
+        className="flex items-center justify-around py-2"
+        style={{ minHeight: "var(--bottom-nav-content-height)" }}
+      >
         {/* Left Navigation Items */}
         {navItems.slice(0, 2).map((item) => {
           const Icon = item.icon;
@@ -46,7 +50,7 @@ export function BottomNavigation({
             <button
               key={item.id}
               onClick={() => onScreenChange(item.id)}
-              className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all duration-200 ${
+              className={`app-pressable flex flex-col items-center justify-center p-2 rounded-lg transition-all duration-200 ${
                 isActive ? "text-[#4ade80]" : "text-[#94a3b8] hover:text-white"
               }`}
             >
@@ -59,7 +63,7 @@ export function BottomNavigation({
         {/* Center Plus Icon */}
         <button
           onClick={onCreateClick}
-          className="flex flex-col items-center justify-center p-3 rounded-full bg-[#4ade80] text-black hover:bg-[#22c55e] transition-all duration-200 shadow-lg hover:shadow-xl"
+          className="app-pressable flex flex-col items-center justify-center p-3 rounded-full bg-[#4ade80] text-black hover:bg-[#22c55e] transition-all duration-200 shadow-lg hover:shadow-xl"
         >
           <Plus size={28} />
         </button>
@@ -73,7 +77,7 @@ export function BottomNavigation({
             <button
               key={item.id}
               onClick={() => onScreenChange(item.id)}
-              className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all duration-200 ${
+              className={`app-pressable flex flex-col items-center justify-center p-2 rounded-lg transition-all duration-200 ${
                 isActive ? "text-[#4ade80]" : "text-[#94a3b8] hover:text-white"
               }`}
             >
@@ -86,7 +90,7 @@ export function BottomNavigation({
         {/* Profile - Rightmost */}
         <button
           onClick={() => onScreenChange("profile")}
-          className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all duration-200 ${
+          className={`app-pressable flex flex-col items-center justify-center p-2 rounded-lg transition-all duration-200 ${
             currentScreen === "profile"
               ? "text-[#4ade80]"
               : "text-[#94a3b8] hover:text-white"

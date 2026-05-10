@@ -93,11 +93,11 @@ export default function DareVoteModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/80 flex items-end justify-start z-9999 p-4"
+      className="app-modal-backdrop fixed inset-0 bg-black/80 flex items-end justify-start z-9999 p-4"
       onClick={onClose}
     >
       <div
-        className="bg-[#1a1a1a] rounded-2xl w-[98vw] h-[75vh] overflow-hidden border border-gray-800 relative"
+        className="app-modal-sheet bg-[#1a1a1a] rounded-2xl w-[98vw] h-[75vh] overflow-hidden border border-gray-800 relative"
         onClick={(e) => e.stopPropagation()}
       >
         {/* What People Think Section */}

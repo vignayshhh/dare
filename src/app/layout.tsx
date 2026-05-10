@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "DARE - Social Dare Challenge App",
   description: "Challenge your friends with dares and see who completes them",
+  applicationName: "DARE",
+  appleWebApp: {
+    capable: true,
+    title: "DARE",
+    statusBarStyle: "black-translucent",
+  },
   // Cache busting for development
   other: {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -53,6 +59,15 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  viewportFit: "cover",
+  themeColor: "#0a0f0a",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -60,13 +75,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, user-scalable=yes, maximum-scale=5.0"
-        />
-        <link rel="icon" href="/favicon.ico" />
-      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

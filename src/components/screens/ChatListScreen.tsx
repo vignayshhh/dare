@@ -393,10 +393,12 @@ export function ChatListScreen({
       style={{
         fontFamily:
           "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
+        height: "100dvh",
+        paddingBottom: "calc(var(--bottom-nav-total-height) + 16px)",
       }}
-      className="flex flex-col h-screen bg-black pb-24"
+      className="flex flex-col bg-black"
     >
-      <div className="px-4 pt-6 pb-0">
+      <div className="safe-area-top px-4 pt-6 pb-0">
         <div
           style={{
             background: "linear-gradient(160deg, #1a2a1a 0%, #111811 100%)",
@@ -740,12 +742,23 @@ export function ChatListScreen({
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-4px); }
         }
+        @keyframes chatDialogEnter {
+          from {
+            opacity: 0;
+            transform: translate(-50%, calc(-50% + 12px)) scale(0.96);
+          }
+          to {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+          }
+        }
       `}</style>
 
       {/* Friends Modal */}
       {showFriendsModal && (
         <>
           <div
+            className="app-modal-backdrop"
             style={{
               position: "fixed",
               top: 0,
@@ -772,6 +785,7 @@ export function ChatListScreen({
               zIndex: 201,
               border: "1px solid #222",
               boxShadow: "0 24px 48px rgba(0,0,0,0.6)",
+              animation: "chatDialogEnter 240ms var(--motion-ease-out) both",
             }}
           >
             <div

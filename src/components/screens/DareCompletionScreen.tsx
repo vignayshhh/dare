@@ -8,6 +8,9 @@ import {
   Image,
   Mic,
   Camera as CameraIcon,
+  ShieldCheck,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { useAuthStore } from "@/stores/useAuthStore-v2";
@@ -36,6 +39,7 @@ interface DareCompletionScreenProps {
     url: string;
   }) => void | Promise<void>;
   skipValidation?: boolean;
+  initialTimeRemaining?: number;
 }
 
 export function DareCompletionScreen({
@@ -43,6 +47,7 @@ export function DareCompletionScreen({
   onBack,
   onSubmit,
   skipValidation = false,
+  initialTimeRemaining = 15 * 60,
 }: DareCompletionScreenProps) {
   const { user } = useAuthStore();
   const onBackRef = useRef(onBack);
@@ -50,8 +55,9 @@ export function DareCompletionScreen({
 
   const [dareState, setDareState] = useState<string | null>(null);
   const [isValidState, setIsValidState] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(15 * 60);
+  const [timeRemaining, setTimeRemaining] = useState(initialTimeRemaining);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isExpired, setIsExpired] = useState(false);
   const [submittedAction, setSubmittedAction] = useState<
     "video" | "photo" | "voice" | "gallery" | null
   >(null);
@@ -141,18 +147,55 @@ export function DareCompletionScreen({
   }, [previewUrl]);
 
   useEffect(() => {
+    // Check if dare is already expired from localStorage
+    const expiredKey = `dare_expired_${challenge.id}`;
+    const isAlreadyExpired = localStorage.getItem(expiredKey);
+    if (isAlreadyExpired) {
+      setIsExpired(true);
+      onBack();
+      return;
+    }
+
+    // Get initial time from localStorage if available
+    const timerKey = `dare_timer_${challenge.id}`;
+    const savedTime = localStorage.getItem(timerKey);
+    if (savedTime) {
+      const parsedTime = parseInt(savedTime, 10);
+      if (!isNaN(parsedTime) && parsedTime > 0) {
+        setTimeRemaining(parsedTime);
+      }
+    }
+
     const timer = setInterval(() => {
       setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
+        const newTime = prev <= 1 ? 0 : prev - 1;
+        // Save to localStorage for sync
+        localStorage.setItem(timerKey, newTime.toString());
+
+        if (newTime === 0 && !isExpired) {
+          // Mark as expired in localStorage
+          localStorage.setItem(expiredKey, "true");
+          setIsExpired(true);
+          // Clear timer from localStorage
+          localStorage.removeItem(timerKey);
+          // Go back after a short delay
+          setTimeout(() => {
+            onBack();
+          }, 500);
         }
-        return prev - 1;
+
+        return newTime;
       });
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, []);
+    return () => {
+      clearInterval(timer);
+      // Clean up localStorage when unmounting (if not expired)
+      if (!isExpired) {
+        localStorage.removeItem(timerKey);
+      }
+    };
+  }, [challenge.id, onBack, isExpired]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -399,166 +442,238 @@ export function DareCompletionScreen({
     }
   };
 
-  if (!isValidState) {
+  const actionCards = [
+    {
+      id: "video",
+      icon: Camera,
+      label: isRecording ? "Recording..." : "Record Video",
+      hint: "10 second one-take capture",
+      onClick: handleRecordVideo,
+      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
+      border: "border-[#4ade80]/25",
+      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
+      iconBg: "bg-[#4ade80]/15",
+    },
+    {
+      id: "photo",
+      icon: CameraIcon,
+      label: isCapturing ? "Capturing..." : "Take Photo",
+      hint: "Snap proof right now",
+      onClick: handleTakePhoto,
+      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
+      border: "border-[#4ade80]/25",
+      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
+      iconBg: "bg-[#4ade80]/15",
+    },
+    {
+      id: "voice",
+      icon: Mic,
+      label: isRecording ? "Recording..." : "Record Voice",
+      hint: "Short audio proof",
+      onClick: handleRecordVoice,
+      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
+      border: "border-[#4ade80]/25",
+      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
+      iconBg: "bg-[#4ade80]/15",
+    },
+    {
+      id: "gallery",
+      icon: Image,
+      label: "Choose from Gallery",
+      hint: "Upload saved media",
+      onClick: handleChooseFromGallery,
+      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
+      border: "border-[#4ade80]/25",
+      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
+      iconBg: "bg-[#4ade80]/15",
+    },
+  ];
+
+  if (!isValidState || isExpired) {
     return (
       <div className="screen-container flex items-center justify-center">
         <div className="text-center">
-          <div className="text-red-500 text-lg font-semibold mb-2">
-            Invalid Dare State
+          <div className="mb-2 text-lg font-semibold text-red-500">
+            Dare Expired
           </div>
-          <div className="text-text-secondary text-sm mb-4">
-            This dare cannot be completed because it&apos;s not in an accepted
-            state.
+          <div className="mb-4 text-sm text-text-secondary">
+            The time to complete this dare has run out.
           </div>
-          <div className="text-text-secondary text-xs">
-            Current state: {dareState || "Unknown"}
-          </div>
-          <div className="text-text-secondary text-xs mt-2">
-            Redirecting back...
-          </div>
+          <button
+            onClick={onBack}
+            className="btn btn-primary px-6 py-2 text-sm"
+          >
+            Go Back
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="screen-container">
+    <div className="screen-container bg-[radial-gradient(circle_at_top,#16291d_0%,#0c120d_38%,#070907_100%)]">
       <div className="nav-header">
-        <div className="flex items-center justify-between p-4">
-          <button onClick={onBack} className="btn-icon btn-ghost">
+        <div className="flex items-center justify-between px-4 pb-4 pt-5">
+          <button
+            onClick={onBack}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white transition-all hover:border-[#4ade80]/30 hover:bg-white/10"
+          >
             <ArrowLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-white">Complete the Dare</h1>
-          <div className="flex items-center space-x-2 text-[#4ade80]">
+          <div className="text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3a7]">
+              Dare Proof
+            </p>
+            <h1 className="text-lg font-bold text-white">Complete the Dare</h1>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-2 text-[#86efac] shadow-[0_0_24px_rgba(74,222,128,0.12)]">
             <Clock size={16} />
-            <span className="font-medium">{formatTime(timeRemaining)}</span>
+            <span className="text-sm font-semibold">
+              {formatTime(timeRemaining)}
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 pb-24">
-        <div className="card mb-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <Avatar
-              src={resolvedChallenger.avatar}
-              alt={resolvedChallenger.name}
-              size="md"
-              userId={challenge.challengerId}
-              username={resolvedChallenger.username}
-            />
-            <div>
-              <h3 className="font-semibold text-white">
-                {resolvedChallenger.name}
-              </h3>
-              <p className="text-text-secondary text-sm">
-                {resolvedChallenger.username}
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-20 pt-4">
+        <div className="mx-auto max-w-2xl space-y-4">
+          <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,24,21,0.98),rgba(12,15,13,0.98))] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.4)]">
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.45),transparent)]" />
+            <div className="pointer-events-none absolute -right-6 top-0 h-28 w-28 rounded-full bg-[#4ade80]/10 blur-3xl" />
+
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="relative">
+                  <Avatar
+                    src={resolvedChallenger.avatar}
+                    alt={resolvedChallenger.name}
+                    size="md"
+                    userId={challenge.challengerId}
+                    username={resolvedChallenger.username}
+                  />
+                  <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-[#0d1510] bg-[#4ade80] text-black shadow-[0_0_18px_rgba(74,222,128,0.45)]">
+                    <Zap size={9} />
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7dd3a7]">
+                    Dare from
+                  </p>
+                  <h3 className="text-sm font-semibold text-white">
+                    {resolvedChallenger.name}
+                  </h3>
+                  <p className="text-xs text-[#91a091]">
+                    {resolvedChallenger.username}
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#86efac]">
+                Accepted
+              </div>
+            </div>
+
+            <div className="rounded-[20px] border border-[#4ade80]/14 bg-[linear-gradient(180deg,rgba(26,31,28,0.98),rgba(18,21,19,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="mb-2.5 flex items-center gap-2 text-[#86efac]">
+                <div className="h-1 w-8 rounded-full bg-[#4ade80]" />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+                  Mission
+                </span>
+              </div>
+              <p className="text-base font-semibold leading-relaxed text-white">
+                {challenge.action}
               </p>
             </div>
           </div>
 
-          <div className="bg-[#2a2a2a] rounded-xl p-4 border-l-4 border-[#f59e0b]">
-            <p className="text-white font-semibold text-lg leading-relaxed">
-              {challenge.action}
-            </p>
-          </div>
-
-          <div className="mt-4 flex items-center space-x-2 text-text-secondary">
-            <div className="w-2 h-2 bg-[#f59e0b] rounded-full"></div>
-            <span className="text-sm">One-take proof required</span>
-          </div>
-        </div>
-
-        {!isSubmitted ? (
-          !isPreviewMode ? (
-            <div className="space-y-4">
-              <button
-                onClick={handleRecordVideo}
-                disabled={isRecording || isCapturing}
-                className="btn btn-primary w-full py-4 text-base font-semibold flex items-center justify-center space-x-3 disabled:opacity-50"
-              >
-                <Camera size={20} />
-                <span>{isRecording ? "Recording..." : "Record Video"}</span>
-              </button>
-
-              <button
-                onClick={handleTakePhoto}
-                disabled={isRecording || isCapturing}
-                className="btn btn-primary w-full py-4 text-base font-semibold flex items-center justify-center space-x-3 disabled:opacity-50"
-              >
-                <CameraIcon size={20} />
-                <span>{isCapturing ? "Capturing..." : "Take Photo"}</span>
-              </button>
-
-              <button
-                onClick={handleRecordVoice}
-                disabled={isRecording || isCapturing}
-                className="btn btn-primary w-full py-4 text-base font-semibold flex items-center justify-center space-x-3 disabled:opacity-50"
-              >
-                <Mic size={20} />
-                <span>{isRecording ? "Recording..." : "Record Voice"}</span>
-              </button>
-
-              <button
-                onClick={handleChooseFromGallery}
-                disabled={isRecording || isCapturing}
-                className="btn btn-primary w-full py-4 text-base font-semibold flex items-center justify-center space-x-3 disabled:opacity-50"
-              >
-                <Image size={20} />
-                <span>Choose from Gallery</span>
-              </button>
-
-              <div className="text-center">
-                <p className="text-text-secondary text-sm">
-                  Once submitted, proof cannot be changed
-                </p>
+          {!isSubmitted ? (
+            !isPreviewMode ? (
+              <div className="grid gap-2.5 grid-cols-2">
+                {actionCards.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={item.onClick}
+                      disabled={isRecording || isCapturing}
+                      className={`group relative overflow-hidden rounded-[24px] border ${item.border} bg-[linear-gradient(145deg,rgba(25,26,24,0.98),rgba(15,16,14,0.98))] p-5 text-left ${item.glow} transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02] hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:scale-100`}
+                    >
+                      <div
+                        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${item.accent} opacity-100 transition-opacity duration-300 group-hover:opacity-100`}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+                      <div className="relative">
+                        <div
+                          className={`mb-3 flex h-12 w-12 items-center justify-center rounded-2xl ${item.iconBg} border border-white/20 text-white shadow-[0_8px_16px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-sm`}
+                        >
+                          <Icon size={20} />
+                        </div>
+                        <h3 className="text-sm font-bold text-white tracking-wide">
+                          {item.label}
+                        </h3>
+                        <p className="mt-1 text-xs text-white/70 font-medium">
+                          {item.hint}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="card">
-                <h3 className="text-white font-bold text-lg mb-4">Preview</h3>
+            ) : (
+              <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,21,19,0.98),rgba(11,14,12,0.98))] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
+                <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.34),transparent)]" />
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-bold text-white">Preview</h3>
+                    <p className="mt-0.5 text-xs text-[#8f968f]">
+                      Review your proof before you send it.
+                    </p>
+                  </div>
+                  <div className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86efac]">
+                    {previewType}
+                  </div>
+                </div>
 
-                <div className="mb-6">
+                <div className="mb-4 overflow-hidden rounded-[20px] border border-white/8 bg-black/30">
                   {previewType === "image" && (
                     <img
                       src={previewUrl || ""}
                       alt="Preview"
-                      className="w-full rounded-lg"
+                      className="w-full rounded-[20px]"
                     />
                   )}
                   {previewType === "video" && (
                     <video
                       src={previewUrl || ""}
                       controls
-                      className="w-full rounded-lg"
+                      className="w-full rounded-[20px]"
                     />
                   )}
                   {previewType === "audio" && (
-                    <div className="bg-[#2a2a2a] rounded-lg p-6 text-center">
-                      <Mic size={48} className="text-[#4ade80] mx-auto mb-4" />
+                    <div className="bg-[linear-gradient(180deg,rgba(20,24,21,0.98),rgba(12,15,13,0.98))] p-4 text-center">
+                      <Mic size={36} className="mx-auto mb-3 text-[#86efac]" />
                       <audio
                         src={previewUrl || ""}
                         controls
                         className="w-full"
                       />
-                      <p className="text-text-secondary text-sm mt-2">
+                      <p className="mt-2 text-xs text-[#a7ada7]">
                         Voice Recording
                       </p>
                     </div>
                   )}
                 </div>
 
-                <div className="flex space-x-4">
+                <div className="flex gap-2.5">
                   <button
                     onClick={clearPreview}
-                    className="btn btn-secondary flex-1 py-3 text-base font-semibold"
+                    className="flex-1 rounded-[18px] border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-white/[0.08]"
                   >
                     Retake
                   </button>
                   <button
                     onClick={handleSubmitProof}
                     disabled={isSubmitted || isUploadingProof}
-                    className="btn btn-primary flex-1 py-3 text-base font-semibold"
+                    className="flex-1 rounded-[18px] bg-[linear-gradient(135deg,#4ade80_0%,#22c55e_100%)] px-4 py-3 text-sm font-bold text-black shadow-[0_12px_24px_rgba(74,222,128,0.2)] transition-all hover:-translate-y-1 hover:shadow-[0_16px_28px_rgba(74,222,128,0.24)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isUploadingProof || isSubmitted
                       ? "Submitting..."
@@ -566,37 +681,38 @@ export function DareCompletionScreen({
                   </button>
                 </div>
               </div>
-            </div>
-          )
-        ) : (
-          <div className="text-center">
-            <div className="card">
-              <div className="w-16 h-16 bg-[#4ade80] rounded-full flex items-center justify-center mx-auto mb-4">
+            )
+          ) : (
+            <div className="relative overflow-hidden rounded-[24px] border border-[#4ade80]/16 bg-[linear-gradient(180deg,rgba(18,24,19,0.98),rgba(11,15,11,0.98))] p-5 text-center shadow-[0_20px_45px_rgba(0,0,0,0.35)]">
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.42),transparent)]" />
+              <div className="pointer-events-none absolute left-1/2 top-5 h-28 w-28 -translate-x-1/2 rounded-full bg-[#4ade80]/10 blur-3xl" />
+
+              <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-[#4ade80]/25 bg-[#4ade80]/12 shadow-[0_0_28px_rgba(74,222,128,0.16)]">
                 {submittedAction === "video" && (
-                  <Camera size={32} className="text-black" />
+                  <Camera size={26} className="text-[#86efac]" />
                 )}
                 {submittedAction === "photo" && (
-                  <CameraIcon size={32} className="text-black" />
+                  <CameraIcon size={26} className="text-[#86efac]" />
                 )}
                 {submittedAction === "voice" && (
-                  <Mic size={32} className="text-black" />
+                  <Mic size={26} className="text-[#86efac]" />
                 )}
                 {submittedAction === "gallery" && (
-                  <Image size={32} className="text-black" />
+                  <Image size={26} className="text-[#86efac]" />
                 )}
                 {!submittedAction && (
-                  <Camera size={32} className="text-black" />
+                  <Camera size={26} className="text-[#86efac]" />
                 )}
               </div>
-              <h3 className="text-white font-bold text-xl mb-2">
-                {submittedAction === "video" && "Video Recorded • Under review"}
-                {submittedAction === "photo" && "Photo Taken • Under review"}
-                {submittedAction === "voice" && "Voice Recorded • Under review"}
+              <h3 className="mb-1.5 text-lg font-bold text-white">
+                {submittedAction === "video" && "Video Recorded - Under review"}
+                {submittedAction === "photo" && "Photo Taken - Under review"}
+                {submittedAction === "voice" && "Voice Recorded - Under review"}
                 {submittedAction === "gallery" &&
-                  "Image Selected • Under review"}
-                {!submittedAction && "Submitted • Under review"}
+                  "Image Selected - Under review"}
+                {!submittedAction && "Submitted - Under review"}
               </h3>
-              <p className="text-text-secondary text-sm">
+              <p className="mx-auto max-w-md text-xs text-[#b8c4b8]">
                 {submittedAction === "video" &&
                   "Your video is being reviewed by friends"}
                 {submittedAction === "photo" &&
@@ -608,8 +724,8 @@ export function DareCompletionScreen({
                 {!submittedAction && "Your proof is being reviewed by friends"}
               </p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

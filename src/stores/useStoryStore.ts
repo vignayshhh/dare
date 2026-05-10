@@ -33,7 +33,27 @@ const sanitizeStoryForPersist = (story: StoryDTO): StoryDTO => ({
     ...story.author,
     avatar: isDataUrl(story.author.avatar) ? "" : story.author.avatar,
   },
+  dedicatedTo: story.dedicatedTo
+    ? {
+        ...story.dedicatedTo,
+        avatar: isDataUrl(story.dedicatedTo.avatar)
+          ? ""
+          : story.dedicatedTo.avatar,
+      }
+    : null,
 });
+
+const toStoryUser = (profile: any, fallbackId: string) => {
+  const id = profile?.user_id || profile?.id || fallbackId;
+  const username = profile?.username || `user_${id.slice(-6)}`;
+
+  return {
+    id,
+    username: username.startsWith("@") ? username : `@${username}`,
+    displayName: profile?.display_name || profile?.displayName || username,
+    avatar: profile?.avatar_url || getDefaultAvatarUrl(id),
+  };
+};
 
 // Legacy request-ID guards (used by one-shot loaders)
 let friendsStoriesRequestId = 0;
@@ -146,8 +166,17 @@ export const useStoryStore = create<StoryState>()(
               const uncachedIds = [
                 ...new Set(
                   snapshot.docs
-                    .map((d) => d.data().userId as string)
-                    .filter((id) => id && !profileCache[id]),
+                    .flatMap((d) => {
+                      const data = d.data();
+                      return [
+                        data.userId as string,
+                        data.dedicatedToUserId as string | undefined,
+                      ];
+                    })
+                    .filter(
+                      (id): id is string =>
+                        typeof id === "string" && !profileCache[id],
+                    ),
                 ),
               ];
 
@@ -171,6 +200,9 @@ export const useStoryStore = create<StoryState>()(
                 .map((docSnap) => {
                   const data = docSnap.data();
                   const profile = profileCache[data.userId];
+                  const dedicatedProfile = data.dedicatedToUserId
+                    ? profileCache[data.dedicatedToUserId]
+                    : null;
                   const hasViewed =
                     Array.isArray(data.viewers) &&
                     data.viewers.includes(userId);
@@ -185,6 +217,17 @@ export const useStoryStore = create<StoryState>()(
                         avatar: getDefaultAvatarUrl(data.userId),
                       },
                       media: { type: data.mediaType, url: data.mediaUrl },
+                      storyType: data.storyType || "personal",
+                      dedicatedTo:
+                        data.dedicatedToUserId && dedicatedProfile
+                          ? toStoryUser(
+                              dedicatedProfile,
+                              data.dedicatedToUserId,
+                            )
+                          : null,
+                      storyText: data.storyText || null,
+                      storyFilter: data.storyFilter || "original",
+                      storyMusic: data.storyMusic || null,
                       caption: data.caption ?? null,
                       createdAt:
                         data.createdAt?.toDate()?.toISOString() ??
@@ -210,6 +253,14 @@ export const useStoryStore = create<StoryState>()(
                         getDefaultAvatarUrl(profile.user_id),
                     },
                     media: { type: data.mediaType, url: data.mediaUrl },
+                    storyType: data.storyType || "personal",
+                    dedicatedTo:
+                      data.dedicatedToUserId && dedicatedProfile
+                        ? toStoryUser(dedicatedProfile, data.dedicatedToUserId)
+                        : null,
+                    storyText: data.storyText || null,
+                    storyFilter: data.storyFilter || "original",
+                    storyMusic: data.storyMusic || null,
                     caption: data.caption ?? null,
                     createdAt:
                       data.createdAt?.toDate()?.toISOString() ??
@@ -257,6 +308,7 @@ export const useStoryStore = create<StoryState>()(
         } catch {
           // will use fallback
         }
+        const dedicatedProfileCache: Record<string, any> = {};
 
         const q = query(
           collection(db, "stories"),
@@ -266,8 +318,30 @@ export const useStoryStore = create<StoryState>()(
 
         const unsub = onSnapshot(
           q,
-          (snapshot) => {
+          async (snapshot) => {
             const now = new Date();
+            const uncachedDedicatedIds = [
+              ...new Set(
+                snapshot.docs
+                  .map((docSnap) => docSnap.data().dedicatedToUserId as string)
+                  .filter(
+                    (id): id is string =>
+                      Boolean(id) && !dedicatedProfileCache[id],
+                  ),
+              ),
+            ];
+
+            await Promise.all(
+              uncachedDedicatedIds.map(async (id) => {
+                try {
+                  const profile = await userService.getProfile(id);
+                  if (profile) dedicatedProfileCache[id] = profile;
+                } catch {
+                  // will use fallback
+                }
+              }),
+            );
+
             const userStories: StoryDTO[] = snapshot.docs
               .filter((docSnap) => {
                 const exp = docSnap.data().expiresAt?.toDate?.();
@@ -292,6 +366,18 @@ export const useStoryStore = create<StoryState>()(
                       userProfile?.avatar_url || getDefaultAvatarUrl(userId),
                   },
                   media: { type: data.mediaType, url: data.mediaUrl },
+                  storyType: data.storyType || "personal",
+                  dedicatedTo:
+                    data.dedicatedToUserId &&
+                    dedicatedProfileCache[data.dedicatedToUserId]
+                      ? toStoryUser(
+                          dedicatedProfileCache[data.dedicatedToUserId],
+                          data.dedicatedToUserId,
+                        )
+                      : null,
+                  storyText: data.storyText || null,
+                  storyFilter: data.storyFilter || "original",
+                  storyMusic: data.storyMusic || null,
                   caption: data.caption ?? null,
                   createdAt:
                     data.createdAt?.toDate()?.toISOString() ??

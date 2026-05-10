@@ -160,6 +160,7 @@ function AnimatedModalWrapper({
   if (!mounted) return null;
   return (
     <div
+      className="app-modal-backdrop"
       style={{
         position: "fixed",
         inset: 0,
@@ -175,7 +176,7 @@ function AnimatedModalWrapper({
         .dare-modal-backdrop { pointer-events: all; transition: opacity 0.3s ease; opacity: ${visible ? 1 : 0}; }
       `}</style>
       <div
-        className="dare-modal-backdrop"
+        className="app-modal-backdrop dare-modal-backdrop"
         style={{
           position: "absolute",
           inset: 0,
@@ -184,7 +185,7 @@ function AnimatedModalWrapper({
         onClick={onClose}
       />
       <div
-        className="dare-modal-sheet"
+        className="app-modal-sheet dare-modal-sheet"
         style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
       >
         {children}
@@ -295,6 +296,7 @@ function TruthVoteModal({
 
   return (
     <div
+      className="app-modal-backdrop"
       onClick={handleClose}
       style={{
         position: "fixed",
@@ -315,6 +317,7 @@ function TruthVoteModal({
         @keyframes slideDown { from { transform: translateY(0); }    to { transform: translateY(100%); } }
       `}</style>
       <div
+        className="app-modal-sheet"
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
@@ -730,6 +733,7 @@ function DareVoteModal({
 
   return (
     <div
+      className="app-modal-backdrop"
       onClick={handleClose}
       style={{
         position: "fixed",
@@ -751,6 +755,7 @@ function DareVoteModal({
         .modal-voter-list::-webkit-scrollbar { display: none; }
       `}</style>
       <div
+        className="app-modal-sheet"
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
@@ -1130,6 +1135,8 @@ const AnimatedDareCapsule = React.memo(
     onNavigateToProfile,
     challengerId,
     receiverId,
+    revealDescription = true,
+    persist = false,
   }: {
     cardId: string;
     challenger: DarePost["challenger"];
@@ -1139,6 +1146,8 @@ const AnimatedDareCapsule = React.memo(
     onNavigateToProfile?: (userId: string) => void;
     challengerId?: string;
     receiverId?: string;
+    revealDescription?: boolean;
+    persist?: boolean;
   }) {
     const [expanded, setExpanded] = useState(false);
     const [showChallengerName, setShowChallengerName] = useState(false);
@@ -1175,16 +1184,21 @@ const AnimatedDareCapsule = React.memo(
       const t1 = setTimeout(() => setExpanded(true), 500); // pill expands
       const t2 = setTimeout(() => setShowChallengerName(true), 200); // name drifts in with capsule
       const t3 = setTimeout(() => setShowReceiver(true), 1500); // DARED + receiver
-      const t4 = setTimeout(() => setShowDescription(true), 3500); // description rises
-      const t5 = setTimeout(() => setFading(true), 12000); // fade out
-      const t6 = setTimeout(() => setShowAll(false), 12500); // unmount
+      const t4 = setTimeout(() => {
+        if (revealDescription) setShowDescription(true);
+      }, 3500); // description rises
 
-      timers.current.push(t0, t1, t2, t3, t4, t5, t6);
+      timers.current.push(t0, t1, t2, t3, t4);
+      if (!persist) {
+        const t5 = setTimeout(() => setFading(true), 12000); // fade out
+        const t6 = setTimeout(() => setShowAll(false), 12500); // unmount
+        timers.current.push(t5, t6);
+      }
       return () => {
         timers.current.forEach(clearTimeout);
         timers.current = [];
       };
-    }, [cardId, isActive]);
+    }, [cardId, isActive, persist, revealDescription]);
 
     const COLLAPSED_WIDTH = 64;
 
@@ -1331,23 +1345,28 @@ const AnimatedDareCapsule = React.memo(
           </button>
         </div>
         {/* Description — cinematic slide up */}
-        <p
-          style={{
-            color: "#fff",
-            fontSize: 20,
-            fontWeight: 800,
-            textAlign: "center",
-            textShadow: "0 2px 12px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.8)",
-            margin: "12px 0 0",
-            padding: "0 32px",
-            opacity: showDescription ? 1 : 0,
-            transform: showDescription ? "translateY(0)" : "translateY(18px)",
-            transition:
-              "opacity 1.4s cubic-bezier(0.25,0.46,0.45,0.94), transform 1.4s cubic-bezier(0.25,0.46,0.45,0.94)",
-          }}
-        >
-          {description}
-        </p>
+        {revealDescription && (
+          <p
+            style={{
+              color: "#fff",
+              fontSize: 20,
+              fontWeight: 800,
+              textAlign: "center",
+              textShadow:
+                "0 2px 12px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.8)",
+              margin: "12px 0 0",
+              padding: "0 32px",
+              opacity: showDescription ? 1 : 0,
+              transform: showDescription
+                ? "translateY(0)"
+                : "translateY(18px)",
+              transition:
+                "opacity 1.4s cubic-bezier(0.25,0.46,0.45,0.94), transform 1.4s cubic-bezier(0.25,0.46,0.45,0.94)",
+            }}
+          >
+            {description}
+          </p>
+        )}
       </div>
     );
   },
@@ -1356,7 +1375,9 @@ const AnimatedDareCapsule = React.memo(
     if (
       prev.challenger !== next.challenger ||
       prev.receiver !== next.receiver ||
-      prev.description !== next.description
+      prev.description !== next.description ||
+      prev.revealDescription !== next.revealDescription ||
+      prev.persist !== next.persist
     )
       return false;
     return true;
@@ -1432,6 +1453,7 @@ function ReelCommentsModal({
 
   return (
     <div
+      className="app-modal-backdrop"
       onClick={handleClose}
       style={{
         position: "fixed",
@@ -1452,6 +1474,7 @@ function ReelCommentsModal({
         .rc-list::-webkit-scrollbar { display: none; }
       `}</style>
       <div
+        className="app-modal-sheet"
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
@@ -1846,6 +1869,7 @@ function ReelShareModal({
 
   return (
     <div
+      className="app-modal-backdrop"
       onClick={handleClose}
       style={{
         position: "fixed",
@@ -1866,6 +1890,7 @@ function ReelShareModal({
         .rs-scroll::-webkit-scrollbar { display: none; }
       `}</style>
       <div
+        className="app-modal-sheet"
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
@@ -2189,6 +2214,10 @@ export function DareCard({
   const [exiting, setExiting] = useState(false);
   const btnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipVoteUntilRef = useRef<number>(0);
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const carouselScrollFrame = useRef<number | null>(null);
+  const [carouselSlide, setCarouselSlide] = useState(0);
+  const [carouselSeamProgress, setCarouselSeamProgress] = useState(0);
 
   useEffect(() => {
     if (dare.id) {
@@ -2206,6 +2235,9 @@ export function DareCard({
 
   const realViewCount = viewCounts[dare.id] ?? 0;
   const realCommentCount = commentCounts[dare.id] ?? 0;
+  const shouldRunVoteTimer = Boolean(
+    isActive && (!reelMode || carouselSlide === 1),
+  );
 
   useEffect(() => {
     if (btnTimerRef.current) clearTimeout(btnTimerRef.current);
@@ -2217,8 +2249,12 @@ export function DareCard({
       return;
     }
 
-    if (isActive) {
-      setButtonsVisible(false);
+    if (shouldRunVoteTimer) {
+      if (buttonsVisible || phase !== "idle") {
+        setTimerRunning(false);
+        return;
+      }
+
       setTimerRunning(false);
       setTimerKey((k) => k + 1);
       const tStart = setTimeout(() => setTimerRunning(true), 50);
@@ -2227,14 +2263,31 @@ export function DareCard({
         setTimerRunning(false);
       }, 10000);
       return () => clearTimeout(tStart);
-    } else {
+    } else if (!isActive) {
       setButtonsVisible(false);
+      setTimerRunning(false);
+    } else {
       setTimerRunning(false);
     }
     return () => {
       if (btnTimerRef.current) clearTimeout(btnTimerRef.current);
     };
+  }, [buttonsVisible, dare.id, getUserVote, isActive, phase, shouldRunVoteTimer]);
+
+  useEffect(() => {
+    if (isActive) return;
+    setCarouselSlide(0);
+    setCarouselSeamProgress(0);
+    if (carouselRef.current) carouselRef.current.scrollLeft = 0;
   }, [isActive, dare.id]);
+
+  useEffect(() => {
+    return () => {
+      if (carouselScrollFrame.current !== null) {
+        window.cancelAnimationFrame(carouselScrollFrame.current);
+      }
+    };
+  }, []);
 
   const handleVote = (choice: "real" | "fake") => {
     if (phase !== "idle" || exiting || Date.now() < skipVoteUntilRef.current)
@@ -2270,7 +2323,47 @@ export function DareCard({
     lastTapRef.current = now;
   };
 
+  const handleCarouselTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+  };
+
+  const handleCarouselTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+  };
+
+  const handleCarouselTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+  };
+
+  const handleCarouselScroll = () => {
+    if (carouselScrollFrame.current !== null) return;
+
+    carouselScrollFrame.current = window.requestAnimationFrame(() => {
+      carouselScrollFrame.current = null;
+      const carousel = carouselRef.current;
+      if (!carousel || !carousel.clientWidth) return;
+      const nextProgress = Math.max(
+        0,
+        Math.min(1, carousel.scrollLeft / carousel.clientWidth),
+      );
+      const nextSlide = Math.max(
+        0,
+        Math.min(1, Math.round(nextProgress)),
+      );
+      setCarouselSeamProgress((current) =>
+        Math.abs(current - nextProgress) < 0.01 ? current : nextProgress,
+      );
+      setCarouselSlide((current) =>
+        current === nextSlide ? current : nextSlide,
+      );
+    });
+  };
+
   const hasVoted = phase === "voted" && vote !== null;
+  const carouselSeamOpacity =
+    carouselSeamProgress > 0.015 && carouselSeamProgress < 0.985
+      ? Math.min(0.72, Math.sin(carouselSeamProgress * Math.PI) * 0.78)
+      : 0;
 
   if (reelMode) {
     return (
@@ -2286,6 +2379,310 @@ export function DareCard({
         }}
       >
         <DoubleTapLike trigger={likeTrigger} />
+        <div
+          ref={carouselRef}
+          className="dare-reel-carousel"
+          onScroll={handleCarouselScroll}
+          onTouchStart={handleCarouselTouchStart}
+          onTouchMove={handleCarouselTouchMove}
+          onTouchEnd={handleCarouselTouchEnd}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            overflowX: "auto",
+            overflowY: "hidden",
+            scrollSnapType: "x mandatory",
+            scrollBehavior: "smooth",
+            overscrollBehaviorX: "contain",
+            WebkitOverflowScrolling: "touch",
+            touchAction: "pan-x pan-y",
+            willChange: "scroll-position",
+          }}
+        >
+          <section
+            className={`dare-cover-slide ${isActive ? "dare-cover-slide-active" : ""}`}
+            style={{
+              position: "relative",
+              flex: "0 0 100%",
+              width: "100%",
+              height: "100%",
+              scrollSnapAlign: "start",
+              scrollSnapStop: "always",
+              overflow: "hidden",
+              background:
+                "radial-gradient(circle at 50% 18%, rgba(250,204,21,0.16), transparent 18%), radial-gradient(circle at 16% 76%, rgba(74,222,128,0.18), transparent 24%), radial-gradient(circle at 86% 72%, rgba(96,165,250,0.14), transparent 28%), linear-gradient(180deg, #020403 0%, #07100b 38%, #030303 100%)",
+            }}
+          >
+            <div
+              className="dare-cover-lattice"
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "linear-gradient(115deg, rgba(74,222,128,0.18) 0 1px, transparent 1px 22px), linear-gradient(245deg, rgba(255,255,255,0.075) 0 1px, transparent 1px 28px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.12), transparent 42%)",
+                backgroundSize: "100% 100%, 100% 100%, 100% 100%",
+                opacity: 0.9,
+              }}
+            />
+            <div
+              className="dare-cover-metal"
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "conic-gradient(from 210deg at 50% 52%, rgba(74,222,128,0.18), rgba(255,255,255,0.06), rgba(96,165,250,0.14), rgba(250,204,21,0.1), rgba(74,222,128,0.18)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.72), transparent 50%)",
+                opacity: 0.72,
+                mixBlendMode: "screen",
+              }}
+            />
+            <div
+              className="dare-cover-ribbon"
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "-22%",
+                width: "144%",
+                height: 220,
+                transform: "translateY(-50%) rotate(12deg)",
+                background:
+                  "linear-gradient(90deg, transparent 0%, rgba(74,222,128,0.02) 18%, rgba(74,222,128,0.2) 46%, rgba(255,255,255,0.16) 51%, rgba(96,165,250,0.12) 59%, transparent 100%)",
+                opacity: 0.68,
+                filter: "blur(0.2px)",
+              }}
+            />
+            <div
+              className="dare-cover-stage"
+              style={{
+                position: "absolute",
+                left: "7%",
+                right: "7%",
+                top: "15%",
+                bottom: "16%",
+                borderRadius: 36,
+                border: "1px solid rgba(74,222,128,0.16)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 0 90px rgba(74,222,128,0.08), inset 0 -44px 90px rgba(0,0,0,0.34), 0 30px 94px rgba(0,0,0,0.38)",
+                background:
+                  "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01))",
+                transform: "translateY(-38px) perspective(900px) rotateX(2deg)",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                border: "1px solid rgba(255,255,255,0.06)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -120px 160px rgba(0,0,0,0.58), inset 0 120px 160px rgba(74,222,128,0.035)",
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                zIndex: 1,
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "24px",
+                padding: "40px 22px calc(120px + env(safe-area-inset-bottom))",
+                transform: "translateY(-38px)",
+              }}
+            >
+              <div
+                className="dare-cover-avatar-stack"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: 98,
+                  filter: "drop-shadow(0 18px 34px rgba(0,0,0,0.5))",
+                }}
+              >
+                <button
+                  className="dare-cover-avatar dare-cover-avatar-left"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onNavigateToProfile && dare.challengerId) {
+                      onNavigateToProfile(dare.challengerId);
+                    }
+                  }}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: onNavigateToProfile ? "pointer" : "default",
+                    position: "relative",
+                    zIndex: 2,
+                  }}
+                >
+                  <PostAvatar
+                    src={dare.challenger.avatar}
+                    name={dare.challenger.nickname}
+                    size={88}
+                    style={{
+                      border: "3px solid rgba(255,255,255,0.36)",
+                      boxShadow:
+                        "0 0 0 1px rgba(74,222,128,0.3), 0 18px 46px rgba(0,0,0,0.5)",
+                    }}
+                  />
+                </button>
+                <button
+                  className="dare-cover-avatar dare-cover-avatar-right"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onNavigateToProfile && dare.receiverId) {
+                      onNavigateToProfile(dare.receiverId);
+                    }
+                  }}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: onNavigateToProfile ? "pointer" : "default",
+                    marginLeft: "-18px",
+                    position: "relative",
+                    zIndex: 1,
+                  }}
+                >
+                  <PostAvatar
+                    src={dare.receiver.avatar}
+                    name={dare.receiver.nickname}
+                    size={88}
+                    style={{
+                      border: "3px solid rgba(74,222,128,0.48)",
+                      boxShadow:
+                        "0 0 0 1px rgba(255,255,255,0.18), 0 18px 46px rgba(0,0,0,0.5)",
+                    }}
+                  />
+                </button>
+              </div>
+
+              <div className="dare-cover-capsule">
+                <AnimatedDareCapsule
+                  cardId={dare.id}
+                  challenger={dare.challenger}
+                  receiver={dare.receiver}
+                  description={dare.description}
+                  isActive={!!isActive}
+                  onNavigateToProfile={onNavigateToProfile}
+                  challengerId={dare.challengerId}
+                  receiverId={dare.receiverId}
+                  revealDescription={false}
+                  persist
+                />
+              </div>
+
+              <div
+                className="dare-cover-challenge"
+                style={{
+                  width: "100%",
+                  maxWidth: 430,
+                  padding: "24px 20px 23px",
+                  borderRadius: 24,
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.052))",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  boxShadow:
+                    "0 26px 70px rgba(0,0,0,0.48), 0 0 42px rgba(74,222,128,0.08), inset 0 1px 0 rgba(255,255,255,0.14)",
+                  backdropFilter: "blur(18px)",
+                }}
+              >
+                <div
+                  className="dare-cover-kicker"
+                  style={{
+                    color: "#4ade80",
+                    fontSize: 12,
+                    fontWeight: 900,
+                    letterSpacing: "0.16em",
+                    textTransform: "uppercase",
+                    textAlign: "center",
+                    marginBottom: 12,
+                  }}
+                >
+                  Dare challenge
+                </div>
+                <p
+                  className="dare-cover-copy"
+                  style={{
+                    color: "#fff",
+                    fontSize: "clamp(24px, 6vw, 36px)",
+                    lineHeight: 1.08,
+                    fontWeight: 900,
+                    textAlign: "center",
+                    margin: 0,
+                    letterSpacing: 0,
+                    textShadow:
+                      "0 10px 30px rgba(0,0,0,0.5), 0 0 18px rgba(74,222,128,0.12)",
+                    overflowWrap: "break-word",
+                  }}
+                >
+                  {dare.description}
+                </p>
+              </div>
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: "calc(94px + env(safe-area-inset-bottom))",
+                display: "flex",
+                justifyContent: "center",
+                gap: 7,
+                zIndex: 2,
+              }}
+            >
+              <span
+                style={{
+                  width: carouselSlide === 0 ? 18 : 5,
+                  height: 5,
+                  borderRadius: 999,
+                  background:
+                    carouselSlide === 0 ? "#4ade80" : "rgba(255,255,255,0.32)",
+                  boxShadow:
+                    carouselSlide === 0
+                      ? "0 0 14px rgba(74,222,128,0.45)"
+                      : "none",
+                  transition: "all 0.2s ease",
+                }}
+              />
+              <span
+                style={{
+                  width: carouselSlide === 1 ? 18 : 5,
+                  height: 5,
+                  borderRadius: 999,
+                  background:
+                    carouselSlide === 1 ? "#4ade80" : "rgba(255,255,255,0.32)",
+                  boxShadow:
+                    carouselSlide === 1
+                      ? "0 0 14px rgba(74,222,128,0.45)"
+                      : "none",
+                  transition: "all 0.2s ease",
+                }}
+              />
+            </div>
+            <div
+              className="dare-carousel-seam-fade dare-carousel-seam-fade-right"
+              aria-hidden="true"
+              style={{ opacity: carouselSeamOpacity }}
+            />
+          </section>
+
+          <section
+            style={{
+              position: "relative",
+              flex: "0 0 100%",
+              width: "100%",
+              height: "100%",
+              scrollSnapAlign: "start",
+              scrollSnapStop: "always",
+              overflow: "hidden",
+              background: "#0a0a0a",
+            }}
+          >
         {dare.proof && (
           <div
             style={{ position: "absolute", inset: 0, zIndex: 0 }}
@@ -2362,32 +2759,11 @@ export function DareCard({
             )}
           </div>
         )}
-
-        {/* Capsule */}
         <div
-          style={{
-            position: "absolute",
-            top: "10px",
-            left: 0,
-            right: 0,
-            zIndex: 1,
-            padding: "14px 14px 0",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-          }}
-        >
-          <AnimatedDareCapsule
-            cardId={dare.id}
-            challenger={dare.challenger}
-            receiver={dare.receiver}
-            description={dare.description}
-            isActive={!!isActive}
-            onNavigateToProfile={onNavigateToProfile}
-            challengerId={dare.challengerId}
-            receiverId={dare.receiverId}
-          />
-        </div>
+          className="dare-carousel-seam-fade dare-carousel-seam-fade-left"
+          aria-hidden="true"
+          style={{ opacity: carouselSeamOpacity }}
+        />
 
         {/* Sidebar icons */}
         <div
@@ -2697,7 +3073,237 @@ export function DareCard({
           </div>
         </div>
 
+          </section>
+        </div>
+        <div
+          className="dare-carousel-swipe-bridge"
+          aria-hidden="true"
+          style={{
+            left: `${(1 - carouselSeamProgress) * 100}%`,
+            opacity: carouselSeamOpacity,
+          }}
+        />
+
         <style>{`
+          .dare-reel-carousel {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+          }
+          .dare-reel-carousel::-webkit-scrollbar {
+            display: none;
+          }
+          .dare-carousel-seam-fade {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: min(24vw, 104px);
+            pointer-events: none;
+            z-index: 4;
+            transition: opacity 120ms ease-out;
+            will-change: opacity;
+          }
+          .dare-carousel-seam-fade-right {
+            right: 0;
+            background: linear-gradient(
+              to left,
+              rgba(0, 0, 0, 0.62) 0%,
+              rgba(0, 0, 0, 0.28) 44%,
+              rgba(0, 0, 0, 0) 100%
+            );
+          }
+          .dare-carousel-seam-fade-left {
+            left: 0;
+            background: linear-gradient(
+              to right,
+              rgba(0, 0, 0, 0.62) 0%,
+              rgba(0, 0, 0, 0.28) 44%,
+              rgba(0, 0, 0, 0) 100%
+            );
+          }
+          .dare-carousel-swipe-bridge {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: min(30vw, 140px);
+            transform: translateX(-50%);
+            pointer-events: none;
+            z-index: 7;
+            background:
+              linear-gradient(
+                90deg,
+                rgba(0, 0, 0, 0) 0%,
+                rgba(0, 0, 0, 0.28) 30%,
+                rgba(0, 0, 0, 0.5) 50%,
+                rgba(0, 0, 0, 0.28) 70%,
+                rgba(0, 0, 0, 0) 100%
+              );
+            filter: blur(0.1px);
+            transition: opacity 120ms ease-out;
+            will-change: left, opacity;
+          }
+          .dare-cover-slide {
+            isolation: isolate;
+          }
+          .dare-cover-lattice {
+            opacity: 0;
+          }
+          .dare-cover-metal {
+            opacity: 0;
+          }
+          .dare-cover-ribbon {
+            opacity: 0;
+          }
+          .dare-cover-stage {
+            opacity: 1;
+          }
+          .dare-cover-avatar-stack {
+            opacity: 0;
+          }
+          .dare-cover-avatar {
+            transform-origin: center;
+          }
+          .dare-cover-avatar::before,
+          .dare-cover-avatar::after {
+            content: "";
+            position: absolute;
+            inset: -12px;
+            border-radius: 999px;
+            pointer-events: none;
+          }
+          .dare-cover-avatar::before {
+            border: 1.5px solid rgba(74,222,128,0.52);
+            background: radial-gradient(circle, rgba(74,222,128,0.18) 0%, rgba(74,222,128,0.07) 44%, transparent 72%);
+            box-shadow: 0 0 26px rgba(74,222,128,0.3), 0 0 52px rgba(74,222,128,0.13);
+            animation: dareCoverAvatarRing 2.65s ease-out 0.45s infinite;
+          }
+          .dare-cover-avatar::after {
+            inset: -6px;
+            padding: 1.5px;
+            background: conic-gradient(from 90deg, rgba(74,222,128,0), rgba(74,222,128,0.82), rgba(255,255,255,0.55), rgba(250,204,21,0.4), rgba(74,222,128,0));
+            opacity: 0.78;
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            animation: dareCoverAvatarHalo 4.8s linear infinite;
+          }
+          .dare-cover-avatar-right::before {
+            animation-delay: 0.78s;
+          }
+          .dare-cover-avatar-right::after {
+            animation-delay: -1.9s;
+          }
+          .dare-cover-capsule {
+            opacity: 0;
+          }
+          .dare-cover-challenge {
+            position: relative;
+            overflow: hidden;
+            transform-origin: center top;
+            opacity: 1;
+          }
+          .dare-cover-challenge::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.16) 42%, rgba(74,222,128,0.13) 50%, transparent 64%);
+            transform: translateX(-120%);
+            pointer-events: none;
+          }
+          .dare-cover-kicker {
+            opacity: 0;
+          }
+          .dare-cover-copy {
+            opacity: 0;
+          }
+          .dare-cover-slide-active .dare-cover-lattice {
+            animation: dareCoverLatticeIn 1s ease-out both;
+          }
+          .dare-cover-slide-active .dare-cover-metal {
+            animation: dareCoverMetalIn 0.8s ease-out both, dareCoverSheen 8s ease-in-out 0.8s infinite;
+          }
+          .dare-cover-slide-active .dare-cover-ribbon {
+            animation: dareCoverRibbonIn 1.1s cubic-bezier(0.22,1,0.36,1) 0.12s both, dareCoverRibbonDrift 7s ease-in-out 1.2s infinite;
+          }
+          .dare-cover-slide-active .dare-cover-avatar-stack {
+            animation: dareCoverAvatarStackIn 0.72s cubic-bezier(0.22,1,0.36,1) 0.18s both;
+          }
+          .dare-cover-slide-active .dare-cover-avatar {
+            animation: dareCoverAvatarBreathe 4.6s ease-in-out 1.25s infinite;
+          }
+          .dare-cover-slide-active .dare-cover-capsule {
+            animation: dareCoverCapsuleSettle 0.75s cubic-bezier(0.22,1,0.36,1) 0.58s both;
+          }
+          .dare-cover-slide-active .dare-cover-challenge {
+            animation: none;
+          }
+          .dare-cover-slide-active .dare-cover-challenge::before {
+            animation: dareCoverChallengeSweep 2.5s cubic-bezier(0.22,1,0.36,1) 3.12s both;
+          }
+          .dare-cover-slide-active .dare-cover-kicker {
+            animation: dareCoverKickerIn 0.5s ease-out 2.84s both;
+          }
+          .dare-cover-slide-active .dare-cover-copy {
+            animation: dareCoverCopyIn 0.72s cubic-bezier(0.22,1,0.36,1) 2.96s both;
+          }
+          @keyframes dareCoverLatticeIn {
+            from { opacity: 0; transform: scale(1.04); }
+            to { opacity: 1; transform: scale(1); }
+          }
+          @keyframes dareCoverSheen {
+            0%, 100% { opacity: 0.68; transform: translateX(-1.5%); }
+            50% { opacity: 0.95; transform: translateX(1.5%); }
+          }
+          @keyframes dareCoverMetalIn {
+            from { opacity: 0; }
+            to { opacity: 0.86; }
+          }
+          @keyframes dareCoverRibbonIn {
+            from { opacity: 0; transform: translateY(calc(-50% + 28px)) rotate(12deg) scale(0.98); }
+            to { opacity: 0.68; transform: translateY(-50%) rotate(12deg) scale(1); }
+          }
+          @keyframes dareCoverRibbonDrift {
+            0%, 100% { transform: translateY(-50%) rotate(12deg); }
+            50% { transform: translateY(calc(-50% + 10px)) rotate(12deg); }
+          }
+          @keyframes dareCoverAvatarStackIn {
+            from { opacity: 0; transform: translateY(22px) scale(0.88); filter: blur(8px) drop-shadow(0 18px 34px rgba(0,0,0,0.5)); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0) drop-shadow(0 18px 34px rgba(0,0,0,0.5)); }
+          }
+          @keyframes dareCoverAvatarBreathe {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-3px) scale(1.015); }
+          }
+          @keyframes dareCoverAvatarRing {
+            0% { opacity: 0.95; transform: scale(0.84); filter: blur(0); }
+            52% { opacity: 0.28; transform: scale(1.2); filter: blur(0.4px); }
+            78% { opacity: 0; transform: scale(1.36); filter: blur(1px); }
+            100% { opacity: 0; transform: scale(1.36); filter: blur(1px); }
+          }
+          @keyframes dareCoverAvatarHalo {
+            0% { transform: rotate(0deg) scale(1); opacity: 0.72; }
+            50% { transform: rotate(180deg) scale(1.04); opacity: 0.95; }
+            100% { transform: rotate(360deg) scale(1); opacity: 0.72; }
+          }
+          @keyframes dareCoverCapsuleSettle {
+            from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(5px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+          }
+          @keyframes dareCoverChallengeIn {
+            from { opacity: 0; transform: translateY(26px) scale(0.965); filter: blur(8px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+          }
+          @keyframes dareCoverChallengeSweep {
+            from { transform: translateX(-120%); }
+            to { transform: translateX(120%); }
+          }
+          @keyframes dareCoverKickerIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes dareCoverCopyIn {
+            from { opacity: 0; transform: translateY(14px); filter: blur(6px); }
+            to { opacity: 1; transform: translateY(0); filter: blur(0); }
+          }
           @keyframes expandBtn { from { width: 50%; opacity: 0.5; transform: scale(0.93); } to { width: 80%; opacity: 1; transform: scale(1); } }
           .dare-real-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
           .dare-real-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
@@ -4612,7 +5218,7 @@ export function MainScreen({
   };
 
   const NavHeader = () => (
-    <div className="nav-header" style={{ flexShrink: 0 }}>
+    <div className="nav-header" style={{ flexShrink: 0, paddingTop: 0 }}>
       <div className="p-4">
         <div className="flex items-center justify-between mb-4">
           <div className="relative"></div>
@@ -4641,7 +5247,7 @@ export function MainScreen({
       className="screen-container"
       style={{
         transition: isTransitioning ? "transform 0.3s ease-out" : "none",
-        touchAction: activeView === "dares" ? "none" : "auto",
+        touchAction: "auto",
       }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
@@ -4709,20 +5315,25 @@ export function MainScreen({
                   height: "100dvh",
                   scrollSnapAlign: "start",
                   scrollSnapStop: "always",
+                  display: "flex",
+                  flexDirection: "column",
                   overflow: "hidden",
                 }}
               >
-                <DareCard
-                  dare={dare}
-                  reelMode
-                  isActive={isDareScreenVisible && activeReelIndex === i + 1}
-                  onVoteClick={handleVoteClick}
-                  onFullscreenMedia={handleFullscreenMedia}
-                  onOpenComments={handleOpenComments}
-                  onOpenShare={handleOpenShare}
-                  onVote={handleDareVote}
-                  onNavigateToProfile={_onNavigateToProfile}
-                />
+                <NavHeader />
+                <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+                  <DareCard
+                    dare={dare}
+                    reelMode
+                    isActive={isDareScreenVisible && activeReelIndex === i + 1}
+                    onVoteClick={handleVoteClick}
+                    onFullscreenMedia={handleFullscreenMedia}
+                    onOpenComments={handleOpenComments}
+                    onOpenShare={handleOpenShare}
+                    onVote={handleDareVote}
+                    onNavigateToProfile={_onNavigateToProfile}
+                  />
+                </div>
               </div>
             ))}
         </div>
@@ -4811,6 +5422,7 @@ export function MainScreen({
       {/* Fullscreen media */}
       {fullscreenMedia && (
         <div
+          className="app-modal-backdrop"
           onClick={() => setFullscreenMedia(null)}
           style={{
             position: "fixed",

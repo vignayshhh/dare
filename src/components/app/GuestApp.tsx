@@ -280,13 +280,13 @@ function MoodBlockModal({
   ];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="app-modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/80 backdrop-blur-sm"
         onClick={onClose}
       />
       <div
-        className="relative bg-[#111] rounded-3xl p-6 w-full max-w-sm border border-white/10 shadow-2xl"
+        className="app-modal-dialog relative bg-[#111] rounded-3xl p-6 w-full max-w-sm border border-white/10 shadow-2xl"
         style={{
           animation: visible ? "modalSlideUp 0.3s ease-out" : "none",
         }}
@@ -335,13 +335,13 @@ function StoryModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="app-modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/80 backdrop-blur-sm"
         onClick={onClose}
       />
       <div
-        className="relative bg-[#111] rounded-3xl p-6 w-full max-w-sm border border-white/10 shadow-2xl"
+        className="app-modal-dialog relative bg-[#111] rounded-3xl p-6 w-full max-w-sm border border-white/10 shadow-2xl"
         style={{
           animation: visible ? "modalSlideUp 0.3s ease-out" : "none",
         }}
@@ -440,7 +440,7 @@ function GuestStoryViewerModal({
   if (!activeStory) return null;
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black">
+    <div className="app-story-shell fixed inset-0 z-[120] bg-black">
       <div className="absolute inset-0">
         <img
           src={activeStory.imageUrl}
@@ -716,7 +716,7 @@ function ActionPickerModal({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="app-modal-backdrop fixed inset-0 z-50 flex items-center justify-center">
       <style>{`
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes slideDown { from { transform: translateY(0); opacity: 1; } to { transform: translateY(100%); opacity: 0; } }
@@ -739,7 +739,7 @@ function ActionPickerModal({
         onClick={handleClose}
       />
 
-      <div className="modal-content relative w-full max-w-md mx-4">
+      <div className="app-modal-dialog modal-content relative w-full max-w-md mx-4">
         <button
           onClick={handleClose}
           className="absolute -top-12 right-0 text-white/60 hover:text-white transition-colors"
@@ -823,7 +823,7 @@ function CreateInteractionModal({
     : "Describe the dare action…";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="app-modal-backdrop fixed inset-0 z-50 flex items-center justify-center">
       <style>{`
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes slideDown { from { transform: translateY(0); opacity: 1; } to { transform: translateY(100%); opacity: 0; } }
@@ -838,7 +838,7 @@ function CreateInteractionModal({
         onClick={handleClose}
       />
 
-      <div className="modal-content relative w-full max-w-md mx-4">
+      <div className="app-modal-dialog modal-content relative w-full max-w-md mx-4">
         <button
           onClick={handleClose}
           className="absolute -top-12 right-0 text-white/60 hover:text-white transition-colors"
@@ -946,7 +946,7 @@ function CommentModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end"
+      className="app-modal-backdrop fixed inset-0 z-50 flex items-end"
       style={{
         backgroundColor: "rgba(0, 0, 0, 0.7)",
         animation: "backdropFadeIn 0.25s ease-out forwards",
@@ -970,7 +970,7 @@ function CommentModal({
         .comment-fade-in { animation: fadeIn 0.2s ease-out forwards; }
       `}</style>
       <div
-        className="bg-[#111] w-full rounded-t-3xl flex flex-col modal-slide-up overflow-hidden"
+        className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col overflow-hidden"
         style={{
           maxHeight: "98vh",
           touchAction: "pan-y",
@@ -1105,7 +1105,7 @@ function ShareModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end"
+      className="app-modal-backdrop fixed inset-0 z-50 flex items-end"
       style={{
         backgroundColor: "rgba(0, 0, 0, 0.7)",
         animation: "backdropFadeIn 0.25s ease-out forwards",
@@ -1129,7 +1129,7 @@ function ShareModal({
         .share-fade-in { animation: fadeIn 0.2s ease-out forwards; }
       `}</style>
       <div
-        className="bg-[#111] w-full rounded-t-3xl flex flex-col modal-slide-up"
+        className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
         style={{
           maxHeight: "98vh",
           minHeight: "60vh",
@@ -1663,7 +1663,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
   };
 
   const renderTopBar = (title: string, backTo?: Screen) => (
-    <div className="sticky top-0 z-20 border-b border-white/10 bg-[#0a0f0a]/95 px-4 py-3 backdrop-blur">
+    <div className="safe-area-top sticky top-0 z-20 border-b border-white/10 bg-[#0a0f0a]/95 px-4 py-3 backdrop-blur">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {backTo ? (
@@ -1687,7 +1687,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
     <div
       className="screen-container"
       style={{
-        paddingBottom: "120px",
+        paddingBottom: "calc(120px + var(--safe-area-bottom))",
         boxSizing: "border-box",
       }}
     >
@@ -3404,10 +3404,12 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
         style={{
           fontFamily:
             "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
+          height: "100dvh",
+          paddingBottom: "calc(var(--bottom-nav-total-height) + 16px)",
         }}
-        className="flex flex-col h-screen bg-black pb-24 max-w-7xl mx-auto lg:px-8"
+        className="flex flex-col bg-black max-w-7xl mx-auto lg:px-8"
       >
-        <div className="px-4 pt-6 pb-0 lg:px-0">
+        <div className="safe-area-top px-4 pt-6 pb-0 lg:px-0">
           <div className="bg-gradient-to-br from-[#1a2a1a] to-[#111811] rounded-full px-6 py-4 shadow-[0_8px_32px_rgba(74,222,128,0.18),0_2px_8px_rgba(0,0,0,0.7),0_0_0_1px_rgba(74,222,128,0.07)]">
             <div className="flex items-center justify-between">
               <h1 className="text-3xl font-extrabold text-white tracking-tight lg:text-4xl">
@@ -3751,8 +3753,9 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
             "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif",
           color: "#fff",
           overflow: "hidden",
+          height: "100dvh",
         }}
-        className="flex flex-col h-screen bg-black"
+        className="flex flex-col bg-black"
       >
         <style>{`
           @keyframes pulse {
@@ -3766,7 +3769,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
         `}</style>
 
         {/* Header */}
-        <div className="flex-shrink-0 bg-black pt-2.5 pb-1.5 px-2.5 rounded-b-[18px]">
+        <div className="safe-area-top flex-shrink-0 bg-black pt-2.5 pb-1.5 px-2.5 rounded-b-[18px]">
           <div className="p-1">
             <div className="flex items-center justify-between bg-[#131313] rounded-full px-4 py-2.5 shadow-[0_12px_40px_rgba(80,80,80,0.25),0_4px_16px_rgba(60,60,60,0.2),0_1px_0_rgba(255,255,255,0.06)]">
               <div className="flex items-center gap-3">
@@ -3824,7 +3827,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
                 {chatMenuOpen && (
                   <>
                     <div
-                      className="fixed inset-0 z-50"
+                      className="app-modal-backdrop fixed inset-0 z-50"
                       onClick={() => setChatMenuOpen(false)}
                     />
                     <div className="absolute top-14 right-0 z-[51] flex flex-col items-end gap-2">
@@ -4762,7 +4765,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
         : currentScreen;
 
   return (
-    <div className="min-h-screen bg-[#0a0f0a]">
+    <div className="app-viewport bg-[#0a0f0a]">
       {isDesktop ? (
         <DesktopNavigation
           currentScreen={currentScreen}
@@ -4825,7 +4828,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
             const likeCount = likeCounts[selectedPostId] || 0;
             return (
               <div
-                className="fixed inset-0 z-50 flex items-end"
+                className="app-modal-backdrop fixed inset-0 z-50 flex items-end"
                 style={{
                   backgroundColor: "rgba(0, 0, 0, 0.7)",
                   animation: "backdropFadeIn 0.25s ease-out forwards",
@@ -4849,7 +4852,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
                 .modal-fade-in { animation: fadeIn 0.2s ease-out forwards; }
               `}</style>
                 <div
-                  className="bg-[#111] w-full rounded-t-3xl flex flex-col modal-slide-up"
+                  className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
                   style={{
                     maxHeight: "98vh",
                     minHeight: "60vh",

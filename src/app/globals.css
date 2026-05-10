@@ -13,6 +13,20 @@
   --success: #4ade80;
   --warning: #fbbf24;
   --error: #ef4444;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --bottom-nav-content-height: 64px;
+  --bottom-nav-total-height: calc(
+    var(--bottom-nav-content-height) + var(--safe-area-bottom)
+  );
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-fast: 160ms;
+  --motion-medium: 240ms;
+  --motion-slow: 340ms;
 }
 
 @theme inline {
@@ -20,6 +34,12 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+html {
+  background: var(--background);
+  min-height: 100%;
+  min-height: 100dvh;
 }
 
 body {
@@ -35,12 +55,16 @@ body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
-  height: 100vh;
+  min-height: 100%;
+  min-height: 100dvh;
   scroll-behavior: smooth;
+  padding-left: var(--safe-area-left);
+  padding-right: var(--safe-area-right);
   /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - touch-action might be blocking touch events */
   /* DISABLED: touch-action: manipulation; */
   touch-action: auto;
   pointer-events: auto !important;
+  -webkit-tap-highlight-color: transparent;
 }
 
 * {
@@ -51,20 +75,21 @@ body {
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--text-tertiary);
-  border-radius: 3px;
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  background: rgba(148, 163, 184, 0.55);
 }
 
 /* Card animations */
@@ -439,9 +464,34 @@ body {
   }
 }
 
-/* Bottom navigation safe area */
+/* Mobile safe-area utilities for edge-to-edge PWA rendering */
+.app-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--background);
+}
+
+.app-fixed-viewport {
+  height: 100vh;
+  height: 100dvh;
+  background: var(--background);
+}
+
+.safe-area-top {
+  padding-top: var(--safe-area-top);
+}
+
 .safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-area-bottom);
+}
+
+.safe-area-x {
+  padding-left: max(var(--safe-area-left), 0px);
+  padding-right: max(var(--safe-area-right), 0px);
+}
+
+.tab-screen-bottom-pad {
+  padding-bottom: calc(var(--bottom-nav-total-height) + 16px);
 }
 
 /* Glass morphism effect */
@@ -481,6 +531,169 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* App motion system: compositor-only transitions for mobile responsiveness. */
+@keyframes appScreenEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes appOverlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes appSheetEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 28px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes appDialogEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes appStoryEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.app-screen-layer {
+  position: absolute;
+  inset: 0;
+  background: var(--background);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, 8px, 0) scale(0.992);
+  transition:
+    opacity var(--motion-medium) var(--motion-ease-standard),
+    transform var(--motion-medium) var(--motion-ease-standard),
+    visibility 0s linear var(--motion-medium);
+  will-change: opacity, transform;
+  contain: layout paint style;
+  content-visibility: hidden;
+}
+
+.app-screen-layer.is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    opacity var(--motion-medium) var(--motion-ease-out),
+    transform var(--motion-medium) var(--motion-ease-out);
+  content-visibility: visible;
+}
+
+.app-overlay-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: var(--background);
+  animation: appScreenEnter var(--motion-slow) var(--motion-ease-out) both;
+  will-change: opacity, transform;
+  contain: layout paint style;
+}
+
+.app-bottom-nav-motion {
+  animation: appSheetEnter var(--motion-slow) var(--motion-ease-out) both;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+.fixed.inset-0:not(.app-modal-backdrop):not(.app-story-shell) {
+  animation: appOverlayFadeIn var(--motion-medium) var(--motion-ease-out) both;
+}
+
+.app-modal-backdrop {
+  animation: appOverlayFadeIn var(--motion-medium) var(--motion-ease-out) both;
+  will-change: opacity;
+}
+
+.app-modal-sheet {
+  animation: appSheetEnter var(--motion-slow) var(--motion-ease-out) both;
+  transform-origin: bottom center;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+.app-modal-dialog {
+  animation: appDialogEnter var(--motion-medium) var(--motion-ease-out) both;
+  transform-origin: center;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+.app-story-shell {
+  animation: appStoryEnter var(--motion-slow) var(--motion-ease-out) both;
+  transform-origin: center;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+.app-pressable {
+  transform: translateZ(0);
+  transition:
+    transform var(--motion-fast) var(--motion-ease-standard),
+    opacity var(--motion-fast) ease,
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
+}
+
+.app-pressable:active {
+  transform: translate3d(0, 1px, 0) scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .app-screen-layer,
+  .app-screen-layer.is-active,
+  .app-overlay-screen,
+  .app-modal-sheet,
+  .app-modal-dialog,
+  .app-story-shell {
+    transform: none !important;
+  }
+}
+
 /* Hide scrollbar utility */
 .scrollbar-hide {
   -ms-overflow-style: none;
@@ -489,6 +702,37 @@ body {
 
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+  html,
+  body,
+  .app-viewport,
+  .app-fixed-viewport,
+  .full-height-scroll,
+  .screen-container,
+  .custom-scrollbar,
+  .scrollbar-hide,
+  [class*="overflow-y-auto"],
+  [class*="overflow-x-auto"] {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar,
+  .app-viewport::-webkit-scrollbar,
+  .app-fixed-viewport::-webkit-scrollbar,
+  .full-height-scroll::-webkit-scrollbar,
+  .screen-container::-webkit-scrollbar,
+  .custom-scrollbar::-webkit-scrollbar,
+  .scrollbar-hide::-webkit-scrollbar,
+  [class*="overflow-y-auto"]::-webkit-scrollbar,
+  [class*="overflow-x-auto"]::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 
 /* Auth component styles */
@@ -541,6 +785,7 @@ body {
   left: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background: #0b0f0c;
   z-index: 9999;
   overflow: hidden;

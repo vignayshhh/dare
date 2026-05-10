@@ -1331,7 +1331,7 @@ export function UserProfileScreen({
   return (
     <div className="screen-container bg-[radial-gradient(circle_at_top,#162016_0%,#0b100b_38%,#070a07_100%)]">
       {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+      <div className="safe-area-top sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
         <div className="p-4">
           <div className="flex items-center space-x-4">
             <button
@@ -1354,7 +1354,7 @@ export function UserProfileScreen({
 
       {/* Show PostsScreen if navigation is triggered */}
       {showPostsScreen && (
-        <div className="fixed inset-0 z-50 bg-black">
+        <div className="app-story-shell fixed inset-0 z-50 bg-black">
           <PostsScreen
             onBack={() => setShowPostsScreen(false)}
             posts={userFeedPosts}
@@ -1369,7 +1369,7 @@ export function UserProfileScreen({
 
       {/* Show TruthsListScreen if navigation is triggered */}
       {showTruthsListScreen && (
-        <div className="fixed inset-0 z-50 bg-black">
+        <div className="app-story-shell fixed inset-0 z-50 bg-black">
           <TruthsListScreen
             userId={userId}
             onBack={() => {
@@ -1390,7 +1390,7 @@ export function UserProfileScreen({
 
       {/* Show DaresListScreen if navigation is triggered */}
       {showDaresListScreen && (
-        <div className="fixed inset-0 z-50 bg-black">
+        <div className="app-story-shell fixed inset-0 z-50 bg-black">
           <DaresListScreen
             userId={userId}
             onBack={() => {
@@ -1410,7 +1410,7 @@ export function UserProfileScreen({
       )}
 
       {/* Profile Content */}
-      <div className="custom-scrollbar flex-1 overflow-y-auto pb-8">
+      <div className="custom-scrollbar flex-1 overflow-y-auto pb-[calc(var(--safe-area-bottom)+2rem)]">
         {/* Avatar and Basic Info */}
         <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-4 sm:px-5 sm:pt-5">
           <div className="mb-4 overflow-hidden rounded-[26px] border border-white/6 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(16,19,16,0.98))] p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.26)] sm:rounded-[28px] sm:p-4">
@@ -2159,11 +2159,11 @@ export function UserProfileScreen({
         {/* Friends Modal */}
         {showAvatarPreview && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/88 px-6"
+            className="app-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/88 px-6"
             onClick={() => setShowAvatarPreview(false)}
           >
             <div
-              className="relative flex h-[min(72vw,320px)] w-[min(72vw,320px)] items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.14),rgba(18,20,18,0.98)_58%,rgba(8,10,8,1)_100%)] p-2 shadow-[0_30px_100px_rgba(0,0,0,0.55),0_0_40px_rgba(74,222,128,0.12)]"
+              className="app-modal-dialog relative flex h-[min(72vw,320px)] w-[min(72vw,320px)] items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.14),rgba(18,20,18,0.98)_58%,rgba(8,10,8,1)_100%)] p-2 shadow-[0_30px_100px_rgba(0,0,0,0.55),0_0_40px_rgba(74,222,128,0.12)]"
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -2186,11 +2186,11 @@ export function UserProfileScreen({
 
         {showFriendsModal && (
           <div
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-70"
+            className="app-modal-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-70"
             onClick={() => setShowFriendsModal(false)}
           >
             <div
-              className="w-full max-w-md rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,23,20,0.98),rgba(12,14,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
+              className="app-modal-sheet w-full max-w-md rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,23,20,0.98),rgba(12,14,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">
@@ -2289,11 +2289,11 @@ export function UserProfileScreen({
         {/* Unfriend Confirmation Modal */}
         {showUnfriendModal && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70"
+            className="app-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70"
             onClick={() => setShowUnfriendModal(false)}
           >
             <div
-              className="mx-4 w-full max-w-sm rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,23,20,0.98),rgba(12,14,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
+              className="app-modal-dialog mx-4 w-full max-w-sm rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,23,20,0.98),rgba(12,14,12,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="text-center mb-6">

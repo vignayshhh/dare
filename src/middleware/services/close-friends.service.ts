@@ -15,7 +15,11 @@ import {
   where,
 } from "firebase/firestore";
 
-type CloseFriendActivityType = "commented" | "repeated_like" | "multi_like";
+type CloseFriendActivityType =
+  | "commented"
+  | "repeated_like"
+  | "multi_like"
+  | "dedicated_story";
 
 interface CloseFriendProfile {
   id: string;
@@ -424,6 +428,57 @@ class CloseFriendsService {
               targetUsername: params.postAuthorUsername.replace(/^@/, ""),
               postThumbnail: params.postThumbnail || "",
               postContent: params.postContent || "",
+              actorName: params.actorName,
+              actorUsername: params.actorUsername.replace(/^@/, ""),
+              actorAvatar: params.actorAvatar || "",
+            },
+          }),
+        ),
+    );
+  }
+
+  async trackDedicatedStoryActivity(params: {
+    actorId: string;
+    actorName: string;
+    actorUsername: string;
+    actorAvatar: string;
+    storyId: string;
+    dedicatedToUserId: string;
+    dedicatedToUsername: string;
+    dedicatedToName: string;
+    dedicatedToAvatar: string;
+    storyThumbnail?: string;
+  }) {
+    if (!params.actorId || !params.storyId || !params.dedicatedToUserId) return;
+    if (params.actorId === params.dedicatedToUserId) return;
+
+    const watcherIds = await this.getWatcherIdsForActor(params.actorId);
+    if (watcherIds.length === 0) return;
+
+    await Promise.all(
+      watcherIds
+        .filter((watcherId) => watcherId !== params.actorId)
+        .map((watcherId) =>
+          this.upsertCloseFriendAlert({
+            watcherId,
+            actorId: params.actorId,
+            entityId: params.storyId,
+            alertDocId: makeAlertDocId(
+              "sus-close-dedicated-story",
+              watcherId,
+              params.actorId,
+              params.storyId,
+            ),
+            message: `${this.toHandle(params.actorUsername)} dedicated a story to ${this.toHandle(params.dedicatedToUsername)}`,
+            metadata: {
+              interactionType:
+                "dedicated_story" satisfies CloseFriendActivityType,
+              storyId: params.storyId,
+              targetUserId: params.dedicatedToUserId,
+              targetUsername: params.dedicatedToUsername.replace(/^@/, ""),
+              targetName: params.dedicatedToName,
+              targetAvatar: params.dedicatedToAvatar || "",
+              storyThumbnail: params.storyThumbnail || "",
               actorName: params.actorName,
               actorUsername: params.actorUsername.replace(/^@/, ""),
               actorAvatar: params.actorAvatar || "",

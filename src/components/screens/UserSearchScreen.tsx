@@ -328,7 +328,7 @@ export function UserSearchScreen({
 
   return (
     <div className="screen-container bg-[radial-gradient(circle_at_top,#162016_0%,#0b100b_45%,#070a07_100%)]">
-      <div className="border-b border-white/6 bg-[linear-gradient(180deg,rgba(11,16,11,0.96),rgba(11,16,11,0.78))] backdrop-blur-xl">
+      <div className="safe-area-top border-b border-white/6 bg-[linear-gradient(180deg,rgba(11,16,11,0.96),rgba(11,16,11,0.78))] backdrop-blur-xl">
         <div className="px-4 pb-5 pt-4">
           <div className="mb-4 flex items-center gap-4">
             <button
@@ -368,7 +368,7 @@ export function UserSearchScreen({
         </div>
       </div>
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-8 pt-4">
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-[calc(var(--safe-area-bottom)+2rem)] pt-4">
         {error ? (
           <div className="mb-4 rounded-3xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {error}

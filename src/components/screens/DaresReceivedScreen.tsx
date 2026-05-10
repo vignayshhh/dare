@@ -105,6 +105,10 @@ const ChallengeCard = memo(
   }) => {
     const isChickenOut = challenge.state === "CHICKEN_OUT";
     const isTimedOut = challenge.state === "ACCEPTED" && timeRemaining === 0;
+    const isExpired =
+      challenge.state === "ACCEPTED" &&
+      (isTimedOut ||
+        localStorage.getItem(`dare_expired_${challenge.id}`) === "true");
     const isCompleted = challenge.state === "ACCEPTED_REAL";
     const isMarkedFake = challenge.state === "REJECTED_FAKE";
     const isAnswered =
@@ -169,8 +173,7 @@ const ChallengeCard = memo(
           {challenge.type === "truth" ? (
             <>
               <p className="mb-2 text-[13px] leading-relaxed text-[#8ea18e]">
-                @{challenge.challenger.username || "unknown"} wants to know the
-                truth about:
+                Wants to know the truth about:
               </p>
               <div className="rounded-[20px] border border-white/5 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
                 <div className="mb-2.5 h-1 w-14 rounded-full bg-[#4ade80]/80" />
@@ -182,7 +185,7 @@ const ChallengeCard = memo(
           ) : (
             <>
               <p className="mb-2 text-[13px] leading-relaxed text-[#8ea18e]">
-                @{challenge.challenger.username || "unknown"} dared you to:
+                Dared you to:
               </p>
               <div className="rounded-[20px] border border-white/5 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
                 <div className="mb-2.5 h-1 w-14 rounded-full bg-[#f59e0b]/80" />
@@ -243,6 +246,14 @@ const ChallengeCard = memo(
               <p className="text-red-400 font-semibold text-xs">
                 You backed away like a loser
               </p>
+            </div>
+          ) : isExpired ? (
+            // Dare expired
+            <div
+              className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 py-2 text-center"
+              style={{ animation: "fadeIn 0.5s ease" }}
+            >
+              <p className="text-red-400 font-semibold text-xs">Dare expired</p>
             </div>
           ) : isTimedOut ? (
             // Timer ran out while accepted
@@ -317,10 +328,11 @@ const ChallengeCard = memo(
           )}
         </div>
 
-        {/* Timer — only show when accepted and time remaining > 0 */}
+        {/* Timer — only show when accepted and time remaining > 0 and not expired */}
         {challenge.state === "ACCEPTED" &&
           timeRemaining !== undefined &&
-          timeRemaining > 0 && (
+          timeRemaining > 0 &&
+          !isExpired && (
             <div className="mt-2.5 rounded-2xl border border-white/7 bg-white/[0.035] px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
               <TimerDisplay time={timeRemaining} formatTime={formatTime} />
             </div>
@@ -632,12 +644,42 @@ export function DaresReceivedScreen({
   useEffect(() => {
     const interval = setInterval(() => {
       setAcceptedTimers((prev) => {
-        const hasActive = Object.values(prev).some((t) => t > 0);
-        if (!hasActive) return prev;
         const next: { [key: string]: number } = {};
+        let hasActive = false;
+
         for (const id in prev) {
-          next[id] = prev[id] > 0 ? prev[id] - 1 : 0;
+          // Check if dare is expired in localStorage
+          const expiredKey = `dare_expired_${id}`;
+          if (localStorage.getItem(expiredKey) === "true") {
+            next[id] = 0;
+            continue;
+          }
+
+          // Get timer from localStorage for sync
+          const timerKey = `dare_timer_${id}`;
+          const savedTime = localStorage.getItem(timerKey);
+          const localStorageTime = savedTime ? parseInt(savedTime, 10) : null;
+
+          // Use localStorage time if available and different from local state
+          const currentTime =
+            localStorageTime !== null && localStorageTime !== prev[id]
+              ? localStorageTime
+              : prev[id];
+
+          const newTime = currentTime > 0 ? currentTime - 1 : 0;
+          next[id] = newTime;
+
+          if (newTime > 0) {
+            hasActive = true;
+            // Update localStorage
+            localStorage.setItem(timerKey, newTime.toString());
+          } else {
+            // Mark as expired in localStorage
+            localStorage.setItem(expiredKey, "true");
+            localStorage.removeItem(timerKey);
+          }
         }
+
         return next;
       });
     }, 1000);
@@ -1681,9 +1723,19 @@ export function DaresReceivedScreen({
     setActiveChallenge(challenge);
     setCurrentScreen(challenge.type === "truth" ? "truth" : "dare");
 
-    // Reset submission state when opening completion screen
+    // Initialize timer in localStorage when opening completion screen
     if (challenge.type === "dare") {
-      // This will help ensure the DareCompletionScreen starts fresh
+      const timerKey = `dare_timer_${challenge.id}`;
+      const expiredKey = `dare_expired_${challenge.id}`;
+
+      // Clear expired flag if it exists
+      localStorage.removeItem(expiredKey);
+
+      // Initialize timer if not already set
+      if (!localStorage.getItem(timerKey)) {
+        localStorage.setItem(timerKey, (15 * 60).toString()); // 15 minutes
+      }
+
       console.log("Opening dare completion for:", challenge.id);
     }
   }, []);
@@ -1698,7 +1750,13 @@ export function DaresReceivedScreen({
     refreshTruths(); // Refresh truths to get updated state
     setCurrentScreen("dares");
     setActiveChallenge(null);
-  }, [refreshTruths]);
+
+    // Clear expired flags for completed dares
+    if (activeChallenge?.type === "dare") {
+      const expiredKey = `dare_expired_${activeChallenge.id}`;
+      localStorage.removeItem(expiredKey);
+    }
+  }, [refreshTruths, activeChallenge]);
 
   const handleDareSubmit = (_proof: {
     type: "image" | "video" | "audio";
@@ -1891,6 +1949,7 @@ export function DaresReceivedScreen({
         onBack={handleBackToDares}
         onSubmit={handleDareSubmittedCinematic}
         skipValidation={true}
+        initialTimeRemaining={acceptedTimers[activeChallenge.id] || 15 * 60}
       />
     );
   }
@@ -1974,7 +2033,12 @@ export function DaresReceivedScreen({
         </div>
       </div>
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-4 py-4 pb-8">
+      <div
+        className="custom-scrollbar flex-1 overflow-y-auto px-4 py-4"
+        style={{
+          paddingBottom: "calc(var(--bottom-nav-total-height) + 24px)",
+        }}
+      >
         <div className="mx-auto max-w-2xl space-y-4">
           {activeTab === "received"
             ? receivedChallengesForDisplay.map((challenge) => (
@@ -2008,11 +2072,11 @@ export function DaresReceivedScreen({
 
       {showAcceptPrompt && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="app-modal-backdrop fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setShowAcceptPrompt(null)}
         >
           <div
-            className="w-full max-w-sm animate-slide-up overflow-y-auto rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,28,24,0.98),rgba(16,19,16,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
+            className="app-modal-dialog w-full max-w-sm overflow-y-auto rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,28,24,0.98),rgba(16,19,16,0.98))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.42)]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center mb-6">

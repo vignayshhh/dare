@@ -432,7 +432,7 @@ export function ProfileCreationScreen({
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0f0a] flex flex-col px-4 py-8 pb-24">
+    <div className="app-viewport safe-area-top bg-[#0a0f0a] flex flex-col px-4 py-8 pb-[calc(var(--safe-area-bottom)+6rem)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <button

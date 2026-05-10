@@ -137,7 +137,7 @@ export function AuthScreen({
   };
 
   return (
-    <div className="relative min-h-screen bg-[#0a0f0a] flex flex-col items-center justify-center px-4 py-6">
+    <div className="app-viewport safe-area-top safe-area-bottom relative bg-[#0a0f0a] flex flex-col items-center justify-center px-4 py-6">
       <div className="w-full max-w-sm mx-auto pt-4 pb-8">
         <h1 className="auth-title mb-4">DARE</h1>
         <p className="text-[#94a3b8] text-sm mb-10 text-center">

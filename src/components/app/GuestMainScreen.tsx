@@ -1573,12 +1573,12 @@ function GuestMainCommentsSheet({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-end"
+      className="app-modal-backdrop fixed inset-0 z-[120] flex items-end"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
       onClick={onClose}
     >
       <div
-        className="w-full overflow-hidden rounded-t-3xl bg-[#111]"
+        className="app-modal-sheet w-full overflow-hidden rounded-t-3xl bg-[#111]"
         style={{ maxHeight: "96vh" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -1667,12 +1667,12 @@ function GuestMainLikesSheet({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-end"
+      className="app-modal-backdrop fixed inset-0 z-[120] flex items-end"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
       onClick={onClose}
     >
       <div
-        className="flex w-full flex-col rounded-t-3xl bg-[#111]"
+        className="app-modal-sheet flex w-full flex-col rounded-t-3xl bg-[#111]"
         style={{ maxHeight: "96vh", minHeight: "58vh" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -1726,12 +1726,12 @@ function GuestMainShareSheet({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-end"
+      className="app-modal-backdrop fixed inset-0 z-[120] flex items-end"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
       onClick={onClose}
     >
       <div
-        className="flex w-full flex-col rounded-t-3xl bg-[#111]"
+        className="app-modal-sheet flex w-full flex-col rounded-t-3xl bg-[#111]"
         style={{ maxHeight: "96vh", minHeight: "60vh" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -2023,12 +2023,14 @@ export function GuestMainScreen({
   };
 
   const NavHeader = () => (
-    <div className="nav-header" style={{ flexShrink: 0 }}>
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="relative"></div>
-          <div className="flex items-center space-x-3"></div>
-        </div>
+    <div
+      className="nav-header"
+      style={{
+        flexShrink: 0,
+        paddingTop: "env(safe-area-inset-top, 0px)",
+      }}
+    >
+      <div style={{ padding: "8px 14px 10px" }}>
         <div className="nav-tabs">
           <button
             onClick={() => setActiveView("dares")}

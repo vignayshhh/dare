@@ -20,7 +20,6 @@ import {
   Story,
   CreateStoryRequest,
   StoryWithViewerInfo,
-  StoryMediaType,
 } from "../domain/interfaces/IStoryRepository";
 import { IFriendshipRepository } from "../domain/interfaces/IFriendshipRepository";
 import { FriendshipRepository } from "./FriendshipRepository";
@@ -101,6 +100,11 @@ export class StoryRepository implements IStoryRepository {
         userId: request.userId,
         mediaUrl: request.mediaUrl,
         mediaType: request.mediaType,
+        storyType: request.storyType || "personal",
+        dedicatedToUserId: request.dedicatedToUserId || null,
+        storyText: request.storyText || null,
+        storyFilter: request.storyFilter || "original",
+        storyMusic: request.storyMusic || null,
         caption: request.caption || null,
         createdAt: serverTimestamp(),
         expiresAt: Timestamp.fromDate(expiresAt),
@@ -136,6 +140,11 @@ export class StoryRepository implements IStoryRepository {
         userId: data.userId,
         mediaUrl: data.mediaUrl,
         mediaType: data.mediaType,
+        storyType: data.storyType || "personal",
+        dedicatedToUserId: data.dedicatedToUserId || null,
+        storyText: data.storyText || null,
+        storyFilter: data.storyFilter || "original",
+        storyMusic: data.storyMusic || null,
         caption: data.caption,
         createdAt:
           data.createdAt?.toDate()?.toISOString() || new Date().toISOString(),
@@ -168,6 +177,11 @@ export class StoryRepository implements IStoryRepository {
           userId: data.userId,
           mediaUrl: data.mediaUrl,
           mediaType: data.mediaType,
+          storyType: data.storyType || "personal",
+          dedicatedToUserId: data.dedicatedToUserId || null,
+          storyText: data.storyText || null,
+          storyFilter: data.storyFilter || "original",
+          storyMusic: data.storyMusic || null,
           caption: data.caption,
           createdAt:
             data.createdAt?.toDate()?.toISOString() || new Date().toISOString(),
@@ -209,6 +223,11 @@ export class StoryRepository implements IStoryRepository {
           userId: data.userId,
           mediaUrl: data.mediaUrl,
           mediaType: data.mediaType,
+          storyType: data.storyType || "personal",
+          dedicatedToUserId: data.dedicatedToUserId || null,
+          storyText: data.storyText || null,
+          storyFilter: data.storyFilter || "original",
+          storyMusic: data.storyMusic || null,
           caption: data.caption,
           createdAt:
             data.createdAt?.toDate()?.toISOString() || new Date().toISOString(),
@@ -267,6 +286,11 @@ export class StoryRepository implements IStoryRepository {
           userId: data.userId,
           mediaUrl: data.mediaUrl,
           mediaType: data.mediaType,
+          storyType: data.storyType || "personal",
+          dedicatedToUserId: data.dedicatedToUserId || null,
+          storyText: data.storyText || null,
+          storyFilter: data.storyFilter || "original",
+          storyMusic: data.storyMusic || null,
           caption: data.caption,
           createdAt:
             data.createdAt?.toDate()?.toISOString() || new Date().toISOString(),

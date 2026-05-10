@@ -157,7 +157,7 @@ export function CreateDareScreen({ onBack }: CreateDareScreenProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 pb-8">
+      <div className="flex-1 overflow-y-auto p-4 pb-[calc(var(--safe-area-bottom)+2rem)]">
         {/* Dare Type Selection */}
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-white mb-3">

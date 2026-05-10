@@ -258,6 +258,7 @@ export function DaresListScreen({
 
       {fullscreenMedia && (
         <div
+          className="app-modal-backdrop"
           onClick={() => setFullscreenMedia(null)}
           style={{
             position: "fixed",

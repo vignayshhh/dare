@@ -1,25 +1,26 @@
 import { db } from "@/backend/lib/firebase";
 import {
-  doc,
-  getDoc,
   collection,
   query,
   where,
   getDocs,
   documentId,
-  Timestamp,
 } from "firebase/firestore";
 import {
-  IStoryRepository,
   Story,
   CreateStoryRequest,
   StoryWithViewerInfo,
   StoryMediaType,
+  StoryTextOverlay,
+  StoryMusic,
 } from "../../backend/domain/interfaces/IStoryRepository";
 import { StoryRepository } from "../../backend/repositories/StoryRepository";
 import { userService, UserProfile } from "./user.service";
 import { storyReactionService } from "./story-reaction.service";
+import { closeFriendsService } from "./close-friends.service";
 import { getDefaultAvatarUrl } from "@/utils/placeholderImages";
+
+export type StoryType = "personal" | "dedication";
 
 export interface StoryDTO {
   id: string;
@@ -33,6 +34,16 @@ export interface StoryDTO {
     type: StoryMediaType;
     url: string;
   };
+  storyType: StoryType;
+  dedicatedTo?: {
+    id: string;
+    username: string;
+    displayName: string;
+    avatar: string;
+  } | null;
+  storyText?: StoryTextOverlay | null;
+  storyFilter?: string | null;
+  storyMusic?: StoryMusic | null;
   caption: string | null;
   createdAt: string;
   expiresAt: string;
@@ -43,6 +54,11 @@ export interface StoryDTO {
 export interface CreateStoryDTO {
   mediaUrl: string;
   mediaType: StoryMediaType;
+  storyType?: StoryType;
+  dedicatedToUserId?: string | null;
+  storyText?: StoryTextOverlay | null;
+  storyFilter?: string | null;
+  storyMusic?: StoryMusic | null;
   caption?: string;
 }
 
@@ -80,17 +96,60 @@ class StoryService {
         userId,
         mediaUrl: request.mediaUrl,
         mediaType: request.mediaType,
+        storyType: request.storyType || "personal",
+        dedicatedToUserId:
+          request.storyType === "dedication" ? request.dedicatedToUserId : null,
+        storyText: request.storyText || null,
+        storyFilter: request.storyFilter || "original",
+        storyMusic: request.storyMusic || null,
         caption: request.caption,
       };
 
       const story = await this.storyRepository.createStory(storyRequest);
 
-      const userProfile = await userService.getProfile(userId);
+      const [userProfile, dedicatedProfile] = await Promise.all([
+        userService.getProfile(userId),
+        story.dedicatedToUserId
+          ? userService.getProfile(story.dedicatedToUserId)
+          : Promise.resolve(null),
+      ]);
       if (!userProfile) {
         throw new Error("User profile not found");
       }
 
-      return this.convertToStoryDTO(story, userProfile);
+      const storyDTO = this.convertToStoryDTO(
+        story,
+        userProfile,
+        dedicatedProfile,
+      );
+
+      if (story.storyType === "dedication" && story.dedicatedToUserId) {
+        void closeFriendsService
+          .trackDedicatedStoryActivity({
+            actorId: userId,
+            actorName: userProfile.display_name || userProfile.username,
+            actorUsername: userProfile.username,
+            actorAvatar: userProfile.avatar_url || getDefaultAvatarUrl(userId),
+            storyId: story.id,
+            dedicatedToUserId: story.dedicatedToUserId,
+            dedicatedToUsername:
+              dedicatedProfile?.username ||
+              `user_${story.dedicatedToUserId.slice(-6)}`,
+            dedicatedToName:
+              dedicatedProfile?.display_name ||
+              dedicatedProfile?.username ||
+              "someone",
+            dedicatedToAvatar:
+              dedicatedProfile?.avatar_url ||
+              getDefaultAvatarUrl(story.dedicatedToUserId),
+            storyThumbnail: story.mediaType === "image" ? story.mediaUrl : "",
+          })
+          .catch((error) => {
+            console.error("Error creating dedicated story sus alert:", error);
+          });
+      }
+
+      return storyDTO;
     } catch (error) {
       console.error("Error creating story:", error);
       return null;
@@ -103,7 +162,11 @@ class StoryService {
         await this.storyRepository.getFriendsStories(userId);
 
       const authorIds = [
-        ...new Set(storiesWithViewerInfo.map((s) => s.userId)),
+        ...new Set(
+          storiesWithViewerInfo
+            .flatMap((s) => [s.userId, s.dedicatedToUserId])
+            .filter((id): id is string => Boolean(id)),
+        ),
       ];
       const authorProfiles = await this.getAuthorProfiles(authorIds);
 
@@ -111,6 +174,13 @@ class StoryService {
         let authorProfile = authorProfiles.find(
           (p) => p.user_id === story.userId,
         );
+        const dedicatedProfile = story.dedicatedToUserId
+          ? authorProfiles.find(
+              (p) =>
+                p.user_id === story.dedicatedToUserId ||
+                p.id === story.dedicatedToUserId,
+            )
+          : null;
 
         console.log(
           `🔍 Processing story ${story.id} - Looking for profile with userId: ${story.userId}`,
@@ -161,6 +231,14 @@ class StoryService {
               type: story.mediaType,
               url: story.mediaUrl,
             },
+            storyType: story.storyType || "personal",
+            dedicatedTo:
+              story.dedicatedToUserId && dedicatedProfile
+                ? this.profileToStoryUser(dedicatedProfile, story.dedicatedToUserId)
+                : null,
+            storyText: story.storyText || null,
+            storyFilter: story.storyFilter || "original",
+            storyMusic: story.storyMusic || null,
             caption: story.caption,
             createdAt: story.createdAt,
             expiresAt: story.expiresAt,
@@ -173,7 +251,7 @@ class StoryService {
           `✅ Using real profile for ${story.userId}:`,
           authorProfile.display_name || authorProfile.username,
         );
-        return this.convertToStoryDTO(story, authorProfile);
+        return this.convertToStoryDTO(story, authorProfile, dedicatedProfile);
       });
     } catch (error) {
       console.error("Error fetching friends stories:", error);
@@ -184,13 +262,31 @@ class StoryService {
   async getUserStories(userId: string): Promise<StoryDTO[]> {
     try {
       const stories = await this.storyRepository.getStoriesByUserId(userId);
-      const userProfile = await userService.getProfile(userId);
+      const dedicatedIds = [
+        ...new Set(
+          stories
+            .map((story) => story.dedicatedToUserId)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      const [userProfile, profilesById] = await Promise.all([
+        userService.getProfile(userId),
+        this.getProfilesByIdsBatch(dedicatedIds),
+      ]);
 
       if (!userProfile) {
         return [];
       }
 
-      return stories.map((story) => this.convertToStoryDTO(story, userProfile));
+      return stories.map((story) =>
+        this.convertToStoryDTO(
+          story,
+          userProfile,
+          story.dedicatedToUserId
+            ? profilesById.get(story.dedicatedToUserId) || null
+            : null,
+        ),
+      );
     } catch (error) {
       console.error("Error fetching user stories:", error);
       return [];
@@ -409,6 +505,7 @@ class StoryService {
   private convertToStoryDTO(
     story: Story | StoryWithViewerInfo,
     userProfile: UserProfile,
+    dedicatedProfile?: UserProfile | null,
   ): StoryDTO {
     const baseStory = story as Story;
     const storyWithViewer = story as StoryWithViewerInfo;
@@ -428,11 +525,31 @@ class StoryService {
         type: baseStory.mediaType,
         url: baseStory.mediaUrl,
       },
+      storyType: baseStory.storyType || "personal",
+      dedicatedTo:
+        baseStory.dedicatedToUserId && dedicatedProfile
+          ? this.profileToStoryUser(dedicatedProfile, baseStory.dedicatedToUserId)
+          : storyWithViewer.dedicatedTo || null,
+      storyText: baseStory.storyText || null,
+      storyFilter: baseStory.storyFilter || "original",
+      storyMusic: baseStory.storyMusic || null,
       caption: baseStory.caption,
       createdAt: baseStory.createdAt,
       expiresAt: baseStory.expiresAt,
       viewCount: baseStory.viewCount,
       hasViewed: storyWithViewer.hasViewed || false,
+    };
+  }
+
+  private profileToStoryUser(profile: UserProfile, fallbackId: string) {
+    const id = profile.user_id || profile.id || fallbackId;
+    return {
+      id,
+      username: profile.username?.startsWith("@")
+        ? profile.username
+        : `@${profile.username || `user_${id.slice(-6)}`}`,
+      displayName: profile.display_name || profile.username || "Someone",
+      avatar: profile.avatar_url || getDefaultAvatarUrl(id),
     };
   }
 

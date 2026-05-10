@@ -1416,12 +1416,12 @@ export function AlertsScreen({
             {(alert.type === "SUS_REPEATED_LIKES" ||
               alert.type === "SUS_PHOTO_VIEWS" ||
               alert.type === "SUS_CLOSE_FRIEND_ACTIVITY") &&
-              meta.postThumbnail && (
+              (meta.postThumbnail || meta.storyThumbnail) && (
                 <div className="mt-3 flex items-center space-x-3 rounded-[22px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-3">
                   <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-[#181818]">
                     <img
-                      src={meta.postThumbnail}
-                      alt="Post"
+                      src={meta.postThumbnail || meta.storyThumbnail}
+                      alt={meta.storyThumbnail ? "Story" : "Post"}
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         e.currentTarget.style.display = "none";
@@ -1496,7 +1496,23 @@ export function AlertsScreen({
                         ? "Comment"
                         : meta.interactionType === "repeated_like"
                           ? `${meta.tapCount || 0}x likes`
-                          : `${meta.distinctLikedPosts || 0} posts liked`}
+                          : meta.interactionType === "dedicated_story"
+                            ? "Story dedication"
+                            : `${meta.distinctLikedPosts || 0} posts liked`}
+                    </span>
+                  </div>
+                )}
+                {meta.interactionType === "dedicated_story" && (
+                  <div className="flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5">
+                    {meta.targetAvatar && (
+                      <img
+                        src={meta.targetAvatar}
+                        alt={meta.targetName || meta.targetUsername || "Target"}
+                        className="h-5 w-5 rounded-full object-cover"
+                      />
+                    )}
+                    <span className="text-xs font-bold text-[#bbf7d0]">
+                      To @{meta.targetUsername || "someone"}
                     </span>
                   </div>
                 )}
@@ -1523,7 +1539,7 @@ export function AlertsScreen({
   return (
     <div className="screen-container flex flex-col bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.12)_0%,rgba(11,16,11,0.96)_24%,#050605_100%)]">
       {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+      <div className="safe-area-top sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
         <div className="px-4 pb-4 pt-5">
           <div className="mb-4 flex items-start justify-between gap-3">
             <button
@@ -1540,24 +1556,7 @@ export function AlertsScreen({
                 <Sparkles size={15} className="text-[#4ade80]" />
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center rounded-[22px] border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-2 shadow-[0_10px_24px_rgba(74,222,128,0.15)]">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#86efac]">
-                  Social
-                </p>
-                <p className="ml-2 text-lg font-black leading-none text-white">
-                  {socialAlerts.filter((a) => !a.isRead).length}
-                </p>
-              </div>
-              <div className="flex items-center justify-center rounded-[22px] border border-red-500/20 bg-red-500/10 px-3 py-2 shadow-[0_10px_24px_rgba(239,68,68,0.15)]">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-red-300">
-                  Sus
-                </p>
-                <p className="ml-2 text-lg font-black leading-none text-white">
-                  {susAlerts.filter((a) => !a.isRead).length}
-                </p>
-              </div>
-            </div>
+            <div className="h-11 w-11 shrink-0" aria-hidden="true" />
           </div>
         </div>
 
@@ -1594,7 +1593,7 @@ export function AlertsScreen({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 pb-8 pt-5">
+      <div className="flex-1 overflow-y-auto px-4 pb-[calc(var(--safe-area-bottom)+2rem)] pt-5">
         {activeTab === "social" ? (
           <>
             {socialToday.length > 0 && (

@@ -20,8 +20,11 @@ import {
   type ChatSwitchSignal,
 } from "../../middleware/services/messaging.service";
 import {
+  isSharedStoryPreviewActive,
   parseSharedPostPayload,
+  parseSharedStoryPayload,
   type SharedPostPayload,
+  type SharedStoryPayload,
 } from "../../utils/sharedPostMessage";
 
 type From = "me" | "them";
@@ -40,6 +43,7 @@ interface Msg {
   from: From;
   text: string;
   sharedPost: SharedPostPayload | null;
+  sharedStory: SharedStoryPayload | null;
 }
 interface Evt {
   id: string;
@@ -254,6 +258,13 @@ function SysLine({
   onOpenUserProfile?: (userId: string) => void;
 }) {
   const cfg = EV_CFG[type];
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    setEntered(false);
+    const raf = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, [type, text, collapsed, targetUserId]);
 
   const openTargetProfile = () => {
     if (!targetUserId) return;
@@ -411,7 +422,13 @@ function SysLine({
         padding: collapsed ? "3px 14px 3px" : "6px 14px 10px",
         display: "flex",
         justifyContent: "center",
-        transition: "padding 0.4s ease",
+        transition:
+          "padding 0.28s ease, opacity 0.24s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+        opacity: entered ? 1 : 0,
+        transform: entered
+          ? "translateY(0) scale(1)"
+          : "translateY(8px) scale(0.985)",
+        willChange: "transform, opacity",
       }}
     >
       <div
@@ -428,10 +445,12 @@ function SysLine({
           width: collapsed ? "fit-content" : "100%",
           maxWidth: collapsed ? 240 : "100%",
           transition:
-            "border-radius 0.4s ease, padding 0.4s ease, width 0.4s ease, max-width 0.4s ease",
-          animation: collapsed
-            ? "none"
-            : "capsuleReveal 0.55s cubic-bezier(0.16,1,0.3,1) both",
+            "border-radius 0.28s ease, padding 0.28s ease, width 0.28s ease, max-width 0.28s ease, box-shadow 0.28s ease",
+          boxShadow: entered
+            ? collapsed
+              ? "0 10px 24px rgba(0,0,0,0.18)"
+              : "0 14px 30px rgba(0,0,0,0.22)"
+            : "0 0 0 rgba(0,0,0,0)",
         }}
       >
         {collapsed ? (
@@ -473,7 +492,574 @@ function SysLine({
   );
 }
 
+// ─── Shared Post Card (Instagram-DM style) ───────────────────────────────────
+
+function SharedPostCard({
+  msg,
+  variant,
+  onOpenSharedPost,
+}: {
+  msg: Msg;
+  variant: "own" | "them";
+  onOpenSharedPost?: (userId: string, postId: string) => void;
+}) {
+  if (!msg.sharedPost) return null;
+  const sp = msg.sharedPost;
+  const isOwn = variant === "own";
+
+  const palette = isOwn
+    ? {
+        cardBg: "#0d0d0d",
+        cardBorder: "rgba(61,245,127,0.18)",
+        mediaBg: "#000",
+        primaryText: "#ffffff",
+        secondaryText: "rgba(255,255,255,0.55)",
+        captionText: "#d7ffe6",
+        avatarBg: "rgba(61,245,127,0.15)",
+        avatarBorder: "rgba(61,245,127,0.35)",
+        footerBorder: "rgba(255,255,255,0.06)",
+        footerText: "#3df57f",
+      }
+    : {
+        cardBg: "#0d0d0d",
+        cardBorder: "rgba(255,255,255,0.1)",
+        mediaBg: "#000",
+        primaryText: "#ffffff",
+        secondaryText: "rgba(255,255,255,0.55)",
+        captionText: "#e5e7eb",
+        avatarBg: "rgba(255,255,255,0.08)",
+        avatarBorder: "rgba(255,255,255,0.18)",
+        footerBorder: "rgba(255,255,255,0.06)",
+        footerText: "#ffffff",
+      };
+
+  const usernameClean = sp.authorUsername.replace(/^@/, "");
+  const initial = (sp.authorName || usernameClean || "?")
+    .charAt(0)
+    .toUpperCase();
+
+  return (
+    <button
+      onClick={() => onOpenSharedPost?.(sp.authorId, sp.postId)}
+      style={{
+        background: palette.cardBg,
+        border: `1px solid ${palette.cardBorder}`,
+        borderRadius: 20,
+        padding: 0,
+        margin: 0,
+        width: 320,
+        maxWidth: "100%",
+        textAlign: "left",
+        cursor: "pointer",
+        color: palette.primaryText,
+        overflow: "hidden",
+        display: "block",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.35)",
+      }}
+    >
+      {/* Header: avatar + username */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "12px 14px",
+        }}
+      >
+        {sp.authorAvatar ? (
+          <img
+            src={sp.authorAvatar}
+            alt=""
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: "50%",
+              objectFit: "cover",
+              border: `1px solid ${palette.avatarBorder}`,
+              flexShrink: 0,
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: "50%",
+              background: palette.avatarBg,
+              border: `1px solid ${palette.avatarBorder}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 13,
+              fontWeight: 700,
+              color: palette.primaryText,
+              flexShrink: 0,
+            }}
+          >
+            {initial}
+          </div>
+        )}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: palette.primaryText,
+              lineHeight: 1.2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {usernameClean}
+          </div>
+        </div>
+      </div>
+
+      {/* Media (square, Instagram-like) */}
+      {sp.media?.url ? (
+        <div
+          style={{
+            width: "100%",
+            aspectRatio: "1 / 1",
+            background: palette.mediaBg,
+            overflow: "hidden",
+          }}
+        >
+          <img
+            src={sp.media.thumbnail || sp.media.url}
+            alt="Shared post"
+            style={{
+              display: "block",
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+            }}
+          />
+        </div>
+      ) : null}
+
+      {/* Caption */}
+      {sp.content ? (
+        <div style={{ padding: "12px 16px 6px" }}>
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              color: palette.captionText,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            <span style={{ fontWeight: 600, color: palette.primaryText }}>
+              {usernameClean}
+            </span>{" "}
+            {sp.content}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Footer: View post */}
+      <div
+        style={{
+          borderTop: `1px solid ${palette.footerBorder}`,
+          marginTop: sp.content ? 8 : 0,
+          padding: "12px 16px",
+          fontSize: 14,
+          fontWeight: 600,
+          color: palette.footerText,
+          letterSpacing: "0.01em",
+        }}
+      >
+        View post
+      </div>
+    </button>
+  );
+}
+
 // ─── Bubble ───────────────────────────────────────────────────────────────────
+
+// Story replies carry their preview payload in the message itself, so rendering
+// the 24-hour card does not need an extra story document read.
+function StoryReplyCard({
+  msg,
+  variant,
+}: {
+  msg: Msg;
+  variant: "own" | "them";
+}) {
+  const story = msg.sharedStory;
+  const isOwn = variant === "own";
+  const [previewActive, setPreviewActive] = useState(() =>
+    story ? isSharedStoryPreviewActive(story) : false,
+  );
+
+  useEffect(() => {
+    if (!story) return;
+    const expiresAtMs = new Date(story.expiresAt).getTime();
+    if (!Number.isFinite(expiresAtMs)) {
+      setPreviewActive(false);
+      return;
+    }
+
+    const remainingMs = expiresAtMs - Date.now();
+    if (remainingMs <= 0) {
+      setPreviewActive(false);
+      return;
+    }
+
+    setPreviewActive(true);
+    const timeout = window.setTimeout(
+      () => setPreviewActive(false),
+      Math.min(remainingMs, 2147483647),
+    );
+    return () => window.clearTimeout(timeout);
+  }, [story?.expiresAt, story?.storyId]);
+
+  if (!story) return null;
+  const previewUrl = story.media.thumbnail || story.media.url || "";
+  const hasPreview = previewActive && Boolean(previewUrl);
+  const isVideo = story.media.type === "video";
+  const usernameClean = story.authorUsername.replace(/^@/, "");
+  const replyText = story.replyText || msg.text;
+
+  return (
+    <div
+      style={{
+        width: 270,
+        maxWidth: "100%",
+        borderRadius: 20,
+        overflow: "hidden",
+        background: isOwn
+          ? "linear-gradient(180deg, rgba(14,24,18,0.98), rgba(10,12,10,0.98))"
+          : "linear-gradient(180deg, rgba(18,18,18,0.98), rgba(10,10,10,0.98))",
+        border: isOwn
+          ? "1px solid rgba(61,245,127,0.22)"
+          : "1px solid rgba(255,255,255,0.11)",
+        boxShadow: "0 10px 28px rgba(0,0,0,0.32)",
+      }}
+    >
+      <div
+        style={{
+          padding: "11px 13px 10px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        <div
+          style={{
+            color: isOwn ? "#3df57f" : "rgba(255,255,255,0.72)",
+            fontSize: 12,
+            fontWeight: 800,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          Replied to story
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <Avatar
+            src={story.authorAvatar || ""}
+            alt={story.authorName}
+            size={30}
+            userId={story.authorId}
+          />
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 700,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {story.authorName}
+            </div>
+            <div
+              style={{
+                color: "rgba(255,255,255,0.46)",
+                fontSize: 11,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              @{usernameClean}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {hasPreview ? (
+        <div
+          style={{
+            position: "relative",
+            aspectRatio: "9 / 16",
+            maxHeight: 330,
+            background: "#050505",
+            overflow: "hidden",
+          }}
+        >
+          {isVideo ? (
+            <video
+              src={previewUrl}
+              muted
+              playsInline
+              preload="metadata"
+              style={{
+                display: "block",
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
+          ) : (
+            <img
+              src={previewUrl}
+              alt="Story preview"
+              loading="lazy"
+              style={{
+                display: "block",
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
+          )}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(to top, rgba(0,0,0,0.48), transparent 42%)",
+            }}
+          />
+          {isVideo && (
+            <div
+              style={{
+                position: "absolute",
+                left: 10,
+                bottom: 10,
+                borderRadius: 999,
+                background: "rgba(0,0,0,0.55)",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "5px 8px",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              Video story
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: "22px 16px",
+            color: "rgba(255,255,255,0.48)",
+            fontSize: 13,
+            textAlign: "center",
+            background: "rgba(255,255,255,0.035)",
+          }}
+        >
+          {previewActive ? "Story preview unavailable" : "Story preview expired"}
+        </div>
+      )}
+
+      {replyText && (
+        <div
+          style={{
+            padding: "12px 14px 14px",
+            color: isOwn ? "#d7ffe6" : "#f3f4f6",
+            fontSize: 15,
+            lineHeight: 1.4,
+            wordBreak: "break-word",
+          }}
+        >
+          {replyText}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function parseDailyChallengeStarter(text: string):
+  | {
+      askerName: string;
+      question: string;
+    }
+  | null {
+  const marker = " asked you a question as part of their daily challenge.";
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex <= 0) return null;
+
+  const askerName = text.slice(0, markerIndex).trim();
+  const question = text.slice(markerIndex + marker.length).trim();
+  if (!askerName || !question) return null;
+
+  return {
+    askerName,
+    question: question.replace(/^\n+/, "").trim(),
+  };
+}
+
+function DailyChallengeStarterCard({
+  starter,
+  variant,
+}: {
+  starter: { askerName: string; question: string };
+  variant: "own" | "them";
+}) {
+  const isOwn = variant === "own";
+
+  return (
+    <div
+      style={{
+        width: 326,
+        maxWidth: "100%",
+        overflow: "hidden",
+        borderRadius: 26,
+        border: isOwn
+          ? "1px solid rgba(61,245,127,0.28)"
+          : "1px solid rgba(255,255,255,0.1)",
+        background:
+          "linear-gradient(180deg, rgba(18,24,20,0.98), rgba(8,10,9,0.99))",
+        boxShadow: isOwn
+          ? "0 20px 52px rgba(0,0,0,0.42), 0 0 34px rgba(61,245,127,0.12), inset 0 1px 0 rgba(255,255,255,0.06)"
+          : "0 18px 46px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.05)",
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          padding: "16px 16px 14px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: "0 22px auto",
+            height: 1,
+            background:
+              "linear-gradient(90deg, rgba(61,245,127,0), rgba(61,245,127,0.85), rgba(61,245,127,0))",
+          }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 46,
+              height: 46,
+              borderRadius: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background:
+                "radial-gradient(circle at 30% 20%, rgba(255,255,255,0.28), rgba(61,245,127,0.18) 42%, rgba(6,8,7,0.9) 100%)",
+              border: "1px solid rgba(61,245,127,0.3)",
+              color: "#bbf7d0",
+              fontSize: 22,
+              fontWeight: 900,
+              boxShadow: "0 14px 34px rgba(61,245,127,0.14)",
+              flexShrink: 0,
+            }}
+          >
+            ?
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 5,
+                padding: "5px 8px",
+                borderRadius: 999,
+                border: "1px solid rgba(61,245,127,0.2)",
+                background: "rgba(61,245,127,0.08)",
+                color: "#86efac",
+                fontSize: 10,
+                fontWeight: 900,
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+              }}
+            >
+              Daily Challenge
+            </div>
+            <div
+              style={{
+                color: "#fff",
+                fontSize: 15,
+                fontWeight: 800,
+                lineHeight: 1.25,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {isOwn
+                ? "You started the challenge"
+                : `${starter.askerName} picked you`}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "17px 17px 18px" }}>
+        <p
+          style={{
+            margin: 0,
+            color: "#f8fafc",
+            fontSize: 17,
+            lineHeight: 1.48,
+            fontWeight: 750,
+            letterSpacing: 0,
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+          }}
+        >
+          {starter.question}
+        </p>
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <span
+            style={{
+              color: "rgba(255,255,255,0.42)",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            Conversation starter
+          </span>
+          <span
+            style={{
+              borderRadius: 999,
+              background: "rgba(61,245,127,0.12)",
+              color: "#86efac",
+              border: "1px solid rgba(61,245,127,0.2)",
+              padding: "6px 10px",
+              fontSize: 11,
+              fontWeight: 900,
+            }}
+          >
+            Opened
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Bubble({
   msg,
@@ -487,6 +1073,127 @@ function Bubble({
   onOpenSharedPost?: (userId: string, postId: string) => void;
 }) {
   const own = msg.from === "me";
+  const dailyChallengeStarter = parseDailyChallengeStarter(msg.text);
+
+  if (dailyChallengeStarter) {
+    return (
+      <div style={{ padding: "6px 14px 10px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: own ? "flex-end" : "flex-start",
+            alignItems: "flex-start",
+          }}
+        >
+          <div style={{ maxWidth: "90%" }}>
+            <DailyChallengeStarterCard
+              starter={dailyChallengeStarter}
+              variant={own ? "own" : "them"}
+            />
+          </div>
+        </div>
+        {showStatus && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              padding: "4px 4px 2px",
+            }}
+          >
+            {status === "screenshot" ? (
+              <span style={{ fontSize: 12, color: "#facc15", fontWeight: 600 }}>
+                Screenshot
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: "#444", fontWeight: 500 }}>
+                {status === "seen" ? "Seen" : "Delivered"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (msg.sharedStory) {
+    return (
+      <div style={{ padding: "4px 14px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: own ? "flex-end" : "flex-start",
+            alignItems: "flex-start",
+          }}
+        >
+          <div style={{ maxWidth: "86%" }}>
+            <StoryReplyCard msg={msg} variant={own ? "own" : "them"} />
+          </div>
+        </div>
+        {showStatus && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              padding: "4px 4px 2px",
+            }}
+          >
+            {status === "screenshot" ? (
+              <span style={{ fontSize: 12, color: "#facc15", fontWeight: 600 }}>
+                ðŸ“¸ Screenshot
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: "#444", fontWeight: 500 }}>
+                {status === "seen" ? "Seen" : "Delivered"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Shared post messages render as standalone Instagram-style cards (no bubble).
+  if (msg.sharedPost) {
+    return (
+      <div style={{ padding: "4px 14px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: own ? "flex-end" : "flex-start",
+            alignItems: "flex-start",
+          }}
+        >
+          <div style={{ maxWidth: "86%" }}>
+            <SharedPostCard
+              msg={msg}
+              variant={own ? "own" : "them"}
+              onOpenSharedPost={onOpenSharedPost}
+            />
+          </div>
+        </div>
+        {showStatus && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              padding: "4px 4px 2px",
+            }}
+          >
+            {status === "screenshot" ? (
+              <span style={{ fontSize: 12, color: "#facc15", fontWeight: 600 }}>
+                📸 Screenshot
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: "#444", fontWeight: 500 }}>
+                {status === "seen" ? "Seen" : "Delivered"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: "4px 14px" }}>
       <div
@@ -514,96 +1221,7 @@ function Bubble({
                 boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
               }}
             >
-              {msg.sharedPost ? (
-                <button
-                  onClick={() =>
-                    onOpenSharedPost?.(
-                      msg.sharedPost!.authorId,
-                      msg.sharedPost!.postId,
-                    )
-                  }
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    margin: 0,
-                    width: "100%",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    color: "inherit",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      opacity: 0.75,
-                      marginBottom: 10,
-                    }}
-                  >
-                    {msg.text}
-                  </div>
-                  <div
-                    style={{
-                      borderRadius: 18,
-                      overflow: "hidden",
-                      border: "1px solid rgba(61,245,127,0.2)",
-                      background: "rgba(61,245,127,0.06)",
-                    }}
-                  >
-                    {msg.sharedPost.media?.url ? (
-                      <img
-                        src={
-                          msg.sharedPost.media.thumbnail ||
-                          msg.sharedPost.media.url
-                        }
-                        alt="Shared post"
-                        style={{
-                          display: "block",
-                          width: "100%",
-                          height: 180,
-                          objectFit: "cover",
-                        }}
-                      />
-                    ) : null}
-                    <div style={{ padding: "12px 14px 14px" }}>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 700,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {msg.sharedPost.authorName}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          opacity: 0.7,
-                          marginBottom: msg.sharedPost.content ? 8 : 0,
-                        }}
-                      >
-                        @{msg.sharedPost.authorUsername.replace(/^@/, "")}
-                      </div>
-                      {msg.sharedPost.content ? (
-                        <div
-                          style={{
-                            fontSize: 14,
-                            lineHeight: 1.5,
-                            color: "#d7ffe6",
-                          }}
-                        >
-                          {msg.sharedPost.content}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </button>
-              ) : (
-                msg.text
-              )}
+              {msg.text}
             </div>
             <svg
               width="12"
@@ -638,96 +1256,7 @@ function Bubble({
                 border: "none",
               }}
             >
-              {msg.sharedPost ? (
-                <button
-                  onClick={() =>
-                    onOpenSharedPost?.(
-                      msg.sharedPost!.authorId,
-                      msg.sharedPost!.postId,
-                    )
-                  }
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    margin: 0,
-                    width: "100%",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    color: "inherit",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      opacity: 0.75,
-                      marginBottom: 10,
-                    }}
-                  >
-                    {msg.text}
-                  </div>
-                  <div
-                    style={{
-                      borderRadius: 18,
-                      overflow: "hidden",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "#101010",
-                    }}
-                  >
-                    {msg.sharedPost.media?.url ? (
-                      <img
-                        src={
-                          msg.sharedPost.media.thumbnail ||
-                          msg.sharedPost.media.url
-                        }
-                        alt="Shared post"
-                        style={{
-                          display: "block",
-                          width: "100%",
-                          height: 180,
-                          objectFit: "cover",
-                        }}
-                      />
-                    ) : null}
-                    <div style={{ padding: "12px 14px 14px" }}>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 700,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {msg.sharedPost.authorName}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          opacity: 0.7,
-                          marginBottom: msg.sharedPost.content ? 8 : 0,
-                        }}
-                      >
-                        @{msg.sharedPost.authorUsername.replace(/^@/, "")}
-                      </div>
-                      {msg.sharedPost.content ? (
-                        <div
-                          style={{
-                            fontSize: 14,
-                            lineHeight: 1.5,
-                            color: "#d1d5db",
-                          }}
-                        >
-                          {msg.sharedPost.content}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </button>
-              ) : (
-                msg.text
-              )}
+              {msg.text}
             </div>
           </>
         )}
@@ -1670,6 +2199,7 @@ export default function MessagingScreen({
       from: (msg.senderId === user?.id ? "me" : "them") as From,
       text: msg.content,
       sharedPost: parseSharedPostPayload(msg.mediaUrl || msg.media_url),
+      sharedStory: parseSharedStoryPayload(msg.mediaUrl || msg.media_url),
     })),
     ...timelineEvents
       .filter((e) => {
@@ -1996,7 +2526,7 @@ export default function MessagingScreen({
         style={{
           flexShrink: 0,
           background: "#000",
-          padding: "10px 10px 6px",
+          padding: "calc(10px + env(safe-area-inset-top, 0px)) 10px 6px",
           borderRadius: "0 0 18px 18px",
         }}
       >
@@ -2122,6 +2652,7 @@ export default function MessagingScreen({
               {menuOpen && (
                 <>
                   <div
+                    className="app-modal-backdrop"
                     style={{
                       position: "fixed",
                       top: 0,
@@ -2250,6 +2781,7 @@ export default function MessagingScreen({
       >
         {!currentConversation && !loadingMessages && (
           <div
+            className="app-modal-backdrop"
             style={{
               display: "flex",
               flexDirection: "column",
@@ -2334,6 +2866,7 @@ export default function MessagingScreen({
 
             {livePresenceSwitchTarget && (
               <SysLine
+                key={`live-switch-${livePresenceSwitchTarget.userId}-${livePresenceSwitchTarget.userName}-${livePresenceSwitchTarget.isActive ? "active" : "inactive"}`}
                 type="chat_switch"
                 text={
                   livePresenceSwitchTarget.isActive
@@ -2412,7 +2945,7 @@ export default function MessagingScreen({
       <div
         style={{
           flexShrink: 0,
-          padding: "8px 14px 20px",
+          padding: "8px 14px calc(20px + env(safe-area-inset-bottom, 0px))",
           background: "#000",
           boxShadow: "inset 0 -8px 0 #000",
         }}

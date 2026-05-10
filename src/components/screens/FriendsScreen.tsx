@@ -100,10 +100,10 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         background: "#0a0a0a",
         fontFamily: "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
-        paddingBottom: "20px",
+        paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
       }}
     >
       {/* Header */}
@@ -112,7 +112,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "16px 20px",
+          padding: "calc(16px + env(safe-area-inset-top, 0px)) 20px 16px",
           position: "sticky",
           top: 0,
           zIndex: 10,
@@ -161,7 +161,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
           backdropFilter: "blur(10px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
           position: "sticky",
-          top: "69px",
+          top: "calc(69px + env(safe-area-inset-top, 0px))",
           zIndex: 9,
         }}
       >

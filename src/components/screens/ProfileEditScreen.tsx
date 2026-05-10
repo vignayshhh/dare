@@ -305,7 +305,7 @@ export function ProfileEditScreen({ onBack }: ProfileEditScreenProps) {
     username.trim();
 
   return (
-    <div className="min-h-screen bg-[#0a0f0a]">
+    <div className="app-viewport bg-[#0a0f0a]">
       {/* Header */}
       <div className="bg-black border-b border-gray-800">
         <div className="p-4">
@@ -342,7 +342,7 @@ export function ProfileEditScreen({ onBack }: ProfileEditScreenProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-4 pb-24">
+      <div className="flex-1 p-4 pb-[calc(var(--safe-area-bottom)+6rem)]">
         <div className="max-w-md mx-auto w-full space-y-6">
           {/* Save Status Feedback */}
           {saveStatus === "success" && (

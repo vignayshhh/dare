@@ -20,6 +20,7 @@ export type ActivityType =
   | "liked_post"
   | "commented_post"
   | "shared_post"
+  | "dedicated_story"
   | "dare_sent"
   | "dare_received"
   | "truth_sent"
@@ -40,6 +41,15 @@ export interface ActivityPost {
   author?: ActivityUser;
   created_at?: string;
   view_count?: number;
+}
+
+export interface ActivityStory {
+  id: string;
+  media_url?: string;
+  media_type?: string;
+  dedicated_to_user_id?: string;
+  dedicated_to?: ActivityUser;
+  created_at?: string;
 }
 
 export interface ActivityDare {
@@ -64,6 +74,7 @@ export interface ActivityItem {
   type: ActivityType;
   timestamp: string;
   post?: ActivityPost;
+  story?: ActivityStory;
   dare?: ActivityDare;
   truth?: ActivityTruth;
   comment_text?: string;
@@ -79,6 +90,7 @@ export interface GroupedActivity {
   count: number;
   items: ActivityItem[];
   post?: ActivityPost;
+  story?: ActivityStory;
   dare?: ActivityDare;
   truth?: ActivityTruth;
   comment_text?: string;
@@ -134,6 +146,7 @@ class ActivityService {
     const [
       likesSnap,
       commentsSnap,
+      dedicatedStoriesSnap,
       daresSentSnap,
       daresReceivedSnap,
       truthsSentSnap,
@@ -155,6 +168,15 @@ class ActivityService {
           where("user_id", "==", userId),
           where("created_at", ">=", sinceTs),
           orderBy("created_at", "desc"),
+          limit(userScopedLimit),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, "stories"),
+          where("userId", "==", userId),
+          where("createdAt", ">=", sinceTs),
+          orderBy("createdAt", "desc"),
           limit(userScopedLimit),
         ),
       ),
@@ -216,6 +238,12 @@ class ActivityService {
 
     likesSnap.forEach((d) => postIds.add(d.data().post_id));
     commentsSnap.forEach((d) => postIds.add(d.data().post_id));
+    dedicatedStoriesSnap.forEach((d) => {
+      const data = d.data();
+      if (data.storyType === "dedication" && data.dedicatedToUserId) {
+        userIds.add(data.dedicatedToUserId);
+      }
+    });
     daresSentSnap.forEach((d) => userIds.add(d.data().receiver_id));
     daresReceivedSnap.forEach((d) => userIds.add(d.data().challenger_id));
     truthsSentSnap.forEach((d) => userIds.add(d.data().receiver_id));
@@ -327,6 +355,32 @@ class ActivityService {
         comment_text: data.text,
         comment_id: d.id,
         post: postMap.get(data.post_id),
+      });
+    });
+
+    dedicatedStoriesSnap.forEach((d) => {
+      const data = d.data();
+      const ts = normaliseTs(data.createdAt);
+      if (ts < since || data.storyType !== "dedication") return;
+
+      const dedicatedToUserId = data.dedicatedToUserId;
+      items.push({
+        id: `story_dedicated_${d.id}`,
+        type: "dedicated_story",
+        timestamp: ts,
+        story: {
+          id: d.id,
+          media_url: data.mediaUrl,
+          media_type: data.mediaType,
+          dedicated_to_user_id: dedicatedToUserId,
+          dedicated_to: dedicatedToUserId
+            ? profileMap.get(dedicatedToUserId)
+            : undefined,
+          created_at: ts,
+        },
+        other_user: dedicatedToUserId
+          ? profileMap.get(dedicatedToUserId)
+          : undefined,
       });
     });
 
@@ -460,6 +514,9 @@ class ActivityService {
       ) {
         return item.post?.id || item.id;
       }
+      if (item.type === "dedicated_story") {
+        return item.story?.id || item.other_user?.id || item.id;
+      }
       if (item.type === "dare_sent" || item.type === "dare_received") {
         return item.dare?.id || item.other_user?.id || item.id;
       }
@@ -494,6 +551,7 @@ class ActivityService {
         count: group.length,
         items: group,
         post: first.post,
+        story: first.story,
         dare: first.dare,
         truth: first.truth,
         comment_text: first.comment_text,

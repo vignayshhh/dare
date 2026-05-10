@@ -130,6 +130,7 @@
 /* Base Component Styles */
 .screen-container {
   height: 100vh;
+  height: 100dvh;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family:
@@ -384,6 +385,7 @@
   position: sticky;
   top: 0;
   z-index: 100;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .nav-title {

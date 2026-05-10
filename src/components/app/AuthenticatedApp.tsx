@@ -28,6 +28,8 @@ import { UserSearchScreen } from "../screens/UserSearchScreen";
 import { UserProfileScreen } from "../screens/UserProfileScreen";
 import { ProfileEditScreen } from "../screens/ProfileEditScreen";
 import { ActivityScreen } from "../screens/ActivityScreen";
+import { DailyChallengeScreen } from "../screens/DailyChallengeScreen";
+import { DailyChallengeMatchScreen } from "../screens/DailyChallengeMatchScreen";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
 import { useGhostModeStore } from "../../stores/useGhostModeStore";
 import { useMessagingStore } from "../../stores/useMessagingStore";
@@ -64,7 +66,9 @@ type Screen =
   | "profile-creation"
   | "user-search"
   | "user-profile"
-  | "activity";
+  | "activity"
+  | "daily"
+  | "daily-match";
 
 type DaresNavigationRequest = {
   tab?: "received" | "sent";
@@ -72,6 +76,13 @@ type DaresNavigationRequest = {
   highlightTruthId?: string;
   nonce: number;
 };
+
+function getScreenLayerClassName(
+  isActive: boolean,
+  className = "full-height-scroll tab-screen-bottom-pad",
+) {
+  return `app-screen-layer ${isActive ? "is-active" : ""} ${className}`;
+}
 
 function normalizeTimestampInput(value: unknown): string | null {
   if (!value) return null;
@@ -119,6 +130,7 @@ export default function AuthenticatedApp() {
   const alerts = useAlertStore((s) => s.alerts);
   const subscribeToAlerts = useAlertStore((s) => s.subscribeToAlerts);
   const [currentScreen, setCurrentScreen] = useState<Screen>("feed");
+  const [dailyChallengeSkipWait, setDailyChallengeSkipWait] = useState(false);
   const handledGhostApprovalAlertIdsRef = useRef<Set<string>>(new Set());
   const handledGhostCompletionKeysRef = useRef<Set<string>>(new Set());
 
@@ -663,7 +675,14 @@ export default function AuthenticatedApp() {
     }
   };
 
-  const TAB_SCREENS = ["feed", "dares", "profile", "main", "chat-list"];
+  const TAB_SCREENS = [
+    "feed",
+    "dares",
+    "profile",
+    "main",
+    "chat-list",
+    "daily",
+  ];
   const effectiveScreen =
     isAuthenticated &&
     (user?.hasCompletedProfileCreation === false ||
@@ -677,25 +696,25 @@ export default function AuthenticatedApp() {
     switch (effectiveScreen) {
       case "profile-edit":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <ProfileEditScreen onBack={handleBackToMain} />
           </div>
         );
       case "create-dare":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <CreateDareScreen onBack={handleBackToMain} />
           </div>
         );
       case "create-feed":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <CreateFeedPostScreen onBack={handleBackToMain} />
           </div>
         );
       case "chat":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <MessagingScreen
               onBack={() => setCurrentScreen("chat-list")}
               conversationId={chatConversationId || undefined}
@@ -712,7 +731,7 @@ export default function AuthenticatedApp() {
         );
       case "action-picker":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <ActionPickerScreen
               onClose={handleBackToMain}
               onSelectAction={handleActionSelect}
@@ -721,19 +740,19 @@ export default function AuthenticatedApp() {
         );
       case "create-truth":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <CreateInteractionScreen mode="truth" onBack={handleBackToMain} />
           </div>
         );
       case "create-dare-interaction":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <CreateInteractionScreen mode="dare" onBack={handleBackToMain} />
           </div>
         );
       case "alerts":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <AlertsScreen
               onBack={handleBackToMain}
               onNavigateToDares={(request) => {
@@ -749,7 +768,7 @@ export default function AuthenticatedApp() {
         );
       case "profile-creation":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <ProfileCreationScreen
               onComplete={handleProfileCreationComplete}
               onBack={handleBackToMain}
@@ -758,7 +777,7 @@ export default function AuthenticatedApp() {
         );
       case "user-search":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <UserSearchScreen
               onBack={handleBackToMain}
               onUserSelect={handleUserSelect}
@@ -767,7 +786,7 @@ export default function AuthenticatedApp() {
         );
       case "user-profile":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <UserProfileScreen
               onBack={() => setCurrentScreen(previousScreen)}
               userId={selectedUserId}
@@ -789,7 +808,7 @@ export default function AuthenticatedApp() {
         );
       case "activity":
         return (
-          <div className="full-height-scroll">
+          <div className="app-overlay-screen full-height-scroll">
             <ActivityScreen
               userId={selectedUserId || undefined}
               onBack={handleActivityBack}
@@ -828,6 +847,18 @@ export default function AuthenticatedApp() {
             />
           </div>
         );
+      case "daily-match":
+        return (
+          <div className="app-overlay-screen h-full overflow-hidden">
+            <DailyChallengeMatchScreen
+              isActive={effectiveScreen === "daily-match"}
+              skipWaitEnabled={dailyChallengeSkipWait}
+              onSkipWait={() => setDailyChallengeSkipWait(true)}
+              onBack={() => setCurrentScreen("daily")}
+              onOpenConversation={handleChatSelect}
+            />
+          </div>
+        );
       default:
         return null;
     }
@@ -838,7 +869,7 @@ export default function AuthenticatedApp() {
   // Render a neutral shell during SSR and first client paint to avoid hydration mismatch.
   // Auth state from the persisted Zustand store is only safe to consume after mount.
   if (!mounted) {
-    return <div className="bg-[#0a0f0a] h-screen" />;
+    return <div className="app-fixed-viewport bg-[#0a0f0a]" />;
   }
 
   if (isGuestMode && !isAuthenticated) {
@@ -856,9 +887,9 @@ export default function AuthenticatedApp() {
   }
 
   return (
-    <div className="bg-[#0a0f0a] h-screen relative">
+    <div className="app-fixed-viewport relative overflow-hidden bg-[#0a0f0a]">
       <div
-        className={effectiveScreen === "feed" ? "full-height-scroll" : "hidden"}
+        className={getScreenLayerClassName(effectiveScreen === "feed")}
       >
         <FeedScreen
           isActive={effectiveScreen === "feed"}
@@ -867,21 +898,18 @@ export default function AuthenticatedApp() {
           onNavigateToChat={() => setCurrentScreen("chat-list")}
           onNavigateToAlerts={() => setCurrentScreen("alerts")}
           onNavigateToSearch={handleNavigateToSearch}
+          onNavigateToDaily={() => setCurrentScreen("daily")}
           onNavigateToProfile={handleUserSelect}
           onStoryViewerOpenChange={setIsStoryViewerOpen}
         />
       </div>
       <div
-        className={
-          effectiveScreen === "dares" ? "full-height-scroll" : "hidden"
-        }
+        className={getScreenLayerClassName(effectiveScreen === "dares")}
       >
         <DaresReceivedScreen navigationRequest={daresNavigationRequest} />
       </div>
       <div
-        className={
-          effectiveScreen === "profile" ? "full-height-scroll" : "hidden"
-        }
+        className={getScreenLayerClassName(effectiveScreen === "profile")}
       >
         <ProfileScreen
           isActive={effectiveScreen === "profile"}
@@ -892,7 +920,7 @@ export default function AuthenticatedApp() {
         />
       </div>
       <div
-        className={effectiveScreen === "main" ? "full-height-scroll" : "hidden"}
+        className={getScreenLayerClassName(effectiveScreen === "main")}
       >
         <MainScreen
           isActive={effectiveScreen === "main"}
@@ -903,9 +931,21 @@ export default function AuthenticatedApp() {
         />
       </div>
       <div
-        className={
-          effectiveScreen === "chat-list" ? "full-height-scroll" : "hidden"
-        }
+        className={getScreenLayerClassName(
+          effectiveScreen === "daily",
+          "h-full overflow-hidden",
+        )}
+      >
+        <DailyChallengeScreen
+          isActive={effectiveScreen === "daily"}
+          skipWaitEnabled={dailyChallengeSkipWait}
+          onBack={() => setCurrentScreen("feed")}
+          onSkipWait={() => setDailyChallengeSkipWait(true)}
+          onStartMatch={() => setCurrentScreen("daily-match")}
+        />
+      </div>
+      <div
+        className={getScreenLayerClassName(effectiveScreen === "chat-list")}
       >
         <ChatListScreen
           isActive={effectiveScreen === "chat-list"}

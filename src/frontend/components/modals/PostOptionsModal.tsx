@@ -33,8 +33,8 @@ export function PostOptionsModal({
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#1a1a1a] rounded-2xl max-w-md w-full p-6 border border-[#2a2a2a]">
+    <div className="app-modal-backdrop fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="app-modal-dialog bg-[#1a1a1a] rounded-2xl max-w-md w-full p-6 border border-[#2a2a2a]">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-white">

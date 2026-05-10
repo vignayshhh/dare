@@ -1,10 +1,31 @@
 export type StoryMediaType = "image" | "video";
+export type StoryType = "personal" | "dedication";
+export type StoryTextStyle = "clean" | "bold" | "glass";
+
+export interface StoryTextOverlay {
+  text: string;
+  color?: string;
+  style?: StoryTextStyle;
+  xPct?: number;
+  yPct?: number;
+  fontSize?: number;
+}
+
+export interface StoryMusic {
+  id: string;
+  label: string;
+}
 
 export interface Story {
   id: string;
   userId: string;
   mediaUrl: string;
   mediaType: StoryMediaType;
+  storyType?: StoryType;
+  dedicatedToUserId?: string | null;
+  storyText?: StoryTextOverlay | null;
+  storyFilter?: string | null;
+  storyMusic?: StoryMusic | null;
   caption: string | null;
   createdAt: string;
   expiresAt: string;
@@ -16,6 +37,11 @@ export interface CreateStoryRequest {
   userId: string;
   mediaUrl: string;
   mediaType: StoryMediaType;
+  storyType?: StoryType;
+  dedicatedToUserId?: string | null;
+  storyText?: StoryTextOverlay | null;
+  storyFilter?: string | null;
+  storyMusic?: StoryMusic | null;
   caption?: string;
 }
 
@@ -33,6 +59,12 @@ export interface StoryWithViewerInfo extends Story {
     displayName: string;
     avatar: string;
   };
+  dedicatedTo?: {
+    id: string;
+    username: string;
+    displayName: string;
+    avatar: string;
+  } | null;
   hasViewed: boolean;
   viewerInfo?: StoryViewer[];
 }

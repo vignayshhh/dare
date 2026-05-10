@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Target,
   Eye,
@@ -20,6 +20,7 @@ import {
   Activity,
   MessageSquare,
   ChevronRight,
+  Users,
 } from "lucide-react";
 import "@/styles/design-system.css";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
@@ -31,6 +32,7 @@ import { ProfileEditScreen } from "./ProfileEditScreen";
 import { FriendsScreen } from "./FriendsScreen";
 import { Avatar } from "../ui/Avatar";
 import { useProfileDataStore } from "../../stores/profileDataStore";
+import { getAggressiveAvatar, useAvatarStore } from "../../stores/avatarStore";
 import { friendsService } from "../../middleware/services/service-factory";
 import { closeFriendsService } from "../../middleware/services/service-factory";
 import { formatTimeAgo } from "../../utils/timeFormat";
@@ -247,6 +249,7 @@ export function ProfileScreen({
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showFriendsScreen, setShowFriendsScreen] = useState(false);
+  const [showAvatarPreview, setShowAvatarPreview] = useState(false);
   const [showTruthsListScreen, setShowTruthsListScreen] = useState(false);
   const [showDaresListScreen, setShowDaresListScreen] = useState(false);
   const [initialTruthId, setInitialTruthId] = useState<string | undefined>(
@@ -263,6 +266,14 @@ export function ProfileScreen({
     truthsLoadedForUserId: null,
     daresLoadedForUserId: null,
   });
+  const avatarLongPressTimer = useRef<number | null>(null);
+
+  const clearAvatarLongPressTimer = useCallback(() => {
+    if (avatarLongPressTimer.current !== null) {
+      window.clearTimeout(avatarLongPressTimer.current);
+      avatarLongPressTimer.current = null;
+    }
+  }, []);
 
   // Handle logout
   const handleLogout = async () => {
@@ -289,6 +300,10 @@ export function ProfileScreen({
     const unsubscribe = subscribe((_updatedUser) => {});
     return () => unsubscribe();
   }, [subscribe]);
+
+  useEffect(() => {
+    return () => clearAvatarLongPressTimer();
+  }, [clearAvatarLongPressTimer]);
 
   // Load user profile and friends count when component mounts or user changes
   useEffect(() => {
@@ -432,6 +447,30 @@ export function ProfileScreen({
     profileData.currentUsername
       ? profileData.currentUsername
       : user?.username || "user";
+  const currentAvatarFromStore = useAvatarStore((state) =>
+    user?.id
+      ? state.userAvatars[user.id] || state.globalAvatar
+      : state.globalAvatar,
+  );
+  const avatarPreviewSrc =
+    getAggressiveAvatar(
+      currentAvatarFromStore || user?.avatar,
+      "/default-avatar.png",
+      user?.id,
+      username,
+    ) || "/default-avatar.png";
+
+  const handleAvatarPressStart = () => {
+    clearAvatarLongPressTimer();
+    avatarLongPressTimer.current = window.setTimeout(() => {
+      setShowAvatarPreview(true);
+      avatarLongPressTimer.current = null;
+    }, 420);
+  };
+
+  const handleAvatarPressEnd = () => {
+    clearAvatarLongPressTimer();
+  };
 
   const allUserDares = [...sentDares, ...receivedDares];
   const completedDaresCount = allUserDares.filter(
@@ -832,10 +871,12 @@ export function ProfileScreen({
     <div
       style={{
         minHeight: "100vh",
-        background: "#0a0f0a",
+        background:
+          "radial-gradient(circle at 50% -10%, rgba(74,222,128,0.11), transparent 30%), radial-gradient(circle at 88% 16%, rgba(96,165,250,0.055), transparent 26%), #050705",
         fontFamily:
           "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
-        paddingBottom: "100px",
+        paddingTop: "var(--safe-area-top)",
+        paddingBottom: "calc(100px + var(--safe-area-bottom))",
         position: "relative",
         overflowX: "hidden",
         overflowY: "auto",
@@ -848,10 +889,31 @@ export function ProfileScreen({
           gap: 8px;
           margin-bottom: 0;
         }
+        .profile-hero-card {
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+        }
+        .profile-stat-capsule {
+          min-height: 68px;
+        }
         @media (max-width: 480px) {
           .profile-posts-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 6px;
+          }
+          .profile-hero-card {
+            gap: 14px;
+            padding: 18px !important;
+            border-radius: 26px !important;
+          }
+          .profile-hero-card h2 {
+            font-size: 24px !important;
+          }
+          .profile-stat-capsule {
+            min-height: 58px;
+            padding: 8px 7px !important;
+            border-radius: 16px !important;
           }
         }
         @keyframes fadeInUp {
@@ -893,7 +955,7 @@ export function ProfileScreen({
           width: "110%",
           height: "320px",
           background:
-            "radial-gradient(ellipse 70% 32% at 50% 0%, rgba(74,222,128,0.035) 0%, transparent 100%)",
+            "radial-gradient(ellipse 70% 32% at 50% 0%, rgba(74,222,128,0.09) 0%, transparent 100%)",
           pointerEvents: "none",
           zIndex: -1,
         }}
@@ -911,18 +973,16 @@ export function ProfileScreen({
         }}
       >
         <div
+          className="profile-hero-card"
           style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: "20px",
             marginBottom: "18px",
             padding: "22px",
             borderRadius: "30px",
-            border: "1px solid rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.08)",
             background:
-              "linear-gradient(180deg, rgba(19,22,19,0.98), rgba(11,13,11,0.98))",
+              "linear-gradient(145deg, rgba(24,30,24,0.98) 0%, rgba(11,14,11,0.99) 54%, rgba(6,8,6,0.99) 100%)",
             boxShadow:
-              "0 20px 60px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
+              "0 24px 72px rgba(0,0,0,0.34), 0 0 44px rgba(74,222,128,0.055), inset 0 1px 0 rgba(255,255,255,0.055)",
             overflow: "hidden",
             position: "relative",
           }}
@@ -933,25 +993,62 @@ export function ProfileScreen({
               inset: "0 0 auto 0",
               height: "1px",
               background:
-                "linear-gradient(90deg, transparent 0%, rgba(74,222,128,0.32) 50%, transparent 100%)",
+                "linear-gradient(90deg, transparent 0%, rgba(74,222,128,0.55) 46%, rgba(96,165,250,0.22) 64%, transparent 100%)",
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              right: "-42px",
+              top: "-54px",
+              width: "180px",
+              height: "180px",
+              borderRadius: "999px",
+              background: "rgba(74,222,128,0.11)",
+              filter: "blur(38px)",
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: "22%",
+              bottom: "-80px",
+              width: "210px",
+              height: "130px",
+              borderRadius: "999px",
+              background: "rgba(96,165,250,0.055)",
+              filter: "blur(42px)",
               pointerEvents: "none",
             }}
           />
           {/* Avatar */}
           <div style={{ position: "relative", flexShrink: 0 }}>
             <div
+              onPointerDown={handleAvatarPressStart}
+              onPointerUp={handleAvatarPressEnd}
+              onPointerCancel={handleAvatarPressEnd}
+              onPointerLeave={handleAvatarPressEnd}
+              onContextMenu={(event) => event.preventDefault()}
               style={{
-                padding: "2px",
+                padding: "3px",
                 borderRadius: "50%",
                 background:
-                  "linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))",
+                  "linear-gradient(135deg, rgba(74,222,128,0.9), rgba(255,255,255,0.18) 42%, rgba(96,165,250,0.38))",
                 boxShadow:
-                  "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
-                width: "88px",
-                height: "88px",
+                  "0 12px 38px rgba(0,0,0,0.45), 0 0 28px rgba(74,222,128,0.14), inset 0 1px 0 rgba(255,255,255,0.16)",
+                width: "90px",
+                height: "90px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                position: "relative",
+                zIndex: 1,
+                cursor: "zoom-in",
+                touchAction: "manipulation",
+                WebkitUserSelect: "none",
+                userSelect: "none",
               }}
             >
               <Avatar
@@ -1007,34 +1104,27 @@ export function ProfileScreen({
           </div>
 
           {/* Name + username + bio */}
-          <div style={{ flex: 1, minWidth: 0, paddingTop: "4px" }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              paddingTop: "12px",
+              position: "relative",
+              zIndex: 1,
+            }}
+          >
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                marginBottom: "8px",
+                marginBottom: 0,
+                position: "absolute",
+                top: "4px",
+                right: 0,
               }}
             >
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "4px 10px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(74,222,128,0.18)",
-                  background: "rgba(74,222,128,0.1)",
-                  color: "#86efac",
-                  fontSize: "10px",
-                  fontWeight: 700,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Profile
-              </div>
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
                 <button
                   onClick={() => setIsGhostMode(!isGhostMode)}
                   style={{
@@ -1045,7 +1135,7 @@ export function ProfileScreen({
                       ? "1.5px solid rgba(74,222,128,0.4)"
                       : "1px solid rgba(255,255,255,0.08)",
                     background: isGhostMode
-                      ? "rgba(74,222,128,0.15)"
+                      ? "linear-gradient(180deg, rgba(74,222,128,0.2), rgba(74,222,128,0.08))"
                       : "rgba(255,255,255,0.04)",
                     color: isGhostMode ? "#4ade80" : "rgba(255,255,255,0.5)",
                     display: "flex",
@@ -1054,7 +1144,7 @@ export function ProfileScreen({
                     cursor: "pointer",
                     transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
                     boxShadow: isGhostMode
-                      ? "0 0 20px rgba(74,222,128,0.2)"
+                      ? "0 0 22px rgba(74,222,128,0.24)"
                       : "0 8px 18px rgba(0,0,0,0.18)",
                   }}
                 >
@@ -1097,10 +1187,12 @@ export function ProfileScreen({
             <h2
               style={{
                 color: "#fff",
-                fontSize: "28px",
-                fontWeight: 800,
-                lineHeight: 1.1,
-                margin: "0 0 4px",
+                fontSize: "30px",
+                fontWeight: 850,
+                lineHeight: 1.05,
+                margin: "0 0 7px",
+                letterSpacing: "-0.035em",
+                textShadow: "0 12px 30px rgba(0,0,0,0.38)",
               }}
             >
               {displayName}
@@ -1109,7 +1201,9 @@ export function ProfileScreen({
               style={{
                 color: "rgba(74,222,128,0.7)",
                 fontSize: "15px",
-                margin: "0 0 10px",
+                fontWeight: 700,
+                letterSpacing: "-0.01em",
+                margin: user?.bio ? "0 0 11px" : 0,
               }}
             >
               {username.startsWith("@") ? username : `@${username}`}
@@ -1135,17 +1229,18 @@ export function ProfileScreen({
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: "12px",
+            gap: "8px",
             marginBottom: "0px",
           }}
         >
           {[
             {
-              label: "Circle",
-              sublabel: "Friends",
+              label: "Friends",
+              sublabel: "Circle",
               value: profileStats.friends,
               onClick: handleFriendsClick,
               accent: "#4ade80",
+              icon: <Users size={14} strokeWidth={2.4} />,
             },
             {
               label: "Dares",
@@ -1153,6 +1248,7 @@ export function ProfileScreen({
               value: profileStats.daresCompleted,
               onClick: undefined,
               accent: "#22c55e",
+              icon: <CheckCircle size={14} strokeWidth={2.4} />,
             },
             {
               label: "Dares",
@@ -1160,78 +1256,111 @@ export function ProfileScreen({
               value: profileStats.daresSurrendered,
               onClick: undefined,
               accent: "#f59e0b",
+              icon: <X size={14} strokeWidth={2.4} />,
             },
-          ].map(({ label, sublabel, value, onClick, accent }) => (
+          ].map(({ label, sublabel, value, onClick, accent, icon }) => (
             <div
               key={`${label}-${sublabel}`}
+              className="profile-stat-capsule"
               onClick={onClick}
               style={{
                 background:
-                  "linear-gradient(180deg, rgba(24,29,24,0.98), rgba(17,20,17,0.98))",
-                border: "1px solid rgba(255,255,255,0.06)",
-                borderRadius: "24px",
-                padding: "16px 12px 14px",
-                textAlign: "center",
+                  "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.024))",
+                border: `1px solid ${accent}22`,
+                borderRadius: "18px",
+                padding: "10px 10px 9px",
                 cursor: onClick ? "pointer" : "default",
                 transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
                 boxShadow:
-                  "0 14px 34px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+                  "0 10px 26px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.045)",
+                position: "relative",
+                overflow: "hidden",
               }}
               onMouseEnter={(e) => {
                 if (onClick) {
-                  e.currentTarget.style.borderColor = "rgba(74,222,128,0.24)";
+                  e.currentTarget.style.borderColor = "rgba(74,222,128,0.32)";
                   e.currentTarget.style.background =
-                    "linear-gradient(180deg, rgba(28,34,28,0.98), rgba(18,22,18,0.98))";
+                    "linear-gradient(180deg, rgba(74,222,128,0.095), rgba(255,255,255,0.026))";
                   e.currentTarget.style.transform = "translateY(-2px)";
                 }
               }}
               onMouseLeave={(e) => {
                 if (onClick) {
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)";
+                  e.currentTarget.style.borderColor = `${accent}22`;
                   e.currentTarget.style.background =
-                    "linear-gradient(180deg, rgba(24,29,24,0.98), rgba(17,20,17,0.98))";
+                    "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.024))";
                   e.currentTarget.style.transform = "translateY(0)";
                 }
               }}
             >
               <div
                 style={{
-                  width: "30px",
-                  height: "4px",
-                  borderRadius: "999px",
-                  background: accent,
-                  margin: "0 auto 12px",
-                  boxShadow: `0 0 14px ${accent}55`,
+                  position: "absolute",
+                  inset: "0 0 auto 0",
+                  height: "1px",
+                  background: `linear-gradient(90deg, transparent, ${accent}88, transparent)`,
+                  opacity: 0.7,
                 }}
               />
-              <p
+              <div
                 style={{
-                  color: "#fff",
-                  fontWeight: 800,
-                  fontSize: "24px",
-                  margin: "0 0 6px",
-                  letterSpacing: "-0.02em",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "6px",
+                  marginBottom: "7px",
                 }}
               >
-                {value}
-              </p>
+                <p
+                  style={{
+                    color: "#fff",
+                    fontWeight: 900,
+                    fontSize: "19px",
+                    lineHeight: 1,
+                    margin: 0,
+                    letterSpacing: "-0.03em",
+                  }}
+                >
+                  {value}
+                </p>
+                <div
+                  style={{
+                    width: "26px",
+                    height: "26px",
+                    borderRadius: "999px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: accent,
+                    background: `${accent}14`,
+                    border: `1px solid ${accent}24`,
+                    boxShadow: `0 0 18px ${accent}20`,
+                    flexShrink: 0,
+                  }}
+                >
+                  {icon}
+                </div>
+              </div>
               <p
                 style={{
-                  color: "#fff",
-                  fontSize: "12px",
+                  color: "rgba(255,255,255,0.82)",
+                  fontSize: "10px",
+                  lineHeight: 1.1,
                   margin: "0 0 2px",
-                  letterSpacing: "0.04em",
-                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  fontWeight: 800,
                 }}
               >
                 {label}
               </p>
               <p
                 style={{
-                  color: "rgba(255,255,255,0.42)",
-                  fontSize: "10px",
+                  color: "rgba(255,255,255,0.38)",
+                  fontSize: "9px",
+                  lineHeight: 1.1,
                   margin: 0,
-                  letterSpacing: "0.12em",
+                  letterSpacing: "0.1em",
                   textTransform: "uppercase",
                   fontWeight: 600,
                 }}
@@ -2206,9 +2335,87 @@ export function ProfileScreen({
         </button>
       </div>
 
+      {showAvatarPreview && (
+        <div
+          className="app-modal-backdrop"
+          onClick={() => setShowAvatarPreview(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1600,
+            background:
+              "radial-gradient(circle at 50% 20%, rgba(74,222,128,0.12), transparent 34%), rgba(0,0,0,0.92)",
+            backdropFilter: "blur(18px)",
+            WebkitBackdropFilter: "blur(18px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "28px",
+            cursor: "zoom-out",
+          }}
+        >
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowAvatarPreview(false);
+            }}
+            style={{
+              position: "absolute",
+              top: "calc(18px + env(safe-area-inset-top))",
+              right: "18px",
+              width: "42px",
+              height: "42px",
+              borderRadius: "999px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.07)",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 14px 34px rgba(0,0,0,0.36)",
+            }}
+            aria-label="Close avatar preview"
+          >
+            <X size={20} />
+          </button>
+          <div
+            className="app-modal-dialog"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "min(76vw, 380px)",
+              height: "min(76vw, 380px)",
+              maxHeight: "72vh",
+              maxWidth: "72vh",
+              borderRadius: "50%",
+              padding: "4px",
+              background:
+                "linear-gradient(135deg, rgba(74,222,128,0.95), rgba(255,255,255,0.22) 44%, rgba(96,165,250,0.42))",
+              boxShadow:
+                "0 30px 100px rgba(0,0,0,0.58), 0 0 60px rgba(74,222,128,0.14), inset 0 1px 0 rgba(255,255,255,0.2)",
+            }}
+          >
+            <img
+              src={avatarPreviewSrc}
+              alt={`${displayName}'s avatar`}
+              style={{
+                width: "100%",
+                height: "100%",
+                borderRadius: "50%",
+                objectFit: "cover",
+                display: "block",
+                background: "#111611",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Show ProfileEditScreen if settings is clicked */}
       {showEditProfile && (
         <div
+          className="app-story-shell"
           style={{
             position: "fixed",
             top: 0,
@@ -2229,6 +2436,7 @@ export function ProfileScreen({
 
       {showFriendsScreen && (
         <div
+          className="app-story-shell"
           style={{
             position: "fixed",
             top: 0,

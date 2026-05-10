@@ -19,15 +19,72 @@ import {
   Users,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
-import { formatTimeAgo } from "../../utils/timeFormat";
 import {
   storyService,
   type StoryDTO,
   type StoryAudienceDTO,
 } from "../../middleware/services/story.service";
 import { storyReactionService } from "../../middleware/services/story-reaction.service";
+import {
+  getStoryFilterPreset,
+  getStoryMusicPreset,
+} from "../../utils/storyEnhancements";
 
 const STORY_DURATION = 5000;
+
+function startGeneratedStoryMusic(musicId: string) {
+  const AudioContextCtor =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+
+  if (!AudioContextCtor || musicId === "none") return null;
+
+  const context = new AudioContextCtor();
+  const master = context.createGain();
+  master.gain.value = 0.035;
+  master.connect(context.destination);
+
+  const patterns: Record<string, { notes: number[]; tempo: number; type: OscillatorType }> = {
+    pulse: { notes: [196, 247, 294, 247], tempo: 320, type: "sine" },
+    glow: { notes: [330, 392, 494, 587], tempo: 520, type: "triangle" },
+    afterhours: { notes: [110, 147, 165, 147], tempo: 420, type: "sine" },
+  };
+  const pattern = patterns[musicId] || patterns.pulse;
+  let step = 0;
+
+  const playNote = () => {
+    if (context.state === "suspended") {
+      void context.resume();
+    }
+
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+
+    oscillator.type = pattern.type;
+    oscillator.frequency.value = pattern.notes[step % pattern.notes.length];
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start(now);
+    oscillator.stop(now + 0.24);
+    step += 1;
+  };
+
+  playNote();
+  const timer = window.setInterval(playNote, pattern.tempo);
+
+  return {
+    stop: () => {
+      window.clearInterval(timer);
+      void context.close();
+    },
+  };
+}
 
 interface StoryViewerProps {
   stories: StoryDTO[];
@@ -108,6 +165,9 @@ export function StoryViewer({
   }, [onClose]);
 
   const story = stories[currentIndex];
+  const currentStoryId = story?.id;
+  const currentStoryMediaType = story?.media.type;
+  const currentStoryMusicId = story?.storyMusic?.id;
   const storyIdsKey = useMemo(
     () => stories.map((item) => item.id).join("|"),
     [stories],
@@ -163,7 +223,11 @@ export function StoryViewer({
       return;
     }
 
-    video.play().catch(() => {});
+    video.play().catch(() => {
+      video.muted = true;
+      setIsMuted(true);
+      video.play().catch(() => {});
+    });
   }, [isMuted, isPaused]);
 
   useEffect(() => {
@@ -181,7 +245,11 @@ export function StoryViewer({
     const video = videoRef.current;
     if (video) {
       video.currentTime = 0;
-      video.play().catch(() => {});
+      video.play().catch(() => {
+        video.muted = true;
+        setIsMuted(true);
+        video.play().catch(() => {});
+      });
     }
   }, [currentIndex, story?.id]);
 
@@ -207,7 +275,7 @@ export function StoryViewer({
   }, [currentUserId, storyIdsKey]);
 
   useEffect(() => {
-    if (!story || story.media.type === "video") {
+    if (!currentStoryId || currentStoryMediaType === "video") {
       if (imageProgressRef.current.rafId) {
         cancelAnimationFrame(imageProgressRef.current.rafId);
       }
@@ -268,7 +336,7 @@ export function StoryViewer({
         imageProgressRef.current.rafId = null;
       }
     };
-  }, [goNext, isPaused, mediaLoaded, story]);
+  }, [currentStoryId, currentStoryMediaType, goNext, isPaused, mediaLoaded]);
 
   useEffect(() => {
     const nextStory = stories[currentIndex + 1];
@@ -286,6 +354,14 @@ export function StoryViewer({
   useEffect(() => {
     setShowAudienceSheet(false);
   }, [story?.id]);
+
+  useEffect(() => {
+    const musicId = currentStoryMusicId;
+    if (!musicId || musicId === "none" || isPaused || isMuted) return;
+
+    const player = startGeneratedStoryMusic(musicId);
+    return () => player?.stop();
+  }, [currentStoryId, currentStoryMusicId, isMuted, isPaused]);
 
   const onTimeUpdate = () => {
     const video = videoRef.current;
@@ -348,6 +424,11 @@ export function StoryViewer({
   };
 
   const onMouseUp = () => {
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    setIsPaused(false);
+  };
+
+  const onMouseLeave = () => {
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     setIsPaused(false);
   };
@@ -466,10 +547,35 @@ export function StoryViewer({
       : audienceTab === "hates"
         ? storyAudience?.hates ?? []
         : storyAudience?.viewers ?? [];
+  const shellStyle: React.CSSProperties = {
+    maxWidth: 430,
+    width: "100%",
+    height: "100dvh",
+    minHeight: "100vh",
+    opacity: visible && !exiting ? 1 : 0,
+    transform:
+      visible && !exiting
+        ? "translate3d(0,0,0) scale(1)"
+        : "translate3d(0,16px,0) scale(0.975)",
+    transition:
+      "opacity 240ms var(--motion-ease-out), transform 280ms var(--motion-ease-out)",
+    willChange: "opacity, transform",
+    overscrollBehavior: "none",
+    touchAction: "none",
+  };
+  const mediaClassName =
+    "relative z-10 block h-auto max-h-full w-auto max-w-full object-contain object-center";
+  const filterPreset = getStoryFilterPreset(story.storyFilter);
+  const musicPreset = getStoryMusicPreset(story.storyMusic?.id);
+  const hasStoryMusic = Boolean(
+    currentStoryMusicId && currentStoryMusicId !== "none",
+  );
+  const dedicatedAuthorUsername = story.author.username.replace(/^@/, "");
+  const dedicatedTargetUsername = story.dedicatedTo?.username.replace(/^@/, "");
 
   return (
     <div
-      className="fixed inset-0 flex items-start justify-center overflow-hidden"
+      className="app-modal-backdrop fixed inset-0 flex items-center justify-center overflow-hidden bg-black"
       style={{
         zIndex: 200,
         backgroundColor: `rgba(0,0,0,${visible && !exiting ? 0.96 : 0})`,
@@ -484,21 +590,16 @@ export function StoryViewer({
       `}</style>
 
       <div
-        className="relative flex h-screen w-full select-none flex-col overflow-hidden"
-        style={{
-          maxWidth: 430,
-          opacity: visible && !exiting ? 1 : 0,
-          transition: "opacity 220ms ease",
-          overscrollBehavior: "none",
-          touchAction: "none",
-        }}
+        className="relative flex w-full select-none flex-col overflow-hidden"
+        style={shellStyle}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
         onMouseDown={onMouseDown}
         onMouseUp={onMouseUp}
+        onMouseLeave={onMouseLeave}
         onClick={onClickZone}
       >
-        <div className="absolute left-0 right-0 top-0 z-30 flex gap-1 px-2 pt-2">
+        <div className="absolute left-0 right-0 top-0 z-40 flex gap-1 px-2 pt-[calc(env(safe-area-inset-top,0px)+8px)]">
           {stories.map((_, idx) => {
             const isCurrent = idx === currentIndex;
             const isPast = idx < currentIndex;
@@ -513,7 +614,7 @@ export function StoryViewer({
             return (
               <div
                 key={`${progressKey}-${idx}`}
-                className="h-0.5 flex-1 overflow-hidden rounded-full bg-white/30"
+                className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/25"
               >
                 <div
                   className="h-full bg-[#00ff88] transition-all duration-100 ease-linear"
@@ -524,10 +625,10 @@ export function StoryViewer({
           })}
         </div>
 
-        <div className="absolute inset-0 z-0 overflow-hidden bg-[#0a0a0a]">
+        <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden bg-black">
           {!mediaLoaded && (
             <div
-              className="absolute inset-0 z-10"
+              className="absolute inset-0 z-20"
               style={{
                 background:
                   "linear-gradient(135deg, #141414 25%, #1e1e1e 50%, #141414 75%)",
@@ -542,7 +643,7 @@ export function StoryViewer({
               key={mediaKey ?? story.id}
               ref={videoRef}
               src={story.media.url || undefined}
-              className="h-full max-h-full w-full max-w-full object-contain"
+              className={mediaClassName}
               autoPlay
               playsInline
               muted={isMuted}
@@ -563,14 +664,18 @@ export function StoryViewer({
               }}
               onEnded={goNext}
               onTimeUpdate={onTimeUpdate}
-              style={{ pointerEvents: "none" }}
+              style={{
+                pointerEvents: "none",
+                maxHeight: "100dvh",
+                filter: filterPreset.cssFilter,
+              }}
             />
           ) : (
             <img
               key={mediaKey ?? story.id}
               src={story.media.url || undefined}
               alt={story.caption ?? "Story"}
-              className="h-full max-h-full w-full max-w-full object-contain"
+              className={mediaClassName}
               draggable={false}
               onLoad={() => {
                 if (mediaKey) {
@@ -582,24 +687,57 @@ export function StoryViewer({
                   setLoadedMediaKey(mediaKey);
                 }
               }}
-              style={{ pointerEvents: "none" }}
+              style={{
+                pointerEvents: "none",
+                maxHeight: "100dvh",
+                filter: filterPreset.cssFilter,
+              }}
             />
           )}
 
+          {filterPreset.overlay !== "transparent" && (
+            <div
+              className="pointer-events-none absolute inset-0 z-[12]"
+              style={{ background: filterPreset.overlay }}
+            />
+          )}
+
+          {story.storyText?.text && (
+            <div
+              className="pointer-events-none absolute z-[25] max-w-[86%] text-center"
+              style={{
+                left: `${story.storyText.xPct ?? 50}%`,
+                top: `${story.storyText.yPct ?? 50}%`,
+                transform: "translate(-50%, -50%)",
+              }}
+            >
+              <span
+                className="inline-block max-w-full break-words rounded-2xl bg-black/24 px-4 py-2.5 font-black leading-tight shadow-[0_10px_28px_rgba(0,0,0,0.4)] backdrop-blur-sm"
+                style={{
+                  color: story.storyText.color || "#ffffff",
+                  fontSize: `${story.storyText.fontSize ?? 26}px`,
+                  textShadow: "0 2px 14px rgba(0,0,0,0.82)",
+                }}
+              >
+                {story.storyText.text}
+              </span>
+            </div>
+          )}
+
           <div
-            className="pointer-events-none absolute inset-0"
+            className="pointer-events-none absolute inset-0 z-20"
             style={{
               background:
-                "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 22%, transparent 75%, rgba(0,0,0,0.3) 100%)",
+                "linear-gradient(to bottom, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.24) 12%, rgba(0,0,0,0.02) 34%, rgba(0,0,0,0.02) 62%, rgba(0,0,0,0.72) 100%)",
             }}
           />
         </div>
 
-        <div className="pointer-events-none absolute left-0 right-0 top-0 z-20 flex items-center justify-between px-3 pb-6 pt-8">
+        <div className="pointer-events-none absolute left-0 right-0 top-0 z-30 flex items-center justify-between px-3 pb-6 pt-[calc(env(safe-area-inset-top,0px)+28px)]">
           <div className="pointer-events-auto flex items-center gap-2.5">
             <button
               type="button"
-              className="shrink-0"
+              className="relative shrink-0"
               onClick={(event) => {
                 event.stopPropagation();
                 if (!isOwner && onNavigateToProfile) {
@@ -611,29 +749,54 @@ export function StoryViewer({
               <Avatar
                 src={story.author.avatar}
                 alt={story.author.displayName}
-                size="sm"
+                size="md"
                 userId={story.author.id}
                 className="ring-2 ring-white/70 shadow-lg"
               />
             </button>
             <div className="pointer-events-none">
-              <p
-                className="text-sm font-semibold leading-tight text-white"
-                style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}
-              >
-                {story.author.displayName}
-              </p>
-              <p
-                className="mt-0.5 text-[11px] text-white/65"
-                style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}
-              >
-                {formatTimeAgo(story.createdAt)}
-              </p>
+              {story.storyType === "dedication" &&
+              story.dedicatedTo &&
+              dedicatedTargetUsername ? (
+                <div
+                  className="flex min-w-0 max-w-[calc(100vw-96px)] items-center gap-2 text-sm font-semibold leading-tight text-white"
+                  style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}
+                >
+                  <span className="truncate">@{dedicatedAuthorUsername}</span>
+                  <span className="mr-1 shrink-0 animate-pulse rounded-full bg-[#4ade80]/18 px-2.5 py-0.5 text-[11px] font-black uppercase tracking-[0.16em] text-[#bbf7d0] shadow-[0_0_14px_rgba(74,222,128,0.35)]">
+                    for
+                  </span>
+                  <Avatar
+                    src={story.dedicatedTo.avatar}
+                    alt={story.dedicatedTo.displayName}
+                    size="md"
+                    userId={story.dedicatedTo.id}
+                    username={story.dedicatedTo.username}
+                    className="shrink-0 ring-2 ring-[#4ade80]/80 shadow-[0_0_16px_rgba(74,222,128,0.36)]"
+                  />
+                  <span className="truncate">@{dedicatedTargetUsername}</span>
+                </div>
+              ) : (
+                <p
+                  className="text-sm font-semibold leading-tight text-white"
+                  style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}
+                >
+                  {story.author.displayName}
+                </p>
+              )}
+              {hasStoryMusic && (
+                <p
+                  className="mt-0.5 text-[11px] text-white/65"
+                  style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}
+                >
+                  {musicPreset.label}
+                </p>
+              )}
             </div>
           </div>
 
           <div className="pointer-events-auto flex items-center gap-2">
-            {isVideo && (
+            {(isVideo || hasStoryMusic) && (
               <button
                 type="button"
                 onClick={(event) => {
@@ -659,13 +822,10 @@ export function StoryViewer({
         </div>
 
         <div
-          className="pointer-events-none absolute left-0 right-0 bottom-0 z-50 px-4"
+          className="pointer-events-none absolute left-0 right-0 bottom-0 z-50 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+32px)] pt-14"
           style={{
-            bottom: "52px",
-            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 2px)",
-            paddingTop: "14px",
             background:
-              "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.72) 46%, rgba(0,0,0,0) 100%)",
+              "linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.58) 46%, rgba(0,0,0,0) 100%)",
           }}
         >
           {isOwner ? (
@@ -838,11 +998,11 @@ export function StoryViewer({
 
         {showAudienceSheet && isOwner && (
           <div
-            className="absolute inset-0 z-[70] flex items-end bg-black/70"
+            className="app-modal-backdrop absolute inset-0 z-[70] flex items-end bg-black/70"
             onClick={() => setShowAudienceSheet(false)}
           >
             <div
-              className="w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+18px)] pt-4 shadow-[0_-20px_40px_rgba(0,0,0,0.38)]"
+              className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+18px)] pt-4 shadow-[0_-20px_40px_rgba(0,0,0,0.38)]"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/15" />
@@ -942,3 +1102,5 @@ export function StoryViewer({
     </div>
   );
 }
+
+

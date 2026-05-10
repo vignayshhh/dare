@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
+  ArrowLeft,
   Heart,
   MessageCircle,
   Send,
   X,
   MoreHorizontal,
+  Trash2,
   Music,
 } from "lucide-react";
 import "@/styles/design-system.css";
@@ -268,6 +270,7 @@ export function PostsScreen({
     subscribeToPostLikes,
     unsubscribeFromPostLikes,
     userPosts,
+    deletePost,
   } = usePostsStore();
   const { getOrCreateConversation, sendRealTimeMessage } = useMessagingStore();
 
@@ -332,11 +335,17 @@ export function PostsScreen({
   );
   const [showLikesModal, setShowLikesModal] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState<string | null>(null);
+  const [openPostMenuId, setOpenPostMenuId] = useState<string | null>(null);
+  const [postPendingDelete, setPostPendingDelete] = useState<FeedPost | null>(
+    null,
+  );
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<Set<string>>(new Set());
   const [friends, setFriends] = useState<any[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
   const postRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const consumedInitialCommentLinkRef = useRef<string | null>(null);
+  const postMenuRef = useRef<HTMLDivElement | null>(null);
 
   // ── Heart burst state — EXACT copy from FeedScreen ──
   const [bursts, setBursts] = useState<Record<string, HeartBurst[]>>({});
@@ -443,6 +452,24 @@ export function PostsScreen({
     return () => window.clearTimeout(timer);
   }, [initialCommentId, initialPostId, optimizedPosts]);
 
+  useEffect(() => {
+    if (!openPostMenuId) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        postMenuRef.current &&
+        !postMenuRef.current.contains(event.target as Node)
+      ) {
+        setOpenPostMenuId(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [openPostMenuId]);
+
   const openCommentsModal = useCallback((postId: string) => {
     setShowCommentsModal(postId);
   }, []);
@@ -451,7 +478,14 @@ export function PostsScreen({
     setShowCommentsModal(null);
   }, []);
 
-  useBodyScrollLock(!!(showCommentsModal || showLikesModal || showShareModal));
+  useBodyScrollLock(
+    !!(
+      showCommentsModal ||
+      showLikesModal ||
+      showShareModal ||
+      postPendingDelete
+    ),
+  );
 
   // ── Burst spawner — EXACT copy from FeedScreen ──
   const spawnBurst = useCallback((postId: string, x: number, y: number) => {
@@ -540,6 +574,23 @@ export function PostsScreen({
     setShowShareModal(postId);
   }, []);
 
+  const handleDeletePost = useCallback(async () => {
+    if (!postPendingDelete || !user?.id) return;
+
+    setDeletingPostId(postPendingDelete.id);
+    try {
+      const deleted = await deletePost(postPendingDelete.id, user.id);
+      if (deleted) {
+        setPostPendingDelete(null);
+        setOpenPostMenuId((current) =>
+          current === postPendingDelete.id ? null : current,
+        );
+      }
+    } finally {
+      setDeletingPostId(null);
+    }
+  }, [deletePost, postPendingDelete, user?.id]);
+
   const handleSendToDM = useCallback(
     async (friend: any) => {
       if (!showShareModal || !user?.id) return;
@@ -583,28 +634,33 @@ export function PostsScreen({
 
   // ── Render ──
   return (
-    <div className="screen-container">
+    <div
+      className="screen-container"
+      style={{
+        background:
+          "radial-gradient(circle at 50% -10%, rgba(74,222,128,0.1), transparent 30%), radial-gradient(circle at 88% 14%, rgba(96,165,250,0.055), transparent 28%), #050705",
+      }}
+    >
       {/* Header */}
-      <div className="nav-header">
+      <div className="nav-header border-b border-white/6 bg-[linear-gradient(180deg,rgba(5,7,5,0.98),rgba(5,7,5,0.88))] backdrop-blur-xl">
         <div className="flex items-center justify-between px-4 py-3">
           <button
             onClick={onBack}
-            className="text-white hover:text-[#4ade80] transition-colors"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-[linear-gradient(180deg,rgba(20,24,20,0.96),rgba(12,14,12,0.98))] text-white shadow-[0_12px_28px_rgba(0,0,0,0.28)] transition-all duration-200 hover:border-[#4ade80]/30 hover:text-[#4ade80] hover:shadow-[0_16px_34px_rgba(0,0,0,0.34),0_0_22px_rgba(74,222,128,0.12)]"
+            aria-label="Go back"
           >
-            ← Back
+            <ArrowLeft size={19} strokeWidth={2.2} />
           </button>
-          <h1 className="text-white font-bold text-lg">
+          <h1 className="truncate px-3 text-lg font-black tracking-[-0.03em] text-white">
             {userName ? `${userName}'s Posts` : "Posts"}
           </h1>
-          <button className="text-white hover:text-[#4ade80] transition-colors">
-            <MoreHorizontal size={20} />
-          </button>
+          <div className="h-11 w-11 shrink-0" aria-hidden="true" />
         </div>
       </div>
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto pb-8">
-        <div className="px-2 py-6 space-y-5">
+        <div className="space-y-5 px-3 py-6">
           {optimizedPosts.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-[#94a3b8] text-lg">No posts yet</div>
@@ -616,6 +672,8 @@ export function PostsScreen({
               const postBursts = bursts[post.id] ?? [];
               const author = resolveAuthor(post.author);
               const isHighlighted = initialPostId === post.id;
+              const isOwnPost = !!user?.id && author.id === user.id;
+              const isMenuOpen = openPostMenuId === post.id;
 
               return (
                 <div
@@ -632,11 +690,11 @@ export function PostsScreen({
                       );
                     }
                   }}
-                  className={`bg-[#111] rounded-3xl overflow-hidden ${isHighlighted ? "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-black" : ""}`}
+                  className={`overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(17,19,17,0.98),rgba(8,9,8,0.99))] shadow-[0_22px_60px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.045)] ${isHighlighted ? "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-black" : ""}`}
                 >
                   {/* Header */}
-                  <div className="flex items-center px-3 pt-3 pb-2">
-                    <div className="flex min-w-[236px] max-w-full items-center space-x-3 rounded-full bg-[#1e1e1e] px-5 py-2.5 pr-7">
+                  <div className="flex items-center justify-between px-3 pt-3 pb-2">
+                    <div className="flex min-w-[236px] max-w-full items-center space-x-3 rounded-full border border-white/10 bg-[linear-gradient(90deg,rgba(26,31,26,0.92),rgba(16,19,16,0.92))] px-5 py-2.5 pr-7 shadow-[0_10px_28px_rgba(0,0,0,0.24)] backdrop-blur-md">
                       <Avatar
                         src={author.avatar}
                         alt={author.name}
@@ -665,6 +723,44 @@ export function PostsScreen({
                         </p>
                       </button>
                     </div>
+                    {isOwnPost && (
+                      <div
+                        ref={isMenuOpen ? postMenuRef : null}
+                        className="relative ml-3 shrink-0"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenPostMenuId((current) =>
+                              current === post.id ? null : post.id,
+                            )
+                          }
+                          className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-[linear-gradient(180deg,rgba(20,24,20,0.96),rgba(12,14,12,0.98))] text-[#d7fbe6] shadow-[0_14px_30px_rgba(0,0,0,0.28)] transition-all duration-200 hover:border-[#4ade80]/28 hover:text-white hover:shadow-[0_16px_36px_rgba(0,0,0,0.34),0_0_24px_rgba(74,222,128,0.12)]"
+                          aria-label="Post options"
+                        >
+                          <MoreHorizontal size={18} />
+                        </button>
+                        {isMenuOpen && (
+                          <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-52 overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,24,20,0.98),rgba(10,12,10,0.99))] p-2 shadow-[0_22px_44px_rgba(0,0,0,0.42),0_0_30px_rgba(74,222,128,0.08)] backdrop-blur-xl">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenPostMenuId(null);
+                                setPostPendingDelete(post);
+                              }}
+                              className="flex w-full items-center gap-3 rounded-[18px] px-3.5 py-3 text-left text-red-200 transition-colors hover:bg-red-500/10"
+                            >
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10">
+                                <Trash2 size={15} className="text-red-300" />
+                              </div>
+                              <div className="text-sm font-semibold">
+                                Delete Post
+                              </div>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Media */}
@@ -726,7 +822,7 @@ export function PostsScreen({
 
                   {/* Actions */}
                   <div className="px-2 pt-3">
-                    <div className="bg-[#1e1e1e] rounded-full grid grid-cols-3 items-center px-3 py-2.5 gap-1">
+                    <div className="grid grid-cols-3 items-center gap-1 rounded-full border border-white/8 bg-white/[0.045] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                       <div className="flex items-center justify-center min-w-0">
                         <button
                           onClick={(e) => handleHeartIconClick(post.id, e)}
@@ -800,7 +896,7 @@ export function PostsScreen({
       ══════════════════════════════════════════ */}
       {showCommentsModal && selectedPost && (
         <div
-          className="fixed inset-0 z-50 flex items-end"
+          className="app-modal-backdrop fixed inset-0 z-50 flex items-end"
           style={{
             backgroundColor: "rgba(0, 0, 0, 0.7)",
             animation: "backdropFadeIn 0.25s ease-out forwards",
@@ -827,7 +923,7 @@ export function PostsScreen({
             .comment-fade-in { animation: fadeIn 0.2s ease-out forwards; }
           `}</style>
           <div
-            className="bg-[#111] w-full rounded-t-3xl flex flex-col modal-slide-up overflow-hidden"
+            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col overflow-hidden"
             style={{
               maxHeight: "98vh",
               touchAction: "pan-y",
@@ -895,7 +991,7 @@ export function PostsScreen({
       ══════════════════════════════════════════ */}
       {showLikesModal && selectedPost && (
         <div
-          className="fixed inset-0 z-50 flex items-end"
+          className="app-modal-backdrop fixed inset-0 z-50 flex items-end"
           style={{
             backgroundColor: "rgba(0, 0, 0, 0.7)",
             animation: "backdropFadeIn 0.25s ease-out forwards",
@@ -916,7 +1012,7 @@ export function PostsScreen({
             .modal-fade-in { animation: fadeIn 0.2s ease-out forwards; }
           `}</style>
           <div
-            className="bg-[#111] w-full rounded-t-3xl flex flex-col modal-slide-up"
+            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
             style={{
               maxHeight: "98vh",
               minHeight: "60vh",
@@ -1014,7 +1110,7 @@ export function PostsScreen({
       ══════════════════════════════════════════ */}
       {showShareModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end"
+          className="app-modal-backdrop fixed inset-0 z-50 flex items-end"
           style={{
             backgroundColor: "rgba(0, 0, 0, 0.7)",
             animation: "backdropFadeIn 0.25s ease-out forwards",
@@ -1022,7 +1118,7 @@ export function PostsScreen({
           onClick={() => setShowShareModal(null)}
         >
           <div
-            className="bg-[#111] w-full rounded-t-3xl p-6"
+            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-10 h-1 bg-[#3a3a3a] rounded-full mx-auto mb-4" />
@@ -1138,6 +1234,53 @@ export function PostsScreen({
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {postPendingDelete && (
+        <div
+          className="app-modal-backdrop fixed inset-0 z-[80] flex items-end bg-black/70"
+          onClick={() => {
+            if (deletingPostId) return;
+            setPostPendingDelete(null);
+          }}
+        >
+          <div
+            className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] pt-4 shadow-[0_-20px_46px_rgba(0,0,0,0.42)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/15" />
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10">
+                <Trash2 size={18} className="text-red-300" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-white">
+                  Delete this post?
+                </p>
+                <p className="text-sm text-white/50">
+                  This action permanently removes it from your profile and feed.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPostPendingDelete(null)}
+                disabled={!!deletingPostId}
+                className="flex-1 rounded-[20px] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.07] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeletePost()}
+                disabled={!!deletingPostId}
+                className="flex-1 rounded-[20px] bg-[linear-gradient(135deg,#fb7185,#ef4444)] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(239,68,68,0.28)] transition-all hover:brightness-105 disabled:opacity-50"
+              >
+                {deletingPostId ? "Deleting..." : "Delete Post"}
+              </button>
             </div>
           </div>
         </div>
