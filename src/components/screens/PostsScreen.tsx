@@ -1247,7 +1247,7 @@ export function PostsScreen({
           }}
         >
           <div
-            className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] pt-4 shadow-[0_-20px_46px_rgba(0,0,0,0.42)]"
+            className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(var(--safe-area-bottom)+20px)] pt-4 shadow-[0_-20px_46px_rgba(0,0,0,0.42)]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/15" />

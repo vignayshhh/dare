@@ -534,7 +534,7 @@ function TruthVoteModal({
             padding:
               activeTab === "comments"
                 ? "0"
-                : "16px 20px calc(32px + env(safe-area-inset-bottom, 0px))",
+                : "16px 20px calc(32px + var(--safe-area-bottom))",
           }}
         >
           {activeTab === "comments" ? (
@@ -970,7 +970,7 @@ function DareVoteModal({
             overflowY: "auto",
             overscrollBehavior: "contain",
             WebkitOverflowScrolling: "touch",
-            padding: "12px 20px calc(48px + env(safe-area-inset-bottom, 0px))",
+            padding: "12px 20px calc(48px + var(--safe-area-bottom))",
           }}
         >
           {isLoading ? (
@@ -1137,6 +1137,7 @@ const AnimatedDareCapsule = React.memo(
     receiverId,
     revealDescription = true,
     persist = false,
+    animate = true,
   }: {
     cardId: string;
     challenger: DarePost["challenger"];
@@ -1148,6 +1149,7 @@ const AnimatedDareCapsule = React.memo(
     receiverId?: string;
     revealDescription?: boolean;
     persist?: boolean;
+    animate?: boolean;
   }) {
     const [expanded, setExpanded] = useState(false);
     const [showChallengerName, setShowChallengerName] = useState(false);
@@ -1156,10 +1158,25 @@ const AnimatedDareCapsule = React.memo(
     const [fading, setFading] = useState(false);
     const [showDescription, setShowDescription] = useState(false);
     const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+    const capsuleVisible = animate ? showAll && !fading : true;
+    const capsuleExpanded = animate ? expanded : true;
+    const capsuleShowChallenger = animate ? showChallengerName : true;
+    const capsuleShowReceiver = animate ? showReceiver : true;
+    const capsuleShowDescription = animate ? showDescription : true;
 
     useEffect(() => {
       timers.current.forEach(clearTimeout);
       timers.current = [];
+
+      if (!animate) {
+        setShowAll(true);
+        setExpanded(true);
+        setShowChallengerName(true);
+        setShowReceiver(true);
+        setFading(false);
+        setShowDescription(true);
+        return;
+      }
 
       if (!isActive) {
         setShowAll(false);
@@ -1198,7 +1215,7 @@ const AnimatedDareCapsule = React.memo(
         timers.current.forEach(clearTimeout);
         timers.current = [];
       };
-    }, [cardId, isActive, persist, revealDescription]);
+    }, [animate, cardId, isActive, persist, revealDescription]);
 
     const COLLAPSED_WIDTH = 64;
 
@@ -1208,8 +1225,12 @@ const AnimatedDareCapsule = React.memo(
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          opacity: showAll && !fading ? 1 : 0,
-          transition: fading ? "opacity 1.4s ease" : "opacity 0.6s ease",
+          opacity: capsuleVisible ? 1 : 0,
+          transition: animate
+            ? fading
+              ? "opacity 1.4s ease"
+              : "opacity 0.6s ease"
+            : "none",
           /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
           /* DISABLED: pointerEvents: "none", */
           willChange: "opacity, transform",
@@ -1228,17 +1249,18 @@ const AnimatedDareCapsule = React.memo(
               "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.10))",
             borderRadius: "999px",
             height: "64px",
-            padding: expanded ? "0 18px 0 8px" : "0 8px",
+            padding: capsuleExpanded ? "0 18px 0 8px" : "0 8px",
             backdropFilter: "blur(24px)",
             boxShadow:
               "0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.20), 0 0 0 1px rgba(255,255,255,0.08)",
             overflow: "hidden",
             whiteSpace: "nowrap",
-            maxWidth: expanded ? "420px" : `${COLLAPSED_WIDTH}px`,
-            width: expanded ? "max-content" : `${COLLAPSED_WIDTH}px`,
+            maxWidth: capsuleExpanded ? "420px" : `${COLLAPSED_WIDTH}px`,
+            width: capsuleExpanded ? "max-content" : `${COLLAPSED_WIDTH}px`,
             // Smooth, slower expand — 2.0s with ease-in-out for smooth FPS
-            transition:
-              "max-width 2.0s cubic-bezier(0.4, 0, 0.2, 1), width 2.0s cubic-bezier(0.4, 0, 0.2, 1), padding 2.0s cubic-bezier(0.4, 0, 0.2, 1)",
+            transition: animate
+              ? "max-width 2.0s cubic-bezier(0.4, 0, 0.2, 1), width 2.0s cubic-bezier(0.4, 0, 0.2, 1), padding 2.0s cubic-bezier(0.4, 0, 0.2, 1)"
+              : "none",
             willChange: "max-width, width, padding",
             transform: "translateZ(0)",
             backfaceVisibility: "hidden",
@@ -1253,8 +1275,8 @@ const AnimatedDareCapsule = React.memo(
             style={{
               minWidth: 48,
               border: "2px solid rgba(255,255,255,0.3)",
-              opacity: showChallengerName ? 1 : 0,
-              transition: "opacity 1.2s ease",
+              opacity: capsuleShowChallenger ? 1 : 0,
+              transition: animate ? "opacity 1.2s ease" : "none",
               willChange: "opacity",
               transform: "translateZ(0)",
             }}
@@ -1275,8 +1297,8 @@ const AnimatedDareCapsule = React.memo(
               fontWeight: 700,
               fontSize: 16,
               flexShrink: 0,
-              opacity: showChallengerName ? 1 : 0,
-              transition: "opacity 1.2s ease",
+              opacity: capsuleShowChallenger ? 1 : 0,
+              transition: animate ? "opacity 1.2s ease" : "none",
               letterSpacing: "-0.01em",
               lineHeight: 1,
               textShadow: "0 2px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6)",
@@ -1288,13 +1310,14 @@ const AnimatedDareCapsule = React.memo(
           </button>
           {/* DARED label */}
           <span
+            className="dare-capsule-dared-label"
             style={{
               color: "#4ade80",
               fontWeight: 900,
               fontSize: 16,
               flexShrink: 0,
-              opacity: showReceiver ? 1 : 0,
-              transition: "opacity 1.2s ease",
+              opacity: capsuleShowReceiver ? 1 : 0,
+              transition: animate ? "opacity 1.2s ease" : "none",
               letterSpacing: "0.06em",
               textTransform: "uppercase" as const,
               lineHeight: 1,
@@ -1312,8 +1335,8 @@ const AnimatedDareCapsule = React.memo(
             style={{
               minWidth: 48,
               border: "2px solid rgba(255,255,255,0.3)",
-              opacity: showReceiver ? 1 : 0,
-              transition: "opacity 1.2s ease 0.3s",
+              opacity: capsuleShowReceiver ? 1 : 0,
+              transition: animate ? "opacity 1.2s ease 0.3s" : "none",
             }}
           />
           {/* Receiver name */}
@@ -1332,8 +1355,8 @@ const AnimatedDareCapsule = React.memo(
               fontWeight: 700,
               fontSize: 16,
               flexShrink: 0,
-              opacity: showReceiver ? 1 : 0,
-              transition: "opacity 1.2s ease 0.5s",
+              opacity: capsuleShowReceiver ? 1 : 0,
+              transition: animate ? "opacity 1.2s ease 0.5s" : "none",
               letterSpacing: "-0.01em",
               lineHeight: 1,
               textShadow: "0 2px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6)",
@@ -1356,12 +1379,13 @@ const AnimatedDareCapsule = React.memo(
                 "0 2px 12px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.8)",
               margin: "12px 0 0",
               padding: "0 32px",
-              opacity: showDescription ? 1 : 0,
-              transform: showDescription
+              opacity: capsuleShowDescription ? 1 : 0,
+              transform: capsuleShowDescription
                 ? "translateY(0)"
                 : "translateY(18px)",
-              transition:
-                "opacity 1.4s cubic-bezier(0.25,0.46,0.45,0.94), transform 1.4s cubic-bezier(0.25,0.46,0.45,0.94)",
+              transition: animate
+                ? "opacity 1.4s cubic-bezier(0.25,0.46,0.45,0.94), transform 1.4s cubic-bezier(0.25,0.46,0.45,0.94)"
+                : "none",
             }}
           >
             {description}
@@ -1377,7 +1401,8 @@ const AnimatedDareCapsule = React.memo(
       prev.receiver !== next.receiver ||
       prev.description !== next.description ||
       prev.revealDescription !== next.revealDescription ||
-      prev.persist !== next.persist
+      prev.persist !== next.persist ||
+      prev.animate !== next.animate
     )
       return false;
     return true;
@@ -2118,7 +2143,7 @@ function ReelShareModal({
         />
         <div
           style={{
-            padding: "12px 20px calc(12px + env(safe-area-inset-bottom))",
+            padding: "12px 20px calc(12px + var(--safe-area-bottom))",
             flexShrink: 0,
           }}
         >
@@ -2158,6 +2183,8 @@ interface DareCardProps {
   dare: DarePost;
   reelMode?: boolean;
   isActive?: boolean;
+  hasPlayedEntryAnimation?: boolean;
+  playEntryAnimation?: boolean;
   onVoteClick: (dare: DarePost) => void;
   onFullscreenMedia: (media: {
     url: string;
@@ -2174,6 +2201,8 @@ export function DareCard({
   dare,
   reelMode,
   isActive,
+  hasPlayedEntryAnimation = false,
+  playEntryAnimation = true,
   onVoteClick,
   onFullscreenMedia,
   onOpenComments,
@@ -2364,6 +2393,16 @@ export function DareCard({
     carouselSeamProgress > 0.015 && carouselSeamProgress < 0.985
       ? Math.min(0.72, Math.sin(carouselSeamProgress * Math.PI) * 0.78)
       : 0;
+  const coverSlideClassName = [
+    "dare-cover-slide",
+    isActive && playEntryAnimation ? "dare-cover-slide-active" : "",
+    hasPlayedEntryAnimation && !playEntryAnimation
+      ? "dare-cover-slide-entered"
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const shouldAnimateCapsule = playEntryAnimation || !hasPlayedEntryAnimation;
 
   if (reelMode) {
     return (
@@ -2401,7 +2440,7 @@ export function DareCard({
           }}
         >
           <section
-            className={`dare-cover-slide ${isActive ? "dare-cover-slide-active" : ""}`}
+            className={coverSlideClassName}
             style={{
               position: "relative",
               flex: "0 0 100%",
@@ -2487,7 +2526,7 @@ export function DareCard({
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "24px",
-                padding: "40px 22px calc(120px + env(safe-area-inset-bottom))",
+                padding: "40px 22px calc(120px + var(--safe-area-bottom))",
                 transform: "translateY(-38px)",
               }}
             >
@@ -2572,6 +2611,7 @@ export function DareCard({
                   receiverId={dare.receiverId}
                   revealDescription={false}
                   persist
+                  animate={shouldAnimateCapsule}
                 />
               </div>
 
@@ -2628,7 +2668,7 @@ export function DareCard({
                 position: "absolute",
                 left: 0,
                 right: 0,
-                bottom: "calc(94px + env(safe-area-inset-bottom))",
+                bottom: "calc(94px + var(--safe-area-bottom))",
                 display: "flex",
                 justifyContent: "center",
                 gap: 7,
@@ -2770,7 +2810,7 @@ export function DareCard({
           style={{
             position: "absolute",
             right: 14,
-            bottom: "calc(200px + env(safe-area-inset-bottom))",
+            bottom: "calc(200px + var(--safe-area-bottom))",
             zIndex: 10,
             display: "flex",
             flexDirection: "column",
@@ -2903,7 +2943,7 @@ export function DareCard({
             }}
             style={{
               position: "absolute",
-              top: "calc(100% - 100px - env(safe-area-inset-bottom))", // decreased further to move down more
+              top: "calc(100% - 100px - var(--safe-area-bottom))", // decreased further to move down more
               left: "14px",
               right: "14px",
               zIndex: 2,
@@ -2940,7 +2980,7 @@ export function DareCard({
             left: 0,
             right: 0,
             zIndex: 1,
-            padding: "0 14px calc(95px + env(safe-area-inset-bottom))",
+            padding: "0 14px calc(95px + var(--safe-area-bottom))",
           }}
         >
           <div
@@ -3174,7 +3214,7 @@ export function DareCard({
             border: 1.5px solid rgba(74,222,128,0.52);
             background: radial-gradient(circle, rgba(74,222,128,0.18) 0%, rgba(74,222,128,0.07) 44%, transparent 72%);
             box-shadow: 0 0 26px rgba(74,222,128,0.3), 0 0 52px rgba(74,222,128,0.13);
-            animation: dareCoverAvatarRing 2.65s ease-out 0.45s infinite;
+            animation: none;
           }
           .dare-cover-avatar::after {
             inset: -6px;
@@ -3184,13 +3224,7 @@ export function DareCard({
             -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             -webkit-mask-composite: xor;
             mask-composite: exclude;
-            animation: dareCoverAvatarHalo 4.8s linear infinite;
-          }
-          .dare-cover-avatar-right::before {
-            animation-delay: 0.78s;
-          }
-          .dare-cover-avatar-right::after {
-            animation-delay: -1.9s;
+            animation: none;
           }
           .dare-cover-capsule {
             opacity: 0;
@@ -3230,6 +3264,18 @@ export function DareCard({
           .dare-cover-slide-active .dare-cover-avatar {
             animation: dareCoverAvatarBreathe 4.6s ease-in-out 1.25s infinite;
           }
+          .dare-cover-slide-active .dare-cover-avatar::before {
+            animation: dareCoverAvatarRing 2.65s ease-out 0.45s infinite;
+          }
+          .dare-cover-slide-active .dare-cover-avatar::after {
+            animation: dareCoverAvatarHalo 4.8s linear infinite;
+          }
+          .dare-cover-slide-active .dare-cover-avatar-right::before {
+            animation-delay: 0.78s;
+          }
+          .dare-cover-slide-active .dare-cover-avatar-right::after {
+            animation-delay: -1.9s;
+          }
           .dare-cover-slide-active .dare-cover-capsule {
             animation: dareCoverCapsuleSettle 0.75s cubic-bezier(0.22,1,0.36,1) 0.58s both;
           }
@@ -3244,6 +3290,59 @@ export function DareCard({
           }
           .dare-cover-slide-active .dare-cover-copy {
             animation: dareCoverCopyIn 0.72s cubic-bezier(0.22,1,0.36,1) 2.96s both;
+          }
+          .dare-cover-slide-active .dare-capsule-dared-label,
+          .dare-cover-slide-entered .dare-capsule-dared-label {
+            animation: dareCapsuleDaredGlow 3.8s ease-in-out infinite;
+          }
+          .dare-cover-slide-entered .dare-cover-lattice {
+            opacity: 1;
+            transform: scale(1);
+          }
+          .dare-cover-slide-entered .dare-cover-metal {
+            opacity: 0.86;
+            animation: none;
+          }
+          .dare-cover-slide-entered .dare-cover-ribbon {
+            opacity: 0.68;
+            transform: translateY(-50%) rotate(12deg) scale(1);
+            animation: none;
+          }
+          .dare-cover-slide-entered .dare-cover-avatar-stack {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0) drop-shadow(0 18px 34px rgba(0,0,0,0.5));
+          }
+          .dare-cover-slide-entered .dare-cover-avatar {
+            animation: none;
+            transform: translateY(0) scale(1);
+          }
+          .dare-cover-slide-entered .dare-cover-avatar::before {
+            animation: dareCoverAvatarRing 3.15s ease-out 0.45s infinite;
+          }
+          .dare-cover-slide-entered .dare-cover-avatar::after {
+            animation: dareCoverAvatarHalo 5.6s linear infinite;
+          }
+          .dare-cover-slide-entered .dare-cover-avatar-right::before {
+            animation-delay: 1.08s;
+          }
+          .dare-cover-slide-entered .dare-cover-avatar-right::after {
+            animation-delay: -2.2s;
+          }
+          .dare-cover-slide-entered .dare-cover-capsule {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0);
+          }
+          .dare-cover-slide-entered .dare-cover-challenge::before {
+            animation: dareCoverChallengeSweepLoop 7.2s cubic-bezier(0.22,1,0.36,1) 1.4s infinite;
+            transform: translateX(-120%);
+          }
+          .dare-cover-slide-entered .dare-cover-kicker,
+          .dare-cover-slide-entered .dare-cover-copy {
+            opacity: 1;
+            transform: translateY(0);
+            filter: blur(0);
           }
           @keyframes dareCoverLatticeIn {
             from { opacity: 0; transform: scale(1.04); }
@@ -3295,6 +3394,21 @@ export function DareCard({
           @keyframes dareCoverChallengeSweep {
             from { transform: translateX(-120%); }
             to { transform: translateX(120%); }
+          }
+          @keyframes dareCoverChallengeSweepLoop {
+            0% { transform: translateX(-120%); }
+            34% { transform: translateX(120%); }
+            100% { transform: translateX(120%); }
+          }
+          @keyframes dareCapsuleDaredGlow {
+            0%, 100% {
+              text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 10px rgba(74,222,128,0.42);
+              filter: brightness(1);
+            }
+            45% {
+              text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 20px rgba(74,222,128,0.78), 0 0 34px rgba(74,222,128,0.28);
+              filter: brightness(1.14);
+            }
           }
           @keyframes dareCoverKickerIn {
             from { opacity: 0; transform: translateY(6px); }
@@ -4694,6 +4808,18 @@ export function MainScreen({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isTruthDragging, setIsTruthDragging] = useState(false);
   const [currentTruthIndex, setCurrentTruthIndex] = useState(0);
+  const activeReelIndexRef = useRef(0);
+  const reelWheelLockRef = useRef(false);
+  const reelWheelUnlockTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const dareReelTouchStartX = useRef<number | null>(null);
+  const dareReelTouchStartY = useRef<number | null>(null);
+  const dareReelTouchStartIndex = useRef(0);
+  const visitedDareEntryIds = useRef<Set<string>>(new Set());
+  const [animatedDareEntryIds, setAnimatedDareEntryIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [sessionVoteSnapshot] = useState(() => ({
     truthVotes: votePersistence.getAllTruthVotes(),
     dareVotes: votePersistence.getAllDareVotes(),
@@ -5071,10 +5197,13 @@ export function MainScreen({
   useEffect(() => {
     const el = reelContainerRef.current;
     if (!el) return;
-    el.style.overflow = anyModalOpen ? "hidden" : "scroll";
+    el.style.overflowY = anyModalOpen ? "hidden" : "auto";
+    el.style.overflowX = "hidden";
     // Also lock body scroll when modal open so overscroll doesn't bleed
     document.body.style.overflow = anyModalOpen ? "hidden" : "";
     return () => {
+      el.style.overflowY = "";
+      el.style.overflowX = "";
       document.body.style.overflow = "";
     };
   }, [anyModalOpen]);
@@ -5098,6 +5227,158 @@ export function MainScreen({
     );
   }, [displayDarePosts, sessionVoteSnapshot]);
 
+  const registerDareCardVisit = React.useCallback((dareId: string) => {
+    if (visitedDareEntryIds.current.has(dareId)) {
+      setAnimatedDareEntryIds((current) => {
+        if (current.has(dareId)) return current;
+        return current.size > 0 ? new Set() : current;
+      });
+      return;
+    }
+
+    visitedDareEntryIds.current.add(dareId);
+    setAnimatedDareEntryIds(new Set([dareId]));
+  }, []);
+
+  useEffect(() => {
+    if (!isDareScreenVisible) {
+      setAnimatedDareEntryIds((current) =>
+        current.size > 0 ? new Set() : current,
+      );
+      return;
+    }
+
+    const activeDare = sortedDarePosts[activeReelIndex];
+    if (!activeDare?.id) return;
+    registerDareCardVisit(activeDare.id);
+  }, [
+    activeReelIndex,
+    isDareScreenVisible,
+    registerDareCardVisit,
+    sortedDarePosts,
+  ]);
+
+  const shouldPlayDareEntryAnimation = React.useCallback(
+    (dareId: string, cardIsActive: boolean) => {
+      if (!cardIsActive) return false;
+      return (
+        animatedDareEntryIds.has(dareId) ||
+        !visitedDareEntryIds.current.has(dareId)
+      );
+    },
+    [animatedDareEntryIds],
+  );
+
+  const hasPlayedDareEntryAnimation = React.useCallback((dareId: string) => {
+    return visitedDareEntryIds.current.has(dareId);
+  }, []);
+
+  useEffect(() => {
+    activeReelIndexRef.current = activeReelIndex;
+  }, [activeReelIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (reelWheelUnlockTimer.current) {
+        clearTimeout(reelWheelUnlockTimer.current);
+      }
+    };
+  }, []);
+
+  const scrollDareReelToIndex = React.useCallback((index: number) => {
+    const container = reelContainerRef.current;
+    if (!container) return;
+
+    const maxIndex = Math.max(0, sortedDarePosts.length - 1);
+    const targetIndex = Math.min(maxIndex, Math.max(0, index));
+    const activeDare = sortedDarePosts[targetIndex];
+    if (activeDare?.id) registerDareCardVisit(activeDare.id);
+
+    activeReelIndexRef.current = targetIndex;
+    setActiveReelIndex(targetIndex);
+    container.scrollTo({
+      top: container.clientHeight * targetIndex,
+      behavior: "smooth",
+    });
+  }, [registerDareCardVisit, sortedDarePosts]);
+
+  const handleDareReelWheel = React.useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (!isDareScreenVisible || anyModalOpen) return;
+
+      const verticalDelta = Math.abs(e.deltaY);
+      const horizontalDelta = Math.abs(e.deltaX);
+      if (verticalDelta < 10 || horizontalDelta > verticalDelta) return;
+
+      e.preventDefault();
+      if (reelWheelLockRef.current) return;
+
+      const direction = e.deltaY > 0 ? 1 : -1;
+      const currentIndex = activeReelIndexRef.current;
+      const nextIndex = Math.min(
+        Math.max(0, sortedDarePosts.length - 1),
+        Math.max(0, currentIndex + direction),
+      );
+
+      if (nextIndex === currentIndex) return;
+
+      reelWheelLockRef.current = true;
+      scrollDareReelToIndex(nextIndex);
+
+      if (reelWheelUnlockTimer.current) {
+        clearTimeout(reelWheelUnlockTimer.current);
+      }
+      reelWheelUnlockTimer.current = setTimeout(() => {
+        reelWheelLockRef.current = false;
+      }, 520);
+    },
+    [
+      anyModalOpen,
+      isDareScreenVisible,
+      scrollDareReelToIndex,
+      sortedDarePosts.length,
+    ],
+  );
+
+  const handleDareReelTouchStart = React.useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      const touch = e.touches[0];
+      dareReelTouchStartX.current = touch.clientX;
+      dareReelTouchStartY.current = touch.clientY;
+      dareReelTouchStartIndex.current = activeReelIndexRef.current;
+    },
+    [],
+  );
+
+  const handleDareReelTouchEnd = React.useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      const startX = dareReelTouchStartX.current;
+      const startY = dareReelTouchStartY.current;
+      dareReelTouchStartX.current = null;
+      dareReelTouchStartY.current = null;
+
+      if (startX === null || startY === null) return;
+
+      const touch = e.changedTouches[0];
+      const deltaX = startX - touch.clientX;
+      const deltaY = startY - touch.clientY;
+      const verticalDistance = Math.abs(deltaY);
+
+      if (verticalDistance < 48 || verticalDistance < Math.abs(deltaX) * 1.15) {
+        return;
+      }
+
+      const direction = deltaY > 0 ? 1 : -1;
+      scrollDareReelToIndex(dareReelTouchStartIndex.current + direction);
+    },
+    [scrollDareReelToIndex],
+  );
+
+  const handleDareReelTouchCancel = React.useCallback(() => {
+    dareReelTouchStartX.current = null;
+    dareReelTouchStartY.current = null;
+  }, []);
+
   useEffect(() => {
     if (activeView !== "dares") return;
     const container = reelContainerRef.current;
@@ -5105,13 +5386,20 @@ export function MainScreen({
     const handleScroll = () => {
       const slideHeight = container.clientHeight;
       if (!slideHeight) return;
-      const idx = Math.round(container.scrollTop / slideHeight);
+      const maxIndex = Math.max(0, sortedDarePosts.length - 1);
+      const idx = Math.min(
+        maxIndex,
+        Math.max(0, Math.round(container.scrollTop / slideHeight)),
+      );
+      const activeDare = sortedDarePosts[idx];
+      if (activeDare?.id) registerDareCardVisit(activeDare.id);
+      activeReelIndexRef.current = idx;
       setActiveReelIndex(idx);
     };
     container.addEventListener("scroll", handleScroll, { passive: true });
     handleScroll();
     return () => container.removeEventListener("scroll", handleScroll);
-  }, [activeView, sortedDarePosts]);
+  }, [activeView, registerDareCardVisit, sortedDarePosts]);
 
   useEffect(() => {
     if (!focusRequest || focusRequest.view !== "truth") return;
@@ -5255,33 +5543,55 @@ export function MainScreen({
     >
       {activeView === "dares" ? (
         <div
-          ref={reelContainerRef}
           style={{
             height: "100dvh",
-            overflowY: "scroll",
-            scrollSnapType: "y mandatory",
-            WebkitOverflowScrolling: "touch",
-            overscrollBehavior: "none",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            background: "#0a0a0a",
           }}
         >
+          <NavHeader />
           <div
-            data-reel-index="0"
+            ref={reelContainerRef}
+            onWheel={handleDareReelWheel}
+            onTouchStart={handleDareReelTouchStart}
+            onTouchEnd={handleDareReelTouchEnd}
+            onTouchCancel={handleDareReelTouchCancel}
             style={{
-              height: "100dvh",
-              scrollSnapAlign: "start",
-              scrollSnapStop: "always",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+              overflowX: "hidden",
+              scrollSnapType: "y mandatory",
+              scrollBehavior: "smooth",
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+              touchAction: "pan-y",
             }}
           >
-            <NavHeader />
-            <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+            <div
+              data-reel-index="0"
+              style={{
+                height: "100%",
+                minHeight: "100%",
+                scrollSnapAlign: "start",
+                scrollSnapStop: "always",
+                overflow: "hidden",
+              }}
+            >
               {sortedDarePosts[0] ? (
                 <DareCard
                   dare={sortedDarePosts[0]}
                   reelMode
                   isActive={isDareScreenVisible && activeReelIndex === 0}
+                  hasPlayedEntryAnimation={hasPlayedDareEntryAnimation(
+                    sortedDarePosts[0].id,
+                  )}
+                  playEntryAnimation={shouldPlayDareEntryAnimation(
+                    sortedDarePosts[0].id,
+                    isDareScreenVisible && activeReelIndex === 0,
+                  )}
                   onVoteClick={handleVoteClick}
                   onFullscreenMedia={handleFullscreenMedia}
                   onOpenComments={handleOpenComments}
@@ -5303,29 +5613,32 @@ export function MainScreen({
                 </div>
               )}
             </div>
-          </div>
-          {sortedDarePosts
-            .slice(1)
-            .filter((dare) => dare && dare.id)
-            .map((dare, i) => (
-              <div
-                key={dare.id}
-                data-reel-index={String(i + 1)}
-                style={{
-                  height: "100dvh",
-                  scrollSnapAlign: "start",
-                  scrollSnapStop: "always",
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                }}
-              >
-                <NavHeader />
-                <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+            {sortedDarePosts
+              .slice(1)
+              .filter((dare) => dare && dare.id)
+              .map((dare, i) => (
+                <div
+                  key={dare.id}
+                  data-reel-index={String(i + 1)}
+                  style={{
+                    height: "100%",
+                    minHeight: "100%",
+                    scrollSnapAlign: "start",
+                    scrollSnapStop: "always",
+                    overflow: "hidden",
+                  }}
+                >
                   <DareCard
                     dare={dare}
                     reelMode
                     isActive={isDareScreenVisible && activeReelIndex === i + 1}
+                    hasPlayedEntryAnimation={hasPlayedDareEntryAnimation(
+                      dare.id,
+                    )}
+                    playEntryAnimation={shouldPlayDareEntryAnimation(
+                      dare.id,
+                      isDareScreenVisible && activeReelIndex === i + 1,
+                    )}
                     onVoteClick={handleVoteClick}
                     onFullscreenMedia={handleFullscreenMedia}
                     onOpenComments={handleOpenComments}
@@ -5334,8 +5647,8 @@ export function MainScreen({
                     onNavigateToProfile={_onNavigateToProfile}
                   />
                 </div>
-              </div>
-            ))}
+              ))}
+          </div>
         </div>
       ) : (
         <div
@@ -5345,7 +5658,7 @@ export function MainScreen({
             flexDirection: "column",
             overflow: "hidden",
             background: "#0a0a0a",
-            paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+            paddingBottom: "calc(80px + var(--safe-area-bottom))",
           }}
         >
           <NavHeader />

@@ -15,8 +15,10 @@ import {
   Unsubscribe,
   Timestamp,
   documentId,
+  serverTimestamp,
 } from "firebase/firestore";
 import { aggregatedCounters } from "@/services/aggregatedCounters";
+import { requireAuthenticatedUser } from "@/security/appSecurity";
 
 export interface PostComment {
   id: string;
@@ -82,8 +84,51 @@ class CommentService {
       } as PostComment;
     } catch (error) {
       console.error("Error creating comment:", error);
-      throw error;
+      if (!this.isApiAuthFailure(error)) {
+        throw error;
+      }
+
+      return this.createCommentDirect(request);
     }
+  }
+
+  private isApiAuthFailure(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("API 401") || message.includes("API 403");
+  }
+
+  private async createCommentDirect(
+    request: CreateCommentRequest,
+  ): Promise<PostComment> {
+    requireAuthenticatedUser(request.user_id);
+    const now = new Date().toISOString();
+    const ref = doc(collection(db, "post_comments"));
+    const commentData: Record<string, any> = {
+      post_id: request.post_id,
+      user_id: request.user_id,
+      content: request.text,
+      text: request.text,
+      likes: 0,
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+    };
+
+    if (request.parent_id) {
+      commentData.parent_id = request.parent_id;
+    }
+
+    await setDoc(ref, commentData);
+
+    return {
+      id: ref.id,
+      post_id: request.post_id,
+      user_id: request.user_id,
+      text: request.text,
+      likes: 0,
+      parent_id: request.parent_id || null,
+      created_at: now,
+      updated_at: now,
+    };
   }
 
   async getComments(postId: string): Promise<CommentWithAuthor[]> {

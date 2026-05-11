@@ -35,6 +35,8 @@ export function BottomNavigation({
         WebkitBackdropFilter: "blur(16px)",
         borderTop: "1px solid rgba(42, 42, 42, 1)",
         paddingBottom: "var(--safe-area-bottom)",
+        boxShadow:
+          "0 16px 0 rgba(10, 15, 10, 0.98), 0 -16px 40px rgba(0, 0, 0, 0.32)",
       }}
     >
       <div

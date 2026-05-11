@@ -39,6 +39,7 @@ export const POST = withSecurity(
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
 
+    const postRef = adminDb.collection("posts").doc(postId);
     const ref = adminDb.collection("post_comments").doc();
     const commentData: Record<string, unknown> = {
       post_id: postId,
@@ -50,7 +51,14 @@ export const POST = withSecurity(
       updated_at: FieldValue.serverTimestamp(),
     };
     if (parentId) commentData.parent_id = parentId;
-    await ref.set(commentData);
+
+    await adminDb.runTransaction(async (tx) => {
+      tx.set(ref, commentData);
+      tx.update(postRef, {
+        comments_count: FieldValue.increment(1),
+        updated_at: FieldValue.serverTimestamp(),
+      });
+    });
 
     return NextResponse.json({ ok: true, id: ref.id });
   },

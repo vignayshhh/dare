@@ -32,6 +32,25 @@ import {
 
 const STORY_DURATION = 5000;
 
+const getStoryCreatedAtTime = (story: StoryDTO) => {
+  const createdAt = new Date(story.createdAt).getTime();
+  return Number.isFinite(createdAt) ? createdAt : 0;
+};
+
+const getAuthorStoryIndexes = (stories: StoryDTO[], authorId?: string) => {
+  if (!authorId) return [];
+
+  return stories
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.author.id === authorId)
+    .sort((a, b) => {
+      const timeDifference =
+        getStoryCreatedAtTime(a.item) - getStoryCreatedAtTime(b.item);
+      return timeDifference || a.index - b.index;
+    })
+    .map(({ index }) => index);
+};
+
 function startGeneratedStoryMusic(musicId: string) {
   const AudioContextCtor =
     window.AudioContext ||
@@ -136,6 +155,9 @@ export function StoryViewer({
   const [replyText, setReplyText] = useState("");
   const [replyFocused, setReplyFocused] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
+  const [replySendStatus, setReplySendStatus] = useState<
+    "idle" | "sending" | "sent"
+  >("idle");
   const [showAudienceSheet, setShowAudienceSheet] = useState(false);
   const [audienceTab, setAudienceTab] = useState<AudienceTab>("views");
   const [audienceLoading, setAudienceLoading] = useState(false);
@@ -158,6 +180,7 @@ export function StoryViewer({
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const touchStartTime = useRef(0);
+  const suppressClickUntilRef = useRef(0);
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
@@ -176,6 +199,7 @@ export function StoryViewer({
   const mediaLoaded = mediaKey !== null && loadedMediaKey === mediaKey;
   const reaction = reactionMap[story?.id] ?? null;
   const storyAudience = story ? audienceByStoryId[story.id] : undefined;
+  const shouldPauseStory = isPaused || replyFocused || sendingReply;
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setVisible(true));
@@ -188,37 +212,80 @@ export function StoryViewer({
   }, []);
 
   const storiesLengthRef = useRef(stories.length);
+  const storiesRef = useRef(stories);
   useEffect(() => {
+    storiesRef.current = stories;
     storiesLengthRef.current = stories.length;
-  }, [stories.length]);
+  }, [stories]);
+
+  const resetStoryProgress = useCallback(() => {
+    setImageProgress(0);
+    setVideoProgress(0);
+    setProgressKey((key) => key + 1);
+  }, []);
+
+  const getAdjacentSameAuthorStoryIndex = useCallback(
+    (index: number, direction: 1 | -1) => {
+      const storiesList = storiesRef.current;
+      const currentStory = storiesList[index];
+      if (!currentStory) return null;
+
+      const authorStoryIndexes = getAuthorStoryIndexes(
+        storiesList,
+        currentStory.author.id,
+      );
+      if (authorStoryIndexes.length <= 1) return null;
+
+      const authorStoryIndex = authorStoryIndexes.indexOf(index);
+      const nextAuthorStoryIndex =
+        authorStoryIndexes[authorStoryIndex + direction];
+
+      return typeof nextAuthorStoryIndex === "number"
+        ? nextAuthorStoryIndex
+        : null;
+    },
+    [],
+  );
 
   const goNext = useCallback(() => {
     setCurrentIndex((index) => {
+      const sameAuthorNextIndex = getAdjacentSameAuthorStoryIndex(index, 1);
+      if (sameAuthorNextIndex !== null) {
+        resetStoryProgress();
+        return sameAuthorNextIndex;
+      }
+
       if (index < storiesLengthRef.current - 1) {
-        setProgressKey((key) => key + 1);
+        resetStoryProgress();
         return index + 1;
       }
       handleClose();
       return index;
     });
-  }, [handleClose]);
+  }, [getAdjacentSameAuthorStoryIndex, handleClose, resetStoryProgress]);
 
   const goPrev = useCallback(() => {
     setCurrentIndex((index) => {
+      const sameAuthorPrevIndex = getAdjacentSameAuthorStoryIndex(index, -1);
+      if (sameAuthorPrevIndex !== null) {
+        resetStoryProgress();
+        return sameAuthorPrevIndex;
+      }
+
       if (index > 0) {
-        setProgressKey((key) => key + 1);
+        resetStoryProgress();
         return index - 1;
       }
       return index;
     });
-  }, []);
+  }, [getAdjacentSameAuthorStoryIndex, resetStoryProgress]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     video.muted = isMuted;
-    if (isPaused) {
+    if (shouldPauseStory) {
       video.pause();
       return;
     }
@@ -228,13 +295,15 @@ export function StoryViewer({
       setIsMuted(true);
       video.play().catch(() => {});
     });
-  }, [isMuted, isPaused]);
+  }, [isMuted, shouldPauseStory]);
 
   useEffect(() => {
     setReplyText("");
     setReplyFocused(false);
+    setReplySendStatus("idle");
     setVideoProgress(0);
     setImageProgress(0);
+    setProgressKey((key) => key + 1);
     imageProgressRef.current.elapsedMs = 0;
     imageProgressRef.current.startedAt = null;
     if (imageProgressRef.current.rafId) {
@@ -297,7 +366,7 @@ export function StoryViewer({
       imageProgressRef.current.rafId = null;
     }
 
-    if (isPaused) {
+    if (shouldPauseStory) {
       if (imageProgressRef.current.startedAt !== null) {
         imageProgressRef.current.elapsedMs +=
           performance.now() - imageProgressRef.current.startedAt;
@@ -336,7 +405,13 @@ export function StoryViewer({
         imageProgressRef.current.rafId = null;
       }
     };
-  }, [currentStoryId, currentStoryMediaType, goNext, isPaused, mediaLoaded]);
+  }, [
+    currentStoryId,
+    currentStoryMediaType,
+    goNext,
+    shouldPauseStory,
+    mediaLoaded,
+  ]);
 
   useEffect(() => {
     const nextStory = stories[currentIndex + 1];
@@ -348,20 +423,26 @@ export function StoryViewer({
   }, [currentIndex, stories]);
 
   useEffect(() => {
-    setIsPaused(replyFocused);
-  }, [replyFocused]);
-
-  useEffect(() => {
     setShowAudienceSheet(false);
   }, [story?.id]);
 
   useEffect(() => {
+    if (isOwner || !currentStoryId || !currentUserId) return;
+
+    void storyService.markStoryAsViewed(currentStoryId, currentUserId).catch(
+      (error) => {
+        console.error("Error marking story as viewed:", error);
+      },
+    );
+  }, [currentStoryId, currentUserId, isOwner]);
+
+  useEffect(() => {
     const musicId = currentStoryMusicId;
-    if (!musicId || musicId === "none" || isPaused || isMuted) return;
+    if (!musicId || musicId === "none" || shouldPauseStory || isMuted) return;
 
     const player = startGeneratedStoryMusic(musicId);
     return () => player?.stop();
-  }, [currentStoryId, currentStoryMusicId, isMuted, isPaused]);
+  }, [currentStoryId, currentStoryMusicId, isMuted, shouldPauseStory]);
 
   const onTimeUpdate = () => {
     const video = videoRef.current;
@@ -396,11 +477,13 @@ export function StoryViewer({
     const dt = Date.now() - touchStartTime.current;
 
     if (dy > 80 && Math.abs(dx) < 80) {
+      suppressClickUntilRef.current = Date.now() + 400;
       handleClose();
       return;
     }
 
     if (Math.abs(dx) > 55 && Math.abs(dy) < 55) {
+      suppressClickUntilRef.current = Date.now() + 400;
       if (dx < 0) goNext();
       else goPrev();
       return;
@@ -414,7 +497,8 @@ export function StoryViewer({
 
       const x = touchStartX.current;
       const width = (event.currentTarget as HTMLElement).clientWidth;
-      if (x < width / 3) goPrev();
+      suppressClickUntilRef.current = Date.now() + 400;
+      if (x < width / 2) goPrev();
       else goNext();
     }
   };
@@ -434,12 +518,13 @@ export function StoryViewer({
   };
 
   const onClickZone = (event: React.MouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button")) return;
+    if (Date.now() < suppressClickUntilRef.current) return;
+    if ((event.target as HTMLElement).closest("button, input, textarea")) return;
 
     const x = event.clientX;
     const width = event.currentTarget.clientWidth;
-    if (x < width / 3) goPrev();
-    else if (x > (width * 2) / 3) goNext();
+    if (x < width / 2) goPrev();
+    else goNext();
   };
 
   const handleReact = useCallback(
@@ -498,11 +583,17 @@ export function StoryViewer({
     if (!text || sendingReply) return;
 
     setSendingReply(true);
+    setReplySendStatus("sending");
     try {
       if (onReply) await onReply(story.id, story.author.id, text);
       setReplyText("");
       setReplyFocused(false);
+      setReplySendStatus("sent");
       replyInputRef.current?.blur();
+      window.setTimeout(() => setReplySendStatus("idle"), 1400);
+    } catch (error) {
+      console.error("Error sending story reply:", error);
+      setReplySendStatus("idle");
     } finally {
       setSendingReply(false);
     }
@@ -567,6 +658,15 @@ export function StoryViewer({
     "relative z-10 block h-auto max-h-full w-auto max-w-full object-contain object-center";
   const filterPreset = getStoryFilterPreset(story.storyFilter);
   const musicPreset = getStoryMusicPreset(story.storyMusic?.id);
+  const storyProgress = isVideo ? videoProgress : imageProgress;
+  const currentAuthorStoryIndexes = getAuthorStoryIndexes(
+    stories,
+    story.author.id,
+  );
+  const currentAuthorStoryPosition =
+    currentAuthorStoryIndexes.indexOf(currentIndex);
+  const shouldSegmentProgress =
+    currentAuthorStoryIndexes.length > 1 && currentAuthorStoryPosition >= 0;
   const hasStoryMusic = Boolean(
     currentStoryMusicId && currentStoryMusicId !== "none",
   );
@@ -599,30 +699,44 @@ export function StoryViewer({
         onMouseLeave={onMouseLeave}
         onClick={onClickZone}
       >
-        <div className="absolute left-0 right-0 top-0 z-40 flex gap-1 px-2 pt-[calc(env(safe-area-inset-top,0px)+8px)]">
-          {stories.map((_, idx) => {
-            const isCurrent = idx === currentIndex;
-            const isPast = idx < currentIndex;
-            const progress = isCurrent
-              ? isVideo
-                ? videoProgress
-                : imageProgress
-              : isPast
-                ? 100
-                : 0;
+        <div className="absolute left-0 right-0 top-0 z-40 px-2 pt-[calc(env(safe-area-inset-top,0px)+8px)]">
+          {shouldSegmentProgress ? (
+            <div
+              key={`${progressKey}-${currentStoryId ?? currentIndex}`}
+              className="flex h-[3px] w-full gap-1"
+            >
+              {currentAuthorStoryIndexes.map((storyIndex, segmentIndex) => {
+                const segmentProgress =
+                  segmentIndex < currentAuthorStoryPosition
+                    ? 100
+                    : segmentIndex === currentAuthorStoryPosition
+                      ? storyProgress
+                      : 0;
 
-            return (
+                return (
+                  <div
+                    key={stories[storyIndex]?.id ?? storyIndex}
+                    className="h-full flex-1 overflow-hidden rounded-full bg-white/25"
+                  >
+                    <div
+                      className="h-full bg-[#00ff88] transition-all duration-100 ease-linear"
+                      style={{ width: `${segmentProgress}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div
+              key={`${progressKey}-${currentStoryId ?? currentIndex}`}
+              className="h-[3px] w-full overflow-hidden rounded-full bg-white/25"
+            >
               <div
-                key={`${progressKey}-${idx}`}
-                className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/25"
-              >
-                <div
-                  className="h-full bg-[#00ff88] transition-all duration-100 ease-linear"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            );
-          })}
+                className="h-full bg-[#00ff88] transition-all duration-100 ease-linear"
+                style={{ width: `${storyProgress}%` }}
+              />
+            </div>
+          )}
         </div>
 
         <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden bg-black">
@@ -822,7 +936,7 @@ export function StoryViewer({
         </div>
 
         <div
-          className="pointer-events-none absolute left-0 right-0 bottom-0 z-50 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+32px)] pt-14"
+          className="pointer-events-none absolute left-0 right-0 bottom-0 z-50 px-4 pb-[calc(var(--safe-area-bottom)+32px)] pt-14"
           style={{
             background:
               "linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.58) 46%, rgba(0,0,0,0) 100%)",
@@ -862,6 +976,10 @@ export function StoryViewer({
             <div
               className="pointer-events-auto flex items-center gap-2"
               onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onMouseUp={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onTouchEnd={(event) => event.stopPropagation()}
             >
               <button
                 type="button"
@@ -899,36 +1017,55 @@ export function StoryViewer({
               <div
                 className="flex flex-1 items-center gap-2 rounded-full border px-4 py-2.5 backdrop-blur-sm transition-all"
                 style={{
-                  background: replyFocused
+                  background:
+                    replySendStatus === "sent"
+                      ? "rgba(0,255,136,0.16)"
+                      : replyFocused
                     ? "rgba(0,0,0,0.65)"
                     : "rgba(255,255,255,0.10)",
-                  borderColor: replyFocused
+                  borderColor:
+                    replySendStatus === "sent"
+                      ? "rgba(0,255,136,0.55)"
+                      : replyFocused
                     ? "rgba(0,255,136,0.55)"
                     : "rgba(255,255,255,0.18)",
-                  boxShadow: replyFocused
+                  boxShadow: replyFocused || replySendStatus === "sent"
                     ? "0 0 0 1px rgba(0,255,136,0.25)"
                     : "none",
                 }}
               >
-                <input
-                  ref={replyInputRef}
-                  type="text"
-                  value={replyText}
-                  onChange={(event) => setReplyText(event.target.value)}
-                  onFocus={() => setReplyFocused(true)}
-                  onBlur={() => {
-                    if (!replyText.trim()) setReplyFocused(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleSendReply();
-                    }
-                  }}
-                  placeholder="Send message..."
-                  className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/45"
-                />
-                {replyText.trim() && (
+                {replySendStatus === "sent" ? (
+                  <div className="min-w-0 flex-1 text-sm font-semibold text-[#bbf7d0]">
+                    Sent
+                  </div>
+                ) : replySendStatus === "sending" ? (
+                  <div className="min-w-0 flex-1 text-sm font-semibold text-[#bbf7d0]">
+                    Sending...
+                  </div>
+                ) : (
+                  <input
+                    ref={replyInputRef}
+                    type="text"
+                    value={replyText}
+                    onChange={(event) => {
+                      setReplySendStatus("idle");
+                      setReplyText(event.target.value);
+                    }}
+                    onFocus={() => setReplyFocused(true)}
+                    onBlur={() => {
+                      if (!replyText.trim()) setReplyFocused(false);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleSendReply();
+                      }
+                    }}
+                    placeholder="Send message..."
+                    className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/45"
+                  />
+                )}
+                {replyText.trim() && replySendStatus === "idle" && (
                   <button
                     type="button"
                     onClick={(event) => {
@@ -985,24 +1122,13 @@ export function StoryViewer({
           )}
         </div>
 
-        {isPaused && !replyFocused && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/40 backdrop-blur-sm">
-              <div className="flex gap-[5px]">
-                <div className="h-5 w-[5px] rounded-full bg-white" />
-                <div className="h-5 w-[5px] rounded-full bg-white" />
-              </div>
-            </div>
-          </div>
-        )}
-
         {showAudienceSheet && isOwner && (
           <div
             className="app-modal-backdrop absolute inset-0 z-[70] flex items-end bg-black/70"
             onClick={() => setShowAudienceSheet(false)}
           >
             <div
-              className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+18px)] pt-4 shadow-[0_-20px_40px_rgba(0,0,0,0.38)]"
+              className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(var(--safe-area-bottom)+18px)] pt-4 shadow-[0_-20px_40px_rgba(0,0,0,0.38)]"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/15" />

@@ -30,14 +30,38 @@ async function bumpPostCounter(postId: string, field: string, delta: number) {
   });
 }
 
+async function getCollectionCount(collectionName: string, postId: string) {
+  const snapshot = await adminDb
+    .collection(collectionName)
+    .where("post_id", "==", postId)
+    .count()
+    .get();
+  return snapshot.data().count;
+}
+
+async function reconcilePostCounter(
+  postId: string,
+  field: "likes_count" | "comments_count",
+  collectionName: "post_likes" | "post_comments",
+) {
+  const count = await getCollectionCount(collectionName, postId);
+  await adminDb.collection("posts").doc(postId).set(
+    {
+      [field]: count,
+      updated_at: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
 // ─── POST LIKES ─────────────────────────────────────────────────────
 export const onPostLikeCreated = onDocumentCreated(
   "post_likes/{likeId}",
   async (event) => {
     const data = event.data?.data();
     if (!data?.post_id) return;
-    await bumpPostCounter(data.post_id, "likes_count", 1);
-    logger.info("post like counter +1", { post_id: data.post_id });
+    await reconcilePostCounter(data.post_id, "likes_count", "post_likes");
+    logger.info("post like counter reconciled", { post_id: data.post_id });
   },
 );
 
@@ -46,8 +70,8 @@ export const onPostLikeDeleted = onDocumentDeleted(
   async (event) => {
     const data = event.data?.data();
     if (!data?.post_id) return;
-    await bumpPostCounter(data.post_id, "likes_count", -1);
-    logger.info("post like counter -1", { post_id: data.post_id });
+    await reconcilePostCounter(data.post_id, "likes_count", "post_likes");
+    logger.info("post like counter reconciled", { post_id: data.post_id });
   },
 );
 
@@ -57,7 +81,11 @@ export const onPostCommentCreated = onDocumentCreated(
   async (event) => {
     const data = event.data?.data();
     if (!data?.post_id) return;
-    await bumpPostCounter(data.post_id, "comments_count", 1);
+    await reconcilePostCounter(
+      data.post_id,
+      "comments_count",
+      "post_comments",
+    );
   },
 );
 
@@ -66,7 +94,11 @@ export const onPostCommentDeleted = onDocumentDeleted(
   async (event) => {
     const data = event.data?.data();
     if (!data?.post_id) return;
-    await bumpPostCounter(data.post_id, "comments_count", -1);
+    await reconcilePostCounter(
+      data.post_id,
+      "comments_count",
+      "post_comments",
+    );
   },
 );
 

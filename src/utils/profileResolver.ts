@@ -1,6 +1,7 @@
 import { userService } from "@/middleware/services/service-factory";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useProfileDataStore } from "@/stores/profileDataStore";
+import { logFirestoreError } from "./firestoreErrors";
 
 export interface ResolvedUserProfile {
   id: string;
@@ -147,7 +148,7 @@ export async function resolveUserProfile(
         return resolvedProfile;
       }
     } catch (error) {
-      console.error("Error resolving profile:", error);
+      logFirestoreError("Error resolving profile:", error);
     }
 
     resolvedProfileCache.set(userId, null);

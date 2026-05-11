@@ -31,6 +31,7 @@ interface CloseFriendProfile {
 
 const CLOSE_FRIENDS_COLLECTION = "close_friends";
 const CLOSE_FRIEND_ACTIVITY_COLLECTION = "close_friend_activity";
+const FRIENDSHIPS_COLLECTION = "friendships";
 const ALERTS_COLLECTION = "alerts";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -49,6 +50,10 @@ class CloseFriendsService {
     string,
     { ids: string[]; expiresAt: number }
   >();
+  private acceptedFriendIdsCache = new Map<
+    string,
+    { ids: string[]; expiresAt: number }
+  >();
 
   private invalidateOwnerCache(ownerId: string) {
     this.ownerCloseFriendIdsCache.delete(ownerId);
@@ -56,6 +61,10 @@ class CloseFriendsService {
 
   private invalidateWatcherCache(targetUserId: string) {
     this.reverseWatchersCache.delete(targetUserId);
+  }
+
+  private invalidateAcceptedFriendsCache(userId: string) {
+    this.acceptedFriendIdsCache.delete(userId);
   }
 
   async addCloseFriend(ownerId: string, targetUserId: string) {
@@ -102,6 +111,8 @@ class CloseFriendsService {
 
       this.invalidateOwnerCache(ownerId);
       this.invalidateWatcherCache(targetUserId);
+      this.invalidateAcceptedFriendsCache(ownerId);
+      this.invalidateAcceptedFriendsCache(targetUserId);
 
       return { success: true };
     } catch (error) {
@@ -123,6 +134,8 @@ class CloseFriendsService {
 
       this.invalidateOwnerCache(ownerId);
       this.invalidateWatcherCache(targetUserId);
+      this.invalidateAcceptedFriendsCache(ownerId);
+      this.invalidateAcceptedFriendsCache(targetUserId);
 
       return { success: true };
     } catch (error) {
@@ -199,6 +212,62 @@ class CloseFriendsService {
     });
 
     return ids;
+  }
+
+  private async getAcceptedFriendIds(userId: string): Promise<string[]> {
+    const cached = this.acceptedFriendIdsCache.get(userId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.ids;
+    }
+
+    const friendshipsRef = collection(db, FRIENDSHIPS_COLLECTION);
+    const [asRequesterSnap, asAddresseeSnap] = await Promise.all([
+      getDocs(
+        query(
+          friendshipsRef,
+          where("requester_id", "==", userId),
+          where("status", "==", "accepted"),
+        ),
+      ),
+      getDocs(
+        query(
+          friendshipsRef,
+          where("addressee_id", "==", userId),
+          where("status", "==", "accepted"),
+        ),
+      ),
+    ]);
+
+    const ids = [
+      ...asRequesterSnap.docs.map((docSnap) => docSnap.data().addressee_id),
+      ...asAddresseeSnap.docs.map((docSnap) => docSnap.data().requester_id),
+    ].filter((id): id is string => typeof id === "string" && id.length > 0);
+
+    const uniqueIds = [...new Set(ids)];
+    this.acceptedFriendIdsCache.set(userId, {
+      ids: uniqueIds,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+
+    return uniqueIds;
+  }
+
+  private async getMutualAcceptedFriendIds(
+    firstUserId: string,
+    secondUserId: string,
+  ): Promise<string[]> {
+    const [firstFriendIds, secondFriendIds] = await Promise.all([
+      this.getAcceptedFriendIds(firstUserId),
+      this.getAcceptedFriendIds(secondUserId),
+    ]);
+    const secondFriendIdSet = new Set(secondFriendIds);
+
+    return firstFriendIds.filter(
+      (friendId) =>
+        friendId !== firstUserId &&
+        friendId !== secondUserId &&
+        secondFriendIdSet.has(friendId),
+    );
   }
 
   async getCloseFriends(ownerId: string) {
@@ -452,7 +521,10 @@ class CloseFriendsService {
     if (!params.actorId || !params.storyId || !params.dedicatedToUserId) return;
     if (params.actorId === params.dedicatedToUserId) return;
 
-    const watcherIds = await this.getWatcherIdsForActor(params.actorId);
+    const watcherIds = await this.getMutualAcceptedFriendIds(
+      params.actorId,
+      params.dedicatedToUserId,
+    );
     if (watcherIds.length === 0) return;
 
     await Promise.all(
@@ -474,6 +546,7 @@ class CloseFriendsService {
               interactionType:
                 "dedicated_story" satisfies CloseFriendActivityType,
               storyId: params.storyId,
+              alertAudience: "mutual_friends",
               targetUserId: params.dedicatedToUserId,
               targetUsername: params.dedicatedToUsername.replace(/^@/, ""),
               targetName: params.dedicatedToName,

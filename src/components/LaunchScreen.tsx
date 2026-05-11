@@ -290,46 +290,48 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
 }
 
 export function LaunchGate({ children }: { children: React.ReactNode }) {
-  const [showIntro, setShowIntro] = useState<boolean>(false);
-  const [introDone, setIntroDone] = useState<boolean>(false);
+  const [gateState, setGateState] = useState<"checking" | "intro" | "ready">(
+    "checking",
+  );
 
   useEffect(() => {
-    // Check if intro has already been played
     if (typeof window === "undefined") return;
-    const hasPlayed = localStorage.getItem(STORAGE_KEY) === "1";
-    if (!hasPlayed) {
-      setShowIntro(true);
-    }
+
+    const hasPlayedThisSession = sessionStorage.getItem(STORAGE_KEY) === "1";
+    setGateState(hasPlayedThisSession ? "ready" : "intro");
   }, []);
 
   useEffect(() => {
-    // Lock body scroll when launch screen is active
     if (typeof document === "undefined") return;
+
+    if (gateState !== "intro") {
+      return;
+    }
+
     document.body.style.overflow = "hidden";
     document.body.style.position = "fixed";
     document.body.style.inset = "0";
 
     return () => {
-      // Restore body scroll when launch screen is dismissed
       document.body.style.overflow = "";
       document.body.style.position = "";
       document.body.style.inset = "";
     };
-  }, []);
+  }, [gateState]);
 
   const handleComplete = useCallback(() => {
-    setIntroDone(true);
-    setTimeout(() => setShowIntro(false), 100);
+    setGateState("ready");
   }, []);
 
-  return (
-    <>
-      {showIntro && !introDone && <LaunchScreen onComplete={handleComplete} />}
-      <div style={{ visibility: introDone ? "visible" : "hidden" }}>
-        {children}
-      </div>
-    </>
-  );
+  if (gateState === "checking") {
+    return <div className="app-fixed-viewport bg-black" />;
+  }
+
+  if (gateState === "intro") {
+    return <LaunchScreen onComplete={handleComplete} />;
+  }
+
+  return <>{children}</>;
 }
 
 function LaunchScreenWrapper({

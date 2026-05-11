@@ -12,7 +12,6 @@ import {
   doc,
   setDoc,
   updateDoc,
-  deleteDoc,
   Timestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
@@ -308,21 +307,12 @@ class SurveillanceService {
     try {
       const cleanUsername = viewerUsername.replace(/^@/, "");
       const now = new Date();
-      const alertId = this.getProfileViewingAlertId(viewerUserId, targetUserId);
-
-      // This alert uses a deterministic doc id per viewer/target pair.
-      // Delete any previous session doc first so the next write is a fresh create.
-      // Otherwise Firestore treats setDoc as an update, and our rules reject
-      // changing createdAt on existing alerts.
-      await deleteDoc(doc(db, "alerts", alertId));
-
-      // Firestore is the reliable live channel in this app because custom auth
-      // does not guarantee RTDB auth. Keep one deterministic live alert doc per pair.
-      await setDoc(doc(db, "alerts", alertId), {
-        userId: targetUserId,
-        type: "SUS_PROFILE_VIEWING",
-        entityId: viewerUserId,
-        actorId: viewerUserId,
+      const alertId = this.getProfileViewingAlertId(
+        viewerUserId,
+        targetUserId,
+      );
+      const alertRef = doc(db, "alerts", alertId);
+      const liveAlertUpdate = {
         message: `@${cleanUsername} is viewing your profile right now`,
         metadata: {
           viewerName: viewerDisplayName,
@@ -334,10 +324,25 @@ class SurveillanceService {
           isLive: true,
           viewingStartTime: now.getTime(),
         },
-        isRead: false,
-        createdAt: Timestamp.fromDate(now),
         updatedAt: Timestamp.fromDate(now),
-      });
+      };
+
+      // Firestore is the reliable live channel in this app because custom auth
+      // does not guarantee RTDB auth. Keep one deterministic alert per pair;
+      // updatedAt makes the same card rise to the top when it becomes live again.
+      try {
+        await updateDoc(alertRef, liveAlertUpdate);
+      } catch {
+        await setDoc(alertRef, {
+          userId: targetUserId,
+          type: "SUS_PROFILE_VIEWING",
+          entityId: viewerUserId,
+          actorId: viewerUserId,
+          ...liveAlertUpdate,
+          isRead: false,
+          createdAt: Timestamp.fromDate(now),
+        });
+      }
 
       // RTDB is optional fallback for live-presence consumers; don't let it block alerts.
       try {
@@ -349,6 +354,7 @@ class SurveillanceService {
           username: cleanUsername,
           display_name: viewerDisplayName,
           avatar: viewerAvatar,
+          alert_id: alertId,
           started_at: Date.now(),
           is_viewing: true,
         });
@@ -387,7 +393,14 @@ class SurveillanceService {
 
     try {
       const cleanUsername = viewerUsername.replace(/^@/, "");
-      const alertId = this.getProfileViewingAlertId(viewerUserId, targetUserId);
+      const alertId = this.getProfileViewingAlertId(
+        viewerUserId,
+        targetUserId,
+      );
+      const viewerRef = ref(
+        realtimeDb,
+        `profile_viewers/${targetUserId}/${viewerUserId}`,
+      );
 
       await updateDoc(doc(db, "alerts", alertId), {
         message: `@${cleanUsername} viewed your profile`,
@@ -405,10 +418,6 @@ class SurveillanceService {
       });
 
       try {
-        const viewerRef = ref(
-          realtimeDb,
-          `profile_viewers/${targetUserId}/${viewerUserId}`,
-        );
         await remove(viewerRef);
       } catch (presenceError) {
         console.warn(

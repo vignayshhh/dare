@@ -15,7 +15,8 @@
   --error: #ef4444;
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
-  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-bottom-raw: env(safe-area-inset-bottom, 0px);
+  --safe-area-bottom: var(--safe-area-bottom-raw);
   --safe-area-left: env(safe-area-inset-left, 0px);
   --bottom-nav-content-height: 64px;
   --bottom-nav-total-height: calc(
@@ -492,6 +493,18 @@ body {
 
 .tab-screen-bottom-pad {
   padding-bottom: calc(var(--bottom-nav-total-height) + 16px);
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+  :root {
+    /*
+      Some Android/PWA browser chrome combinations report a zero bottom inset
+      even when the rounded screen edge or gesture area still needs breathing
+      room. Keep a small professional mobile gutter, while letting iOS notches
+      and home indicators use their larger native inset.
+    */
+    --safe-area-bottom: max(var(--safe-area-bottom-raw), 12px);
+  }
 }
 
 /* Glass morphism effect */

@@ -28,6 +28,7 @@ import {
   Type,
   Wand2,
   Sparkles,
+  Play,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { CommentSection, type CommentItem } from "../ui/CommentSection";
@@ -138,6 +139,17 @@ const formatNumber = (n: number | undefined) =>
 
 const stripAtSymbol = (username?: string) =>
   (username || "unknown").replace(/^@/, "");
+
+const getStoryCreatedAtTime = (story: StoryDTO) => {
+  const createdAt = new Date(story.createdAt).getTime();
+  return Number.isFinite(createdAt) ? createdAt : 0;
+};
+
+const sortStoriesForPlayback = (stories: StoryDTO[]) =>
+  [...stories].sort((a, b) => {
+    const timeDifference = getStoryCreatedAtTime(a) - getStoryCreatedAtTime(b);
+    return timeDifference || a.id.localeCompare(b.id);
+  });
 
 const STORY_REPLY_PAYLOAD_URL_LIMIT = 7000;
 const STORY_REPLY_ENCODED_PAYLOAD_LIMIT = 15000;
@@ -424,8 +436,11 @@ export function FeedScreen({
   );
   const [dedicationRecipient, setDedicationRecipient] =
     useState<Friend | null>(null);
-  const [storyDraftFile, setStoryDraftFile] = useState<File | null>(null);
-  const [storyDraftPreviewUrl, setStoryDraftPreviewUrl] = useState("");
+  const [storyDraftFiles, setStoryDraftFiles] = useState<File[]>([]);
+  const [storyDraftPreviewUrls, setStoryDraftPreviewUrls] = useState<string[]>(
+    [],
+  );
+  const [selectedStoryDraftIndex, setSelectedStoryDraftIndex] = useState(0);
   const [storyDraftText, setStoryDraftText] = useState("");
   const [storyDraftTextColor, setStoryDraftTextColor] = useState("#ffffff");
   const [storyDraftTextX, setStoryDraftTextX] = useState(50);
@@ -439,6 +454,9 @@ export function FeedScreen({
   const [selectedStoryIndex, setSelectedStoryIndex] = useState(0);
   const [viewerStories, setViewerStories] = useState<StoryDTO[]>([]);
   const [viewerIsOwner, setViewerIsOwner] = useState(false);
+  const [viewerStoryAuthorId, setViewerStoryAuthorId] = useState<string | null>(
+    null,
+  );
   const [ghostDebugLoading, setGhostDebugLoading] = useState(false);
   const [ghostDebugText, setGhostDebugText] = useState<string | null>(null);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
@@ -448,12 +466,14 @@ export function FeedScreen({
   );
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
+  const storyDraftFile = storyDraftFiles[selectedStoryDraftIndex] ?? null;
+  const storyDraftPreviewUrl =
+    storyDraftPreviewUrls[selectedStoryDraftIndex] ?? "";
 
   const {
     stories,
     userStories,
     isLoading: storiesLoading,
-    createStory,
     markStoryAsViewed,
     deleteStory,
     isUploading,
@@ -478,6 +498,7 @@ export function FeedScreen({
   const burstIdCounter = useRef(0);
   const colorCounterRef = useRef(0);
   const storyDraftPreviewRef = useRef<HTMLDivElement | null>(null);
+  const storyDraftPreviewUrlsRef = useRef<string[]>([]);
   const storyFilterTouchStartXRef = useRef<number | null>(null);
 
   // ── Header hide/show logic ──
@@ -557,6 +578,47 @@ export function FeedScreen({
     () => sortedPosts.find((p) => p.id === selectedPostId) || null,
     [sortedPosts, selectedPostId],
   );
+  const storyGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { authorId: string; latestAt: number; stories: StoryDTO[] }
+    >();
+
+    stories.forEach((story) => {
+      const authorId = story.author.id;
+      const createdAt = new Date(story.createdAt).getTime();
+      const latestAt = Number.isFinite(createdAt) ? createdAt : 0;
+      const existing = groups.get(authorId);
+
+      if (existing) {
+        existing.stories.push(story);
+        existing.latestAt = Math.max(existing.latestAt, latestAt);
+      } else {
+        groups.set(authorId, {
+          authorId,
+          latestAt,
+          stories: [story],
+        });
+      }
+    });
+
+    return Array.from(groups.values())
+      .map((group) => {
+        const playbackStories = sortStoriesForPlayback(group.stories);
+        const displayStory =
+          playbackStories.find((story) => !story.hasViewed) ??
+          playbackStories[playbackStories.length - 1];
+
+        return {
+          ...group,
+          stories: playbackStories,
+          displayStory,
+          hasViewed: playbackStories.every((story) => story.hasViewed),
+        };
+      })
+      .filter((group) => Boolean(group.displayStory))
+      .sort((a, b) => b.latestAt - a.latestAt);
+  }, [stories]);
   const ghostModesByUserId = useUserGhostModes([
     ...stories.map((story) => story.author.id),
     ...stories
@@ -811,12 +873,16 @@ export function FeedScreen({
   ]);
 
   useEffect(() => {
+    storyDraftPreviewUrlsRef.current = storyDraftPreviewUrls;
+  }, [storyDraftPreviewUrls]);
+
+  useEffect(() => {
     return () => {
-      if (storyDraftPreviewUrl) {
-        URL.revokeObjectURL(storyDraftPreviewUrl);
-      }
+      storyDraftPreviewUrlsRef.current.forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
     };
-  }, [storyDraftPreviewUrl]);
+  }, []);
 
   const handleYourStoryClick = () => {
     if (userStories.length > 0) {
@@ -824,6 +890,7 @@ export function FeedScreen({
       setSelectedStoryIndex(0);
       setViewerStories(userStories);
       setViewerIsOwner(true);
+      setViewerStoryAuthorId(currentUser.userId);
       setShowStoryViewerModal(true);
       onStoryViewerOpenChange?.(true);
     } else {
@@ -847,11 +914,10 @@ export function FeedScreen({
   };
 
   const clearStoryDraft = () => {
-    if (storyDraftPreviewUrl) {
-      URL.revokeObjectURL(storyDraftPreviewUrl);
-    }
-    setStoryDraftFile(null);
-    setStoryDraftPreviewUrl("");
+    storyDraftPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    setStoryDraftFiles([]);
+    setStoryDraftPreviewUrls([]);
+    setSelectedStoryDraftIndex(0);
     setStoryDraftText("");
     setStoryDraftTextColor("#ffffff");
     setStoryDraftTextX(50);
@@ -918,65 +984,94 @@ export function FeedScreen({
   };
 
   const handleStoryClick = async (index: number) => {
-    const nextViewerStories = stories.map((story, storyIndex) =>
-      storyIndex === index ? { ...story, hasViewed: true } : story,
+    const storyGroup = storyGroups[index];
+    if (!storyGroup) return;
+
+    const firstUnviewedIndex = storyGroup.stories.findIndex(
+      (story) => !story.hasViewed,
+    );
+    const nextSelectedIndex = firstUnviewedIndex >= 0 ? firstUnviewedIndex : 0;
+    const nextViewerStories = storyGroup.stories.map((story, storyIndex) =>
+      storyIndex === nextSelectedIndex ? { ...story, hasViewed: true } : story,
     );
 
-    setSelectedStoryIndex(index);
+    setSelectedStoryIndex(nextSelectedIndex);
     setViewerStories(nextViewerStories);
     setViewerIsOwner(false);
+    setViewerStoryAuthorId(storyGroup.authorId);
     setShowStoryViewerModal(true);
     onStoryViewerOpenChange?.(true);
 
-    const story = stories[index];
+    const story = storyGroup.stories[nextSelectedIndex];
     if (story && !story.hasViewed) {
       await markStoryAsViewed(story.id, currentUser.userId);
     }
   };
 
-  const handleStoryUpload = async (file: File) => {
+  const handleStoryUpload = async (files: File[]) => {
     try {
+      if (files.length === 0) return;
       if (storyUploadMode === "dedication" && !dedicationRecipient) {
         alert("Pick who this story is for first.");
         return;
       }
 
-      // Upload to Firebase Storage with real progress
-      const mediaUrl = await storyService.uploadStoryMedia(file, (percent) => {
-        useStoryStore.setState({ uploadProgress: percent });
-      });
-      const mediaType = file.type.startsWith("video/") ? "video" : "image";
+      useStoryStore.setState({ isUploading: true, uploadProgress: 0 });
+      let createdCount = 0;
 
-      const request: CreateStoryDTO = {
-        mediaUrl,
-        mediaType,
-        storyType: storyUploadMode || "personal",
-        dedicatedToUserId:
-          storyUploadMode === "dedication"
-            ? dedicationRecipient?.user_id || dedicationRecipient?.id
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const mediaUrl = await storyService.uploadStoryMedia(file, (percent) => {
+          const overallProgress = Math.round(
+            ((index + percent / 100) / files.length) * 100,
+          );
+          useStoryStore.setState({ uploadProgress: overallProgress });
+        });
+        const mediaType = file.type.startsWith("video/") ? "video" : "image";
+
+        const request: CreateStoryDTO = {
+          mediaUrl,
+          mediaType,
+          storyType: storyUploadMode || "personal",
+          dedicatedToUserId:
+            storyUploadMode === "dedication"
+              ? dedicationRecipient?.user_id || dedicationRecipient?.id
+              : null,
+          storyText: storyDraftText.trim()
+            ? {
+                text: storyDraftText.trim().slice(0, 120),
+                color: storyDraftTextColor,
+                style: "bold",
+                xPct: Math.round(storyDraftTextX),
+                yPct: Math.round(storyDraftTextY),
+                fontSize: storyDraftTextSize,
+              }
             : null,
-        storyText: storyDraftText.trim()
-          ? {
-              text: storyDraftText.trim().slice(0, 120),
-              color: storyDraftTextColor,
-              style: "bold",
-              xPct: Math.round(storyDraftTextX),
-              yPct: Math.round(storyDraftTextY),
-              fontSize: storyDraftTextSize,
-            }
-          : null,
-        storyFilter: storyDraftFilter,
-        storyMusic:
-          storyDraftMusicId === "none"
-            ? null
-            : {
-                id: storyDraftMusicId,
-                label: getStoryMusicPreset(storyDraftMusicId).label,
-              },
-      };
+          storyFilter: storyDraftFilter,
+          storyMusic:
+            storyDraftMusicId === "none"
+              ? null
+              : {
+                  id: storyDraftMusicId,
+                  label: getStoryMusicPreset(storyDraftMusicId).label,
+                },
+        };
 
-      const newStory = await createStory(currentUser.userId, request);
-      if (newStory) {
+        const newStory = await storyService.createStory(
+          currentUser.userId,
+          request,
+        );
+        if (newStory) createdCount += 1;
+      }
+
+      useStoryStore.setState({ uploadProgress: 100, isUploading: false });
+      window.setTimeout(
+        () => useStoryStore.setState({ uploadProgress: 0 }),
+        1000,
+      );
+
+      if (createdCount > 0) {
+        await useStoryStore.getState().loadUserStories(currentUser.userId);
         closeStoryComposer();
       }
     } catch (error) {
@@ -986,7 +1081,7 @@ export function FeedScreen({
         `Upload failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
       // Reset upload progress
-      useStoryStore.setState({ uploadProgress: 0 });
+      useStoryStore.setState({ isUploading: false, uploadProgress: 0 });
     }
   };
 
@@ -997,22 +1092,22 @@ export function FeedScreen({
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*,video/*";
+    input.multiple = true;
     input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file && !isUploading) {
-        if (storyDraftPreviewUrl) {
-          URL.revokeObjectURL(storyDraftPreviewUrl);
-        }
-        setStoryDraftFile(file);
-        setStoryDraftPreviewUrl(URL.createObjectURL(file));
+      const files = Array.from((e.target as HTMLInputElement).files || []);
+      if (files.length > 0 && !isUploading) {
+        storyDraftPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+        setStoryDraftFiles(files);
+        setStoryDraftPreviewUrls(files.map((file) => URL.createObjectURL(file)));
+        setSelectedStoryDraftIndex(0);
       }
     };
     input.click();
   };
 
   const publishStoryDraft = async () => {
-    if (!storyDraftFile || isUploading) return;
-    await handleStoryUpload(storyDraftFile);
+    if (storyDraftFiles.length === 0 || isUploading) return;
+    await handleStoryUpload(storyDraftFiles);
   };
 
   const handleDeleteStory = async (storyId: string) => {
@@ -1021,6 +1116,7 @@ export function FeedScreen({
     const remaining = userStories.filter((s) => s.id !== storyId);
     if (remaining.length === 0) {
       setShowStoryViewerModal(false);
+      setViewerStoryAuthorId(null);
       onStoryViewerOpenChange?.(false);
     } else {
       // Stay on previous index if possible
@@ -1031,8 +1127,39 @@ export function FeedScreen({
 
   useEffect(() => {
     if (!showStoryViewerModal) return;
-    setViewerStories(viewerIsOwner ? userStories : stories);
-  }, [showStoryViewerModal, viewerIsOwner, userStories, stories]);
+    if (viewerIsOwner) {
+      setViewerStories(sortStoriesForPlayback(userStories));
+      setSelectedStoryIndex((prev) =>
+        Math.min(prev, Math.max(userStories.length - 1, 0)),
+      );
+      return;
+    }
+
+    if (!viewerStoryAuthorId) return;
+
+    const nextViewerStories = sortStoriesForPlayback(
+      stories.filter((story) => story.author.id === viewerStoryAuthorId),
+    );
+
+    if (nextViewerStories.length === 0) {
+      setShowStoryViewerModal(false);
+      setViewerStoryAuthorId(null);
+      onStoryViewerOpenChange?.(false);
+      return;
+    }
+
+    setViewerStories(nextViewerStories);
+    setSelectedStoryIndex((prev) =>
+      Math.min(prev, nextViewerStories.length - 1),
+    );
+  }, [
+    showStoryViewerModal,
+    viewerIsOwner,
+    viewerStoryAuthorId,
+    userStories,
+    stories,
+    onStoryViewerOpenChange,
+  ]);
 
   // ── Story reaction handler ──
   // Uses a deterministic Firestore doc ID so no reads are needed —
@@ -1503,12 +1630,12 @@ export function FeedScreen({
               onClick={handleYourStoryClick}
             >
               <div className="relative">
-                <div className="absolute inset-0 w-20 h-20 rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
+                <div className="absolute inset-0 h-[84px] w-[84px] rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
                   <div className="w-full h-full rounded-full border-2 border-[#4ade80]/25" />
                 </div>
                 {userStories.length > 0 ? (
                   // User has active stories — show profile picture avatar with green ring
-                  <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-[#4ade80] via-[#34d399] to-[#facc15] p-[3px] shadow-[0_18px_40px_rgba(10,14,12,0.45)] transition-all duration-300 group-hover:scale-[1.04]">
+                  <div className="relative h-[84px] w-[84px] rounded-full bg-gradient-to-br from-[#4ade80] via-[#34d399] to-[#facc15] p-[3px] shadow-[0_18px_40px_rgba(10,14,12,0.45)] transition-all duration-300 group-hover:scale-[1.04]">
                     <div className="w-full h-full rounded-full bg-[#050505] p-[3px]">
                       <img
                         src={currentUser.avatar}
@@ -1519,7 +1646,7 @@ export function FeedScreen({
                   </div>
                 ) : (
                   // No stories — show add button
-                  <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,#20242c_0%,#121417_55%,#090909_100%)] shadow-[0_18px_40px_rgba(0,0,0,0.45)] transition-all duration-300 group-hover:scale-[1.04] group-hover:border-[#4ade80]/60">
+                  <div className="relative flex h-[84px] w-[84px] items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_top,#20242c_0%,#121417_55%,#090909_100%)] shadow-[0_18px_40px_rgba(0,0,0,0.45)] transition-all duration-300 group-hover:scale-[1.04] group-hover:border-[#4ade80]/60">
                     <Plus
                       size={28}
                       className="text-[#4ade80] transition-transform duration-300 group-hover:scale-110"
@@ -1538,7 +1665,7 @@ export function FeedScreen({
                   <Plus size={12} className="text-black" />
                 </button>
               </div>
-              <span className="text-sm text-[#94a3b8] mt-3 block text-center w-20 truncate font-medium group-hover:text-white transition-colors duration-300">
+              <span className="text-sm text-[#94a3b8] mt-3 block w-[84px] truncate text-center font-medium transition-colors duration-300 group-hover:text-white">
                 Your Story
               </span>
             </div>
@@ -1551,30 +1678,35 @@ export function FeedScreen({
                   key={`story-skel-${i}`}
                   className="shrink-0 flex flex-col items-center"
                 >
-                  <div className="w-20 h-20 rounded-full bg-[#1e1e1e] animate-pulse" />
+                  <div className="h-[84px] w-[84px] animate-pulse rounded-full bg-[#1e1e1e]" />
                   <div className="w-14 h-2.5 bg-[#1e1e1e] rounded-full mt-3 animate-pulse" />
                 </div>
               ))}
 
             {/* Friends' Stories — real-time from Firestore onSnapshot */}
-            {stories.map((story, index) => (
+            {storyGroups.map((storyGroup, index) => {
+              const story = storyGroup.displayStory;
+              const hasViewed = storyGroup.hasViewed;
+              if (!story) return null;
+
+              return (
               <div
-                key={story.id}
+                key={storyGroup.authorId}
                 className="shrink-0 flex flex-col items-center group"
               >
                 <button
                   type="button"
-                  className="relative w-20 h-20 cursor-pointer"
+                  className="relative h-[84px] w-[84px] cursor-pointer"
                   onClick={() => handleStoryClick(index)}
                 >
-                  {!story.hasViewed && (
-                    <div className="absolute inset-0 w-20 h-20 rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
+                  {!hasViewed && (
+                    <div className="absolute inset-0 h-[84px] w-[84px] rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
                       <div className="w-full h-full rounded-full border-2 border-[#4ade80]/35" />
                     </div>
                   )}
                   <div
-                    className={`relative w-20 h-20 rounded-full p-[3px] transition-all duration-300 group-hover:scale-[1.04] shadow-[0_18px_40px_rgba(0,0,0,0.45)] ${
-                      story.hasViewed
+                    className={`relative h-[84px] w-[84px] rounded-full p-[3px] shadow-[0_18px_40px_rgba(0,0,0,0.45)] transition-all duration-300 group-hover:scale-[1.04] ${
+                      hasViewed
                         ? "bg-gradient-to-br from-[#2b2f35] via-[#353941] to-[#44474f]"
                         : story.storyType === "dedication"
                           ? "bg-gradient-to-br from-[#facc15] via-[#4ade80] to-[#38bdf8]"
@@ -1583,7 +1715,7 @@ export function FeedScreen({
                   >
                     <div
                       className={`w-full h-full rounded-full ${
-                        story.hasViewed ? "bg-[#111315]" : "bg-[#050505]"
+                        hasViewed ? "bg-[#111315]" : "bg-[#050505]"
                       } p-[3px]`}
                     >
                       <div className="w-full h-full rounded-full overflow-hidden">
@@ -1594,12 +1726,12 @@ export function FeedScreen({
                           userId={story.author.id}
                           username={story.author.username}
                           forceGhostMode={ghostModesByUserId[story.author.id]}
-                          className="w-full h-full"
+                          className="!h-full !w-full"
                         />
                       </div>
                     </div>
                   </div>
-                  {!story.hasViewed && (
+                  {!hasViewed && (
                     <div className="absolute -bottom-1 -right-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-[#4ade80]/70 bg-[#08110b] px-1 shadow-lg transition-transform duration-300 group-hover:scale-105">
                       <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#86efac]">
                         New
@@ -1607,46 +1739,75 @@ export function FeedScreen({
                     </div>
                   )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onNavigateToProfile && story.author.id) {
-                      onNavigateToProfile(story.author.id);
-                    }
-                  }}
-                  className={`text-sm mt-3 block text-center w-20 truncate font-medium transition-colors duration-300 ${
-                    story.hasViewed
-                      ? "text-[#6b7280]"
-                      : "text-[#d1d5db] group-hover:text-white"
-                  } ${
-                    onNavigateToProfile && story.author.id
-                      ? "cursor-pointer hover:text-[#4ade80]"
-                      : "cursor-default"
-                  }`}
-                >
-                  {stripAtSymbol(story.author.username)}
-                </button>
-                {story.storyType === "dedication" && story.dedicatedTo && (
-                  <span className="-mt-0.5 flex w-24 items-center justify-center gap-1.5 truncate text-center text-[10px] font-semibold text-[#86efac]">
-                    <span className="mr-0.5 shrink-0 animate-pulse rounded-full bg-[#4ade80]/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
-                      for
-                    </span>
-                    <Avatar
-                      src={story.dedicatedTo.avatar}
-                      alt={story.dedicatedTo.displayName}
-                      size={14}
-                      userId={story.dedicatedTo.id}
-                      username={story.dedicatedTo.username}
-                      forceGhostMode={ghostModesByUserId[story.dedicatedTo.id]}
-                      className="shrink-0 ring-1 ring-[#4ade80]/70"
-                    />
-                    <span className="min-w-0 truncate">
-                      {stripAtSymbol(story.dedicatedTo.username)}
-                    </span>
-                  </span>
+                {story.storyType === "dedication" && story.dedicatedTo ? (
+                  <div className="mt-3 flex w-[84px] items-center justify-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToProfile?.(story.author.id)}
+                      className="shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
+                      aria-label={`Open ${story.author.displayName}'s profile`}
+                    >
+                      <Avatar
+                        src={story.author.avatar}
+                        alt={story.author.displayName}
+                        size={17}
+                        userId={story.author.id}
+                        username={story.author.username}
+                        forceGhostMode={ghostModesByUserId[story.author.id]}
+                        className="ring-1 ring-white/20"
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStoryClick(index)}
+                      className="flex h-4 w-3 shrink-0 items-center justify-center text-[#86efac] transition-transform hover:scale-110 active:scale-95"
+                      aria-label="Open dedicated story"
+                    >
+                      <Play size={9} fill="currentColor" strokeWidth={0} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onNavigateToProfile?.(story.dedicatedTo!.id)
+                      }
+                      className="shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
+                      aria-label={`Open ${story.dedicatedTo.displayName}'s profile`}
+                    >
+                      <Avatar
+                        src={story.dedicatedTo.avatar}
+                        alt={story.dedicatedTo.displayName}
+                        size={17}
+                        userId={story.dedicatedTo.id}
+                        username={story.dedicatedTo.username}
+                        forceGhostMode={ghostModesByUserId[story.dedicatedTo.id]}
+                        className="ring-1 ring-[#4ade80]/70"
+                      />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onNavigateToProfile && story.author.id) {
+                        onNavigateToProfile(story.author.id);
+                      }
+                    }}
+                    className={`mt-3 block w-[84px] truncate text-center text-sm font-medium transition-colors duration-300 ${
+                      hasViewed
+                        ? "text-[#6b7280]"
+                        : "text-[#d1d5db] group-hover:text-white"
+                    } ${
+                      onNavigateToProfile && story.author.id
+                        ? "cursor-pointer hover:text-[#4ade80]"
+                        : "cursor-default"
+                    }`}
+                  >
+                    {stripAtSymbol(story.author.username)}
+                  </button>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -2288,7 +2449,7 @@ export function FeedScreen({
                 <div className="rounded-[24px] border border-[#4ade80]/15 bg-[#08110b]/80 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-white text-sm font-medium">
-                      Uploading story
+                      Uploading {storyDraftFiles.length > 1 ? "stories" : "story"}
                     </span>
                     <span className="text-[#4ade80] text-sm font-medium">
                       {uploadProgress}%
@@ -2305,6 +2466,41 @@ export function FeedScreen({
 
               {storyDraftFile && storyDraftPreviewUrl && (
                 <div className="space-y-4">
+                  {storyDraftFiles.length > 1 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                      {storyDraftFiles.map((file, index) => (
+                        <button
+                          key={`${file.name}-${file.lastModified}-${index}`}
+                          type="button"
+                          onClick={() => setSelectedStoryDraftIndex(index)}
+                          className={`relative h-16 w-11 shrink-0 overflow-hidden rounded-xl border transition-all ${
+                            selectedStoryDraftIndex === index
+                              ? "border-[#4ade80] ring-2 ring-[#4ade80]/25"
+                              : "border-white/10"
+                          }`}
+                          aria-label={`Preview story media ${index + 1}`}
+                        >
+                          {file.type.startsWith("video/") ? (
+                            <video
+                              src={storyDraftPreviewUrls[index]}
+                              className="h-full w-full object-cover"
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <img
+                              src={storyDraftPreviewUrls[index]}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          )}
+                          <span className="absolute bottom-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-bold text-white">
+                            {index + 1}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div
                     ref={storyDraftPreviewRef}
                     className="relative mx-auto aspect-[9/16] max-h-[54vh] w-full max-w-[300px] overflow-hidden rounded-[28px] border border-white/10 bg-black shadow-[0_22px_60px_rgba(0,0,0,0.45)]"
@@ -2653,7 +2849,11 @@ export function FeedScreen({
                     disabled={isUploading}
                     className="rounded-2xl bg-[#4ade80] py-4 font-bold text-black transition-colors hover:bg-[#22c55e] disabled:cursor-not-allowed disabled:bg-[#2a2a2a] disabled:text-[#64748b]"
                   >
-                    {isUploading ? "Posting..." : "Post story"}
+                    {isUploading
+                      ? "Posting..."
+                      : storyDraftFiles.length > 1
+                        ? `Post ${storyDraftFiles.length} stories`
+                        : "Post story"}
                   </button>
                 </div>
               )}
@@ -2680,6 +2880,7 @@ export function FeedScreen({
           currentUserId={currentUser.userId}
           onClose={() => {
             setShowStoryViewerModal(false);
+            setViewerStoryAuthorId(null);
             onStoryViewerOpenChange?.(false);
           }}
           onDelete={viewerIsOwner ? handleDeleteStory : undefined}

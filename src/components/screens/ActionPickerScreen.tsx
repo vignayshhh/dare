@@ -90,7 +90,7 @@ export function ActionPickerScreen({
         }}
       />
 
-      <div className="app-modal-sheet modal-content relative mx-3 mb-[calc(16px+env(safe-area-inset-bottom,0px))] w-[calc(100%-24px)] max-w-md sm:mb-0">
+      <div className="app-modal-sheet modal-content relative mx-3 mb-[calc(16px+var(--safe-area-bottom))] w-[calc(100%-24px)] max-w-md sm:mb-0">
         <button
           onClick={handleClose}
           className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/70 shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition-colors hover:text-white"

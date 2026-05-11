@@ -3,7 +3,7 @@
 import { storage } from "@/backend/lib/firebase";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 
-export type MediaUploadContext = "avatar" | "feed" | "dare-proof";
+export type MediaUploadContext = "avatar" | "feed" | "dare-proof" | "messages";
 export type MediaKind = "image" | "video" | "audio";
 
 interface ImageOptimizationSettings {
@@ -68,6 +68,15 @@ const CONTEXT_CONSTRAINTS: Record<MediaUploadContext, MediaConstraints> = {
     image: {
       maxDimension: 1920,
       quality: 0.84,
+      preferredType: "image/webp",
+    },
+  },
+  messages: {
+    maxInputBytes: 100 * MB,
+    allowedKinds: ["image", "video"],
+    image: {
+      maxDimension: 1920,
+      quality: 0.86,
       preferredType: "image/webp",
     },
   },
@@ -230,7 +239,9 @@ const makeStoragePath = (
       ? "avatars"
       : context === "feed"
         ? "feed-media"
-        : "dare-proofs";
+        : context === "dare-proof"
+          ? "dare-proofs"
+          : "messages";
 
   // SECURITY FIX: Use crypto.randomUUID() instead of Math.random() for cryptographically secure random values
   // Fallback for browsers that don't support crypto.randomUUID() (e.g., older mobile browsers)

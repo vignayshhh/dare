@@ -584,8 +584,11 @@ export const usePostsStore = create<PostsStore>()(
 
       addLike: async (postId: string, _userId: string) => {
         try {
-          void _userId;
-          const current = getCurrentUserDisplay();
+          const currentDisplay = getCurrentUserDisplay();
+          const current = {
+            ...currentDisplay,
+            userId: _userId || currentDisplay.userId,
+          };
 
           const post = [...get().posts, ...get().userPosts].find(
             (p) => p.id === postId,
@@ -664,7 +667,11 @@ export const usePostsStore = create<PostsStore>()(
               });
           }
         } catch (error) {
-          const current = getCurrentUserDisplay();
+          const currentDisplay = getCurrentUserDisplay();
+          const current = {
+            ...currentDisplay,
+            userId: _userId || currentDisplay.userId,
+          };
           const post = [...get().posts, ...get().userPosts].find(
             (p) => p.id === postId,
           );

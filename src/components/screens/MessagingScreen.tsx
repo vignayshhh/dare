@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   useMessagingStore,
   type MessageEvent,
@@ -26,6 +26,8 @@ import {
   type SharedPostPayload,
   type SharedStoryPayload,
 } from "../../utils/sharedPostMessage";
+import { uploadOptimizedMedia } from "../../utils/mediaUpload";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 type From = "me" | "them";
 type Status = "seen" | "delivered" | "screenshot";
@@ -42,8 +44,18 @@ interface Msg {
   kind: "msg";
   from: From;
   text: string;
+  senderId: string;
+  senderName: string;
   sharedPost: SharedPostPayload | null;
   sharedStory: SharedStoryPayload | null;
+  mediaUrl: string | null;
+  mediaType: string | null;
+  photoUrls: string[];
+  sourceIds: string[];
+  replyTo: ReplyTarget | null;
+  createdAt?: string | number;
+  optimistic?: boolean;
+  failed?: boolean;
 }
 interface Evt {
   id: string;
@@ -53,11 +65,50 @@ interface Evt {
   targetUserId?: string;
 }
 type TimelineItem = Msg | Evt;
+interface ChatPhoto {
+  key: string;
+  url: string;
+}
+
+interface ReplyTarget {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  mediaType?: string | null;
+}
+
+interface OptimisticPhotoMessage {
+  id: string;
+  conversationId: string;
+  localUrl: string;
+  uploadedUrl?: string;
+  file: File;
+  createdAt: number;
+  failed?: boolean;
+}
 
 const FRIEND = {
   name: "Nina Creates",
   avatar: "https://picsum.photos/seed/nina/100/100",
 };
+
+function summarizeMessageForReply(msg: Msg): string {
+  const trimmed = msg.text.trim();
+  if (trimmed && !/^photo$/i.test(trimmed) && !/^\d+\s+photos$/i.test(trimmed)) {
+    return trimmed.length > 96 ? `${trimmed.slice(0, 96)}...` : trimmed;
+  }
+  if (msg.photoUrls.length > 1) return `${msg.photoUrls.length} photos`;
+  if (msg.photoUrls.length === 1 || msg.mediaType === "PHOTO") return "Photo";
+  if (msg.sharedStory) return "Story reply";
+  if (msg.sharedPost) return "Shared post";
+  return "Message";
+}
+
+function replyPreviewLabel(replyTo: ReplyTarget): string {
+  if (replyTo.mediaType === "PHOTO") return replyTo.content || "Photo";
+  return replyTo.content || "Message";
+}
 
 // ─── Event label helpers ─────────────────────────────────────────────────────
 
@@ -695,6 +746,7 @@ function StoryReplyCard({
   const [previewActive, setPreviewActive] = useState(() =>
     story ? isSharedStoryPreviewActive(story) : false,
   );
+  const [storyDeleted, setStoryDeleted] = useState(false);
 
   useEffect(() => {
     if (!story) return;
@@ -718,93 +770,76 @@ function StoryReplyCard({
     return () => window.clearTimeout(timeout);
   }, [story?.expiresAt, story?.storyId]);
 
+  useEffect(() => {
+    setStoryDeleted(false);
+    if (!story || !previewActive) return;
+
+    const db = getFirestore();
+    return onSnapshot(
+      doc(db, "stories", story.storyId),
+      (snapshot) => {
+        setStoryDeleted(!snapshot.exists());
+      },
+      () => {
+        setStoryDeleted(false);
+      },
+    );
+  }, [previewActive, story?.storyId]);
+
   if (!story) return null;
   const previewUrl = story.media.thumbnail || story.media.url || "";
-  const hasPreview = previewActive && Boolean(previewUrl);
+  const hasPreview = previewActive && !storyDeleted && Boolean(previewUrl);
   const isVideo = story.media.type === "video";
-  const usernameClean = story.authorUsername.replace(/^@/, "");
   const replyText = story.replyText || msg.text;
+  const collapsedStoryLabel = storyDeleted
+    ? "Story deleted"
+    : previewActive
+      ? "Story unavailable"
+      : "Story expired";
+  const replyBubbleStyle: React.CSSProperties = isOwn
+    ? {
+        alignSelf: "flex-end",
+        background: "rgba(61,245,127,0.08)",
+        color: "#3df57f",
+        boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
+        borderTopRightRadius: 4,
+      }
+    : {
+        alignSelf: "flex-start",
+        background: "#191919",
+        color: "#fff",
+        borderTopLeftRadius: 4,
+      };
 
   return (
     <div
       style={{
-        width: 270,
+        width: 224,
         maxWidth: "100%",
-        borderRadius: 20,
-        overflow: "hidden",
-        background: isOwn
-          ? "linear-gradient(180deg, rgba(14,24,18,0.98), rgba(10,12,10,0.98))"
-          : "linear-gradient(180deg, rgba(18,18,18,0.98), rgba(10,10,10,0.98))",
-        border: isOwn
-          ? "1px solid rgba(61,245,127,0.22)"
-          : "1px solid rgba(255,255,255,0.11)",
-        boxShadow: "0 10px 28px rgba(0,0,0,0.32)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isOwn ? "flex-end" : "flex-start",
+        gap: 8,
       }}
     >
       <div
         style={{
-          padding: "11px 13px 10px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          position: "relative",
+          width: 176,
+          height: hasPreview ? 250 : 64,
+          borderRadius: hasPreview ? 20 : 18,
+          overflow: "hidden",
+          background: hasPreview ? "#050505" : "rgba(255,255,255,0.045)",
+          border: isOwn
+            ? "1px solid rgba(61,245,127,0.2)"
+            : "1px solid rgba(255,255,255,0.1)",
+          boxShadow: hasPreview
+            ? "0 10px 26px rgba(0,0,0,0.34)"
+            : "0 6px 16px rgba(0,0,0,0.22)",
         }}
       >
-        <div
-          style={{
-            color: isOwn ? "#3df57f" : "rgba(255,255,255,0.72)",
-            fontSize: 12,
-            fontWeight: 800,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          Replied to story
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <Avatar
-            src={story.authorAvatar || ""}
-            alt={story.authorName}
-            size={30}
-            userId={story.authorId}
-          />
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                color: "#fff",
-                fontSize: 13,
-                fontWeight: 700,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {story.authorName}
-            </div>
-            <div
-              style={{
-                color: "rgba(255,255,255,0.46)",
-                fontSize: 11,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              @{usernameClean}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {hasPreview ? (
-        <div
-          style={{
-            position: "relative",
-            aspectRatio: "9 / 16",
-            maxHeight: 330,
-            background: "#050505",
-            overflow: "hidden",
-          }}
-        >
-          {isVideo ? (
+        {hasPreview ? (
+          isVideo ? (
             <video
               src={previewUrl}
               muted
@@ -829,56 +864,81 @@ function StoryReplyCard({
                 objectFit: "cover",
               }}
             />
-          )}
+          )
+        ) : (
           <div
             style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(to top, rgba(0,0,0,0.48), transparent 42%)",
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 3,
+              color: storyDeleted
+                ? "rgba(255,255,255,0.58)"
+                : "rgba(255,255,255,0.46)",
+              fontSize: 13,
+              fontWeight: 800,
+              textAlign: "center",
+              padding: "10px 14px",
+              lineHeight: 1.25,
             }}
-          />
-          {isVideo && (
+          >
+            {collapsedStoryLabel}
+            <span
+              style={{
+                color: "rgba(255,255,255,0.28)",
+                fontSize: 10,
+                fontWeight: 700,
+              }}
+            >
+              Preview hidden
+            </span>
+          </div>
+        )}
+
+        {hasPreview && (
+          <>
             <div
               style={{
                 position: "absolute",
-                left: 10,
-                bottom: 10,
+                inset: 0,
+                background:
+                  "linear-gradient(to top, rgba(0,0,0,0.28), transparent 38%)",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: 9,
+                bottom: 9,
                 borderRadius: 999,
-                background: "rgba(0,0,0,0.55)",
-                color: "#fff",
-                fontSize: 11,
-                fontWeight: 700,
+                background: "rgba(0,0,0,0.58)",
+                color: "rgba(255,255,255,0.86)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                fontSize: 10,
+                fontWeight: 800,
                 padding: "5px 8px",
                 backdropFilter: "blur(8px)",
               }}
             >
-              Video story
+              {isVideo ? "Video story" : "Story"}
             </div>
-          )}
-        </div>
-      ) : (
-        <div
-          style={{
-            padding: "22px 16px",
-            color: "rgba(255,255,255,0.48)",
-            fontSize: 13,
-            textAlign: "center",
-            background: "rgba(255,255,255,0.035)",
-          }}
-        >
-          {previewActive ? "Story preview unavailable" : "Story preview expired"}
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       {replyText && (
         <div
           style={{
-            padding: "12px 14px 14px",
-            color: isOwn ? "#d7ffe6" : "#f3f4f6",
-            fontSize: 15,
-            lineHeight: 1.4,
+            maxWidth: "100%",
+            padding: "12px 16px",
+            fontSize: 17,
+            lineHeight: 1.5,
             wordBreak: "break-word",
+            borderRadius: 18,
+            ...replyBubbleStyle,
           }}
         >
           {replyText}
@@ -1061,22 +1121,831 @@ function DailyChallengeStarterCard({
   );
 }
 
+function ChatPhotoViewer({
+  photos,
+  index,
+  onIndexChange,
+  onClose,
+}: {
+  photos: ChatPhoto[];
+  index: number;
+  onIndexChange: (index: number) => void;
+  onClose: () => void;
+}) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const animationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isSettling, setIsSettling] = useState(false);
+  const safeIndex = Math.min(Math.max(index, 0), Math.max(photos.length - 1, 0));
+  const activePhoto = photos[safeIndex];
+  const hasMultiple = photos.length > 1;
+
+  const getWrappedIndex = useCallback(
+    (nextIndex: number) => {
+      if (photos.length === 0) return 0;
+      return (nextIndex + photos.length) % photos.length;
+    },
+    [photos.length],
+  );
+
+  const finishAnimatedNavigation = useCallback(
+    (direction: 1 | -1) => {
+      const viewportWidth =
+        viewportRef.current?.clientWidth ||
+        (typeof window !== "undefined" ? window.innerWidth : 360);
+      const nextIndex = getWrappedIndex(safeIndex + direction);
+
+      if (animationTimerRef.current) {
+        clearTimeout(animationTimerRef.current);
+      }
+
+      setIsDragging(false);
+      setIsSettling(true);
+      setDragOffset(direction === 1 ? -viewportWidth : viewportWidth);
+
+      animationTimerRef.current = setTimeout(() => {
+        onIndexChange(nextIndex);
+        setIsSettling(false);
+        setDragOffset(0);
+        animationTimerRef.current = null;
+      }, 280);
+    },
+    [getWrappedIndex, onIndexChange, safeIndex],
+  );
+
+  const goPrev = useCallback(() => {
+    if (!hasMultiple || isSettling) return;
+    finishAnimatedNavigation(-1);
+  }, [finishAnimatedNavigation, hasMultiple, isSettling]);
+
+  const goNext = useCallback(() => {
+    if (!hasMultiple || isSettling) return;
+    finishAnimatedNavigation(1);
+  }, [finishAnimatedNavigation, hasMultiple, isSettling]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowLeft") goPrev();
+      if (event.key === "ArrowRight") goNext();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+      if (animationTimerRef.current) {
+        clearTimeout(animationTimerRef.current);
+      }
+    };
+  }, [goNext, goPrev, onClose]);
+
+  if (!activePhoto) return null;
+
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (isSettling) return;
+    const touch = event.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    setIsDragging(true);
+    setDragOffset(0);
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    if (!start) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      setDragOffset(dx * 0.72);
+    }
+  };
+
+  const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) {
+      setDragOffset(0);
+      setIsDragging(false);
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const viewportWidth =
+      viewportRef.current?.clientWidth ||
+      (typeof window !== "undefined" ? window.innerWidth : 360);
+    const isSwipe =
+      hasMultiple &&
+      Math.abs(dx) > Math.min(118, viewportWidth * 0.28) &&
+      Math.abs(dx) > Math.abs(dy) * 1.35;
+
+    if (isSwipe) {
+      finishAnimatedNavigation(dx < 0 ? 1 : -1);
+      return;
+    }
+
+    setIsDragging(false);
+    setDragOffset(0);
+  };
+
+  const iconButtonStyle: React.CSSProperties = {
+    width: 42,
+    height: 42,
+    borderRadius: "50%",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(12,12,12,0.58)",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backdropFilter: "blur(14px)",
+    cursor: "pointer",
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photo viewer"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 10000,
+        background: "rgba(0,0,0,0.96)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        touchAction: "none",
+      }}
+    >
+      <div
+        ref={viewportRef}
+        onClick={(event) => event.stopPropagation()}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={() => {
+          touchStartRef.current = null;
+          setIsDragging(false);
+          setDragOffset(0);
+        }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "calc(58px + env(safe-area-inset-top, 0px)) 14px calc(58px + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
+        {(hasMultiple ? [-1, 0, 1] : [0]).map((slot) => {
+          const photoIndex = getWrappedIndex(safeIndex + slot);
+          const photo = photos[photoIndex] ?? activePhoto;
+          return (
+            <img
+              key={`${photo.key}-${slot}`}
+              src={photo.url}
+              alt={`Chat photo ${photoIndex + 1} of ${photos.length}`}
+              draggable={false}
+              style={{
+                position: "absolute",
+                maxWidth: "calc(100% - 28px)",
+                maxHeight:
+                  "calc(100% - 116px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))",
+                objectFit: "contain",
+                borderRadius: 6,
+                transform: `translate3d(calc(${slot * 100}% + ${dragOffset}px), 0, 0)`,
+                transition:
+                  isDragging || (!isSettling && dragOffset !== 0)
+                    ? "none"
+                    : "transform 0.28s cubic-bezier(0.22, 0.78, 0.18, 1)",
+                userSelect: "none",
+                touchAction: "pan-y",
+                willChange: "transform",
+              }}
+            />
+          );
+        })}
+      </div>
+
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          position: "absolute",
+          top: "calc(14px + env(safe-area-inset-top, 0px))",
+          left: 14,
+          right: 14,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            minWidth: 72,
+            borderRadius: 999,
+            padding: "8px 12px",
+            color: "rgba(255,255,255,0.86)",
+            background: "rgba(12,12,12,0.58)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            backdropFilter: "blur(14px)",
+            fontSize: 13,
+            fontWeight: 800,
+            textAlign: "center",
+          }}
+        >
+          {safeIndex + 1} / {photos.length}
+        </div>
+        <button
+          type="button"
+          aria-label="Close photo viewer"
+          onClick={onClose}
+          style={{ ...iconButtonStyle, pointerEvents: "auto" }}
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      {hasMultiple && (
+        <>
+          <button
+            type="button"
+            aria-label="Previous photo"
+            onClick={(event) => {
+              event.stopPropagation();
+              goPrev();
+            }}
+            style={{
+              ...iconButtonStyle,
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+            }}
+          >
+            <ChevronLeft size={24} />
+          </button>
+          <button
+            type="button"
+            aria-label="Next photo"
+            onClick={(event) => {
+              event.stopPropagation();
+              goNext();
+            }}
+            style={{
+              ...iconButtonStyle,
+              position: "absolute",
+              right: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+            }}
+          >
+            <ChevronRight size={24} />
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MessageGestureFrame({
+  msg,
+  onReply,
+  onLongPress,
+  children,
+}: {
+  msg: Msg;
+  onReply?: (msg: Msg) => void;
+  onLongPress?: (msg: Msg) => void;
+  children: React.ReactNode;
+}) {
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dragX, setDragX] = useState(0);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const resetDrag = () => setDragX(0);
+
+  return (
+    <div
+      onTouchStart={(event) => {
+        const touch = event.touches[0];
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+        setDragX(0);
+        clearLongPressTimer();
+        longPressTimerRef.current = setTimeout(() => {
+          onLongPress?.(msg);
+          longPressTimerRef.current = null;
+          setDragX(0);
+        }, 520);
+      }}
+      onTouchMove={(event) => {
+        const start = touchStartRef.current;
+        if (!start) return;
+        const touch = event.touches[0];
+        const dx = touch.clientX - start.x;
+        const dy = touch.clientY - start.y;
+
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) clearLongPressTimer();
+        if (Math.abs(dx) > Math.abs(dy) * 1.25) {
+          const directionAllowed = msg.from === "me" ? dx < 0 : dx > 0;
+          setDragX(directionAllowed ? dx * 0.34 : dx * 0.12);
+        }
+      }}
+      onTouchEnd={(event) => {
+        clearLongPressTimer();
+        const start = touchStartRef.current;
+        touchStartRef.current = null;
+        if (!start) {
+          resetDrag();
+          return;
+        }
+
+        const touch = event.changedTouches[0];
+        const dx = touch.clientX - start.x;
+        const dy = touch.clientY - start.y;
+        const directionAllowed = msg.from === "me" ? dx < 0 : dx > 0;
+        if (
+          directionAllowed &&
+          Math.abs(dx) > 78 &&
+          Math.abs(dx) > Math.abs(dy) * 1.35
+        ) {
+          onReply?.(msg);
+        }
+        resetDrag();
+      }}
+      onTouchCancel={() => {
+        clearLongPressTimer();
+        touchStartRef.current = null;
+        resetDrag();
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onLongPress?.(msg);
+      }}
+      style={{
+        transform: `translateX(${dragX}px)`,
+        transition: dragX === 0 ? "transform 0.22s ease" : "none",
+        touchAction: "pan-y",
+        WebkitTapHighlightColor: "transparent",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function InlineReplyPreview({
+  replyTo,
+  own,
+}: {
+  replyTo: ReplyTarget | null;
+  own: boolean;
+}) {
+  if (!replyTo) return null;
+
+  return (
+    <div
+      style={{
+        margin: "0 0 6px",
+        padding: "8px 10px",
+        borderRadius: 12,
+        background: own ? "rgba(61,245,127,0.1)" : "rgba(255,255,255,0.06)",
+        borderLeft: `3px solid ${own ? "#3df57f" : "#94a3b8"}`,
+        color: own ? "#d7ffe6" : "rgba(255,255,255,0.82)",
+        maxWidth: "100%",
+      }}
+    >
+      <div
+        style={{
+          color: own ? "#86efac" : "#cbd5e1",
+          fontSize: 11,
+          fontWeight: 900,
+          marginBottom: 3,
+        }}
+      >
+        {replyTo.senderName}
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          lineHeight: 1.25,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          opacity: 0.9,
+        }}
+      >
+        {replyPreviewLabel(replyTo)}
+      </div>
+    </div>
+  );
+}
+
 function Bubble({
   msg,
   showStatus,
   status,
   onOpenSharedPost,
+  onOpenPhoto,
+  onReply,
+  onLongPress,
 }: {
   msg: Msg;
   showStatus: boolean;
   status: Status;
   onOpenSharedPost?: (userId: string, postId: string) => void;
+  onOpenPhoto?: (msg: Msg, photoIndex: number) => void;
+  onReply?: (msg: Msg) => void;
+  onLongPress?: (msg: Msg) => void;
 }) {
   const own = msg.from === "me";
   const dailyChallengeStarter = parseDailyChallengeStarter(msg.text);
+  const wrapMessage = (node: React.ReactNode) => (
+    <MessageGestureFrame
+      msg={msg}
+      onReply={onReply}
+      onLongPress={onLongPress}
+    >
+      {node}
+    </MessageGestureFrame>
+  );
+
+  if (msg.photoUrls.length > 0) {
+    const visibleUrls = msg.photoUrls.slice(0, 4);
+    const hiddenCount = Math.max(0, msg.photoUrls.length - visibleUrls.length);
+    const isSinglePhoto = msg.photoUrls.length === 1;
+    const isDisplayCaption =
+      msg.text.trim().length > 0 &&
+      !/^photo$/i.test(msg.text.trim()) &&
+      !/^\d+\s+photos$/i.test(msg.text.trim());
+    const showSendingOverlay = msg.optimistic && !msg.failed;
+    const showFailedOverlay = msg.failed;
+    const photoButtonStyle: React.CSSProperties = {
+      display: "block",
+      padding: 0,
+      margin: 0,
+      border: "none",
+      background: "transparent",
+      cursor: "pointer",
+      lineHeight: 0,
+    };
+
+    return wrapMessage(
+      <div style={{ padding: "4px 14px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: own ? "flex-end" : "flex-start",
+            alignItems: "flex-start",
+            gap: 0,
+          }}
+        >
+          {own ? (
+            <>
+              <div
+                style={{
+                  maxWidth: "82%",
+                  padding: msg.replyTo ? 7 : isDisplayCaption ? 4 : 3,
+                  borderRadius: 18,
+                  borderTopRightRadius: 4,
+                  background: "rgba(61,245,127,0.08)",
+                  overflow: "hidden",
+                  position: "relative",
+                  boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
+                }}
+              >
+                <InlineReplyPreview replyTo={msg.replyTo} own={own} />
+                {isSinglePhoto ? (
+                  <button
+                    type="button"
+                    aria-label="Open sent photo fullscreen"
+                    onClick={() => onOpenPhoto?.(msg, 0)}
+                    style={photoButtonStyle}
+                  >
+                    <img
+                      src={msg.photoUrls[0]}
+                      alt="Sent photo"
+                      style={{
+                        display: "block",
+                        width: "min(72vw, 270px)",
+                        maxHeight: 360,
+                        objectFit: "cover",
+                        borderRadius: 15,
+                        background: "#080808",
+                      }}
+                    />
+                  </button>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: 3,
+                      width: "min(72vw, 280px)",
+                    }}
+                  >
+                    {visibleUrls.map((url, index) => (
+                      <button
+                        type="button"
+                        aria-label={`Open sent photo ${index + 1} fullscreen`}
+                        onClick={() => onOpenPhoto?.(msg, index)}
+                        key={`${url}-${index}`}
+                        style={{
+                          ...photoButtonStyle,
+                          position: "relative",
+                          aspectRatio: "1 / 1",
+                          overflow: "hidden",
+                          borderRadius:
+                            index === 0
+                              ? "14px 3px 3px 3px"
+                              : index === 1
+                                ? "3px 14px 3px 3px"
+                                : index === 2
+                                  ? "3px 3px 3px 14px"
+                                  : "3px 3px 14px 3px",
+                          background: "#080808",
+                        }}
+                        >
+                        <img
+                          src={url}
+                          alt="Sent photo"
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                        {index === 3 && hiddenCount > 0 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: "rgba(0,0,0,0.55)",
+                              color: "#fff",
+                              fontSize: 28,
+                              fontWeight: 800,
+                            }}
+                          >
+                            +{hiddenCount}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {(showSendingOverlay || showFailedOverlay) && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 3,
+                      borderRadius: 15,
+                      background: showFailedOverlay
+                        ? "rgba(80,0,0,0.48)"
+                        : "rgba(0,0,0,0.32)",
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "flex-end",
+                      padding: 8,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        borderRadius: 999,
+                        background: "rgba(0,0,0,0.58)",
+                        color: showFailedOverlay ? "#fecaca" : "#fff",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "5px 8px",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    >
+                      {showFailedOverlay ? "Failed" : "Sending..."}
+                    </span>
+                  </div>
+                )}
+                {isDisplayCaption && (
+                  <div
+                    style={{
+                      padding: "9px 10px 7px",
+                      color: "#d7ffe6",
+                      fontSize: 15,
+                      lineHeight: 1.35,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                )}
+              </div>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                style={{ flexShrink: 0, marginTop: 4 }}
+              >
+                <path d="M 0 0 L 12 0 L 0 10 Z" fill="rgba(61,245,127,0.08)" />
+              </svg>
+            </>
+          ) : (
+            <>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                style={{ flexShrink: 0, marginTop: 4 }}
+              >
+                <path d="M 12 0 L 0 0 L 12 10 Z" fill="#191919" />
+              </svg>
+              <div
+                style={{
+                  maxWidth: "82%",
+                  padding: msg.replyTo ? 7 : isDisplayCaption ? 4 : 3,
+                  borderRadius: 18,
+                  borderTopLeftRadius: 4,
+                  background: "#191919",
+                  overflow: "hidden",
+                  position: "relative",
+                }}
+              >
+                <InlineReplyPreview replyTo={msg.replyTo} own={own} />
+                {isSinglePhoto ? (
+                  <button
+                    type="button"
+                    aria-label="Open received photo fullscreen"
+                    onClick={() => onOpenPhoto?.(msg, 0)}
+                    style={photoButtonStyle}
+                  >
+                    <img
+                      src={msg.photoUrls[0]}
+                      alt="Received photo"
+                      style={{
+                        display: "block",
+                        width: "min(72vw, 270px)",
+                        maxHeight: 360,
+                        objectFit: "cover",
+                        borderRadius: 15,
+                        background: "#080808",
+                      }}
+                    />
+                  </button>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: 3,
+                      width: "min(72vw, 280px)",
+                    }}
+                  >
+                    {visibleUrls.map((url, index) => (
+                      <button
+                        type="button"
+                        aria-label={`Open received photo ${index + 1} fullscreen`}
+                        onClick={() => onOpenPhoto?.(msg, index)}
+                        key={`${url}-${index}`}
+                        style={{
+                          ...photoButtonStyle,
+                          position: "relative",
+                          aspectRatio: "1 / 1",
+                          overflow: "hidden",
+                          borderRadius:
+                            index === 0
+                              ? "14px 3px 3px 3px"
+                              : index === 1
+                                ? "3px 14px 3px 3px"
+                                : index === 2
+                                  ? "3px 3px 3px 14px"
+                                  : "3px 3px 14px 3px",
+                          background: "#080808",
+                        }}
+                      >
+                        <img
+                          src={url}
+                          alt="Received photo"
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                        {index === 3 && hiddenCount > 0 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: "rgba(0,0,0,0.55)",
+                              color: "#fff",
+                              fontSize: 28,
+                              fontWeight: 800,
+                            }}
+                          >
+                            +{hiddenCount}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {(showSendingOverlay || showFailedOverlay) && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 3,
+                      borderRadius: 15,
+                      background: showFailedOverlay
+                        ? "rgba(80,0,0,0.48)"
+                        : "rgba(0,0,0,0.32)",
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "flex-end",
+                      padding: 8,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        borderRadius: 999,
+                        background: "rgba(0,0,0,0.58)",
+                        color: showFailedOverlay ? "#fecaca" : "#fff",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "5px 8px",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    >
+                      {showFailedOverlay ? "Failed" : "Sending..."}
+                    </span>
+                  </div>
+                )}
+                {isDisplayCaption && (
+                  <div
+                    style={{
+                      padding: "9px 10px 7px",
+                      color: "#fff",
+                      fontSize: 15,
+                      lineHeight: 1.35,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        {showStatus && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              padding: "4px 4px 2px",
+            }}
+          >
+            {status === "screenshot" ? (
+              <span style={{ fontSize: 12, color: "#facc15", fontWeight: 600 }}>
+                Screenshot
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: "#444", fontWeight: 500 }}>
+                {status === "seen" ? "Seen" : "Delivered"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>,
+    );
+  }
 
   if (dailyChallengeStarter) {
-    return (
+    return wrapMessage(
       <div style={{ padding: "6px 14px 10px" }}>
         <div
           style={{
@@ -1111,12 +1980,12 @@ function Bubble({
             )}
           </div>
         )}
-      </div>
+      </div>,
     );
   }
 
   if (msg.sharedStory) {
-    return (
+    return wrapMessage(
       <div style={{ padding: "4px 14px" }}>
         <div
           style={{
@@ -1148,13 +2017,13 @@ function Bubble({
             )}
           </div>
         )}
-      </div>
+      </div>,
     );
   }
 
   // Shared post messages render as standalone Instagram-style cards (no bubble).
   if (msg.sharedPost) {
-    return (
+    return wrapMessage(
       <div style={{ padding: "4px 14px" }}>
         <div
           style={{
@@ -1190,11 +2059,11 @@ function Bubble({
             )}
           </div>
         )}
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return wrapMessage(
     <div style={{ padding: "4px 14px" }}>
       <div
         style={{
@@ -1221,6 +2090,7 @@ function Bubble({
                 boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
               }}
             >
+              <InlineReplyPreview replyTo={msg.replyTo} own={own} />
               {msg.text}
             </div>
             <svg
@@ -1256,6 +2126,7 @@ function Bubble({
                 border: "none",
               }}
             >
+              <InlineReplyPreview replyTo={msg.replyTo} own={own} />
               {msg.text}
             </div>
           </>
@@ -1280,7 +2151,7 @@ function Bubble({
           )}
         </div>
       )}
-    </div>
+    </div>,
   );
 }
 
@@ -1357,6 +2228,7 @@ export default function MessagingScreen({
     trackSeenMessage,
     clearIgnoredTracking,
     markMessageAsSeen,
+    deleteMessage,
     clearError,
     clearMessages,
   } = useMessagingStore();
@@ -1364,6 +2236,21 @@ export default function MessagingScreen({
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("seen");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sendingMedia, setSendingMedia] = useState(false);
+  const [optimisticPhotoMessages, setOptimisticPhotoMessages] = useState<
+    OptimisticPhotoMessage[]
+  >([]);
+  const [photoViewer, setPhotoViewer] = useState<{
+    photos: ChatPhoto[];
+    index: number;
+  } | null>(null);
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const [messageActionTarget, setMessageActionTarget] = useState<Msg | null>(
+    null,
+  );
+  const [hiddenMessageIds, setHiddenMessageIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [hasOpenedChat, setHasOpenedChat] = useState(false);
   const [optimisticSwitchEvents, setOptimisticSwitchEvents] = useState<
     MessageEvent[]
@@ -1385,6 +2272,14 @@ export default function MessagingScreen({
   const [currentMoodBlockVisible, setCurrentMoodBlockVisible] = useState(false);
   const [progressBarWidth, setProgressBarWidth] = useState(100);
   const activeMoodTheme = getMoodTheme(currentMoodBlock?.mood ?? "");
+  const activeConversationId = currentConversation?.id ?? null;
+  const activeMessages = useMemo(
+    () =>
+      activeConversationId
+        ? messages.filter((msg) => msg.conversation_id === activeConversationId)
+        : [],
+    [activeConversationId, messages],
+  );
 
   const [localFrozenBy, setLocalFrozenBy] = useState<string | null>(null);
   const [_firestoreOnline, setFirestoreOnline] = useState(false);
@@ -1420,6 +2315,7 @@ export default function MessagingScreen({
   const frozenRef = useRef(frozen);
   const convRef = useRef(currentConversation);
   const userIdRef = useRef(user?.id);
+  const optimisticPhotoMessagesRef = useRef<OptimisticPhotoMessage[]>([]);
 
   useEffect(() => {
     frozenRef.current = frozen;
@@ -1433,6 +2329,60 @@ export default function MessagingScreen({
   useEffect(() => {
     userIdRef.current = user?.id;
   }, [user?.id]);
+  useEffect(() => {
+    optimisticPhotoMessagesRef.current = optimisticPhotoMessages;
+  }, [optimisticPhotoMessages]);
+  useEffect(() => {
+    if (!currentConversation?.id || !user?.id || typeof window === "undefined") {
+      setHiddenMessageIds(new Set());
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(
+        `chat_hidden_messages:${user.id}:${currentConversation.id}`,
+      );
+      setHiddenMessageIds(new Set(raw ? JSON.parse(raw) : []));
+    } catch {
+      setHiddenMessageIds(new Set());
+    }
+  }, [currentConversation?.id, user?.id]);
+  useEffect(() => {
+    return () => {
+      optimisticPhotoMessagesRef.current.forEach((message) => {
+        URL.revokeObjectURL(message.localUrl);
+      });
+    };
+  }, []);
+  useEffect(() => {
+    const realPhotoUrls = new Set(
+      activeMessages
+        .filter((message) => {
+          const mediaType = String(
+            message.media_type || message.mediaType || "",
+          ).toUpperCase();
+          return mediaType === "PHOTO";
+        })
+        .map((message) => message.mediaUrl || message.media_url)
+        .filter(Boolean),
+    );
+
+    if (realPhotoUrls.size === 0) return;
+
+    setOptimisticPhotoMessages((current) => {
+      let changed = false;
+      const next = current.filter((message) => {
+        const hasArrived =
+          message.uploadedUrl && realPhotoUrls.has(message.uploadedUrl);
+        if (hasArrived) {
+          URL.revokeObjectURL(message.localUrl);
+          changed = true;
+          return false;
+        }
+        return true;
+      });
+      return changed ? next : current;
+    });
+  }, [activeMessages]);
 
   useEffect(() => {
     if (!currentConversation?.id) return;
@@ -1940,14 +2890,14 @@ export default function MessagingScreen({
   useEffect(() => {
     if (scrollRef.current)
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, messageEvents, livePresenceSwitchTarget]);
+  }, [activeMessages, messageEvents, livePresenceSwitchTarget]);
 
   // ── Seen tracking (only the most recent incoming message) ────────────────
   useEffect(() => {
     if (!currentConversation || !user?.id) return;
     const otherUserId = currentConversation.other_user?.user_id;
     if (!otherUserId) return;
-    const incoming = messages.filter(
+    const incoming = activeMessages.filter(
       (msg) => msg.senderId === otherUserId && !msg.isOwn,
     );
     if (incoming.length === 0) return;
@@ -1958,11 +2908,11 @@ export default function MessagingScreen({
       latest.senderId,
       latest.senderName,
     );
-  }, [messages, currentConversation, user?.id, trackSeenMessage]);
+  }, [activeMessages, currentConversation, user?.id, trackSeenMessage]);
 
   useEffect(() => {
     if (!currentConversation?.id || !user?.id) return;
-    const unseenIncoming = messages.filter(
+    const unseenIncoming = activeMessages.filter(
       (msg) => msg.senderId !== user.id && !msg.is_seen,
     );
     const unseenIds = new Set(unseenIncoming.map((msg) => msg.id));
@@ -1975,7 +2925,7 @@ export default function MessagingScreen({
       if (!unseenIds.has(pendingId))
         pendingSeenMarksRef.current.delete(pendingId);
     }
-  }, [messages, currentConversation?.id, user?.id, markMessageAsSeen]);
+  }, [activeMessages, currentConversation?.id, user?.id, markMessageAsSeen]);
 
   useEffect(() => {
     pendingSeenMarksRef.current.clear();
@@ -2192,15 +3142,99 @@ export default function MessagingScreen({
     ),
   ];
 
-  const timeline: TimelineItem[] = [
-    ...messages.map((msg) => ({
-      id: msg.id,
-      kind: "msg" as const,
-      from: (msg.senderId === user?.id ? "me" : "them") as From,
-      text: msg.content,
-      sharedPost: parseSharedPostPayload(msg.mediaUrl || msg.media_url),
-      sharedStory: parseSharedStoryPayload(msg.mediaUrl || msg.media_url),
-    })),
+  const msgUserProfiles = useProfileDataStore((s) => s.userProfiles);
+  const friendInfo = currentConversation?.other_user
+    ? {
+        name:
+          (currentConversation.other_user.user_id &&
+            msgUserProfiles[currentConversation.other_user.user_id]
+              ?.displayName) ||
+          currentConversation.other_user.display_name ||
+          currentConversation.other_user.username ||
+          "Unknown User",
+        avatar:
+          currentConversation.other_user.avatar_url ||
+          "https://picsum.photos/seed/default/100/100",
+      }
+    : FRIEND;
+
+  const arrivedPhotoUrls = new Set(
+    activeMessages
+      .filter((msg) => {
+        const mediaType = String(msg.media_type || msg.mediaType || "").toUpperCase();
+        return mediaType === "PHOTO";
+      })
+      .map((msg) => msg.mediaUrl || msg.media_url)
+      .filter(Boolean),
+  );
+
+  const rawTimeline: TimelineItem[] = [
+    ...activeMessages.filter((msg) => !hiddenMessageIds.has(msg.id)).map((msg) => {
+      const mediaUrl = msg.mediaUrl || msg.media_url || null;
+      const mediaType = String(
+        msg.media_type || msg.mediaType || "",
+      ).toUpperCase();
+      const sharedPost = parseSharedPostPayload(mediaUrl);
+      const sharedStory = parseSharedStoryPayload(mediaUrl);
+      const replyToRaw = msg.reply_to || msg.replyTo || null;
+      return {
+        id: msg.id,
+        kind: "msg" as const,
+        from: (msg.senderId === user?.id ? "me" : "them") as From,
+        text: msg.content,
+        senderId: msg.senderId || msg.sender_id,
+        senderName:
+          msg.senderName ||
+          (msg.senderId === user?.id ? "You" : friendInfo.name),
+        sharedPost,
+        sharedStory,
+        mediaUrl,
+        mediaType,
+        sourceIds: [msg.id],
+        replyTo: replyToRaw
+          ? {
+              id: String(replyToRaw.id || ""),
+              senderId: String(replyToRaw.sender_id || replyToRaw.senderId || ""),
+              senderName: String(
+                replyToRaw.sender_name || replyToRaw.senderName || "Message",
+              ),
+              content: String(replyToRaw.content || ""),
+              mediaType: replyToRaw.media_type || replyToRaw.mediaType || null,
+            }
+          : null,
+        createdAt: msg.timestamp ?? msg.created_at,
+        photoUrls:
+          mediaUrl && mediaType === "PHOTO" && !sharedPost && !sharedStory
+            ? [mediaUrl]
+            : [],
+      };
+    }),
+    ...optimisticPhotoMessages
+      .filter(
+        (message) =>
+          message.conversationId === currentConversation?.id &&
+          (!message.uploadedUrl || !arrivedPhotoUrls.has(message.uploadedUrl)),
+      )
+      .map(
+        (message): Msg => ({
+          id: message.id,
+          kind: "msg",
+          from: "me",
+          text: "Photo",
+          senderId: user?.id ?? "",
+          senderName: "You",
+          sharedPost: null,
+          sharedStory: null,
+          mediaUrl: message.uploadedUrl || message.localUrl,
+          mediaType: "PHOTO",
+          photoUrls: [message.localUrl],
+          sourceIds: [message.id],
+          replyTo: null,
+          createdAt: message.createdAt,
+          optimistic: !message.failed,
+          failed: !!message.failed,
+        }),
+      ),
     ...timelineEvents
       .filter((e) => {
         if (!e.event_type || !isValidEventType(e.event_type)) return false;
@@ -2253,11 +3287,11 @@ export default function MessagingScreen({
     const getMs = (item: TimelineItem): number => {
       const src =
         item.kind === "msg"
-          ? messages.find((m) => m.id === item.id)
+          ? activeMessages.find((m) => m.id === item.id)
           : timelineEvents.find((e) => e.id === item.id);
       const raw =
         item.kind === "msg"
-          ? ((src as any)?.timestamp ?? (src as any)?.created_at)
+          ? (item.createdAt ?? (src as any)?.timestamp ?? (src as any)?.created_at)
           : (src as any)?.created_at;
       if (!raw) return Date.now();
       if (typeof raw === "object" && "toDate" in raw)
@@ -2269,6 +3303,103 @@ export default function MessagingScreen({
     if (tA === tB) return a.kind === "msg" ? -1 : 1;
     return tA - tB;
   });
+
+  const timeline: TimelineItem[] = rawTimeline.reduce<TimelineItem[]>(
+    (items, item) => {
+      const prev = items[items.length - 1];
+      if (
+        item.kind === "msg" &&
+        prev?.kind === "msg" &&
+        item.photoUrls.length > 0 &&
+        prev.photoUrls.length > 0 &&
+        item.from === prev.from
+      ) {
+        items[items.length - 1] = {
+          ...prev,
+          id: item.id,
+          text: prev.text,
+          photoUrls: [...prev.photoUrls, ...item.photoUrls],
+          sourceIds: [...prev.sourceIds, ...item.sourceIds],
+          createdAt: item.createdAt,
+          optimistic: prev.optimistic || item.optimistic,
+          failed: prev.failed || item.failed,
+        };
+        return items;
+      }
+      items.push(item);
+      return items;
+    },
+    [],
+  );
+
+  const getChatPhotos = (): ChatPhoto[] =>
+    timeline.flatMap((item) =>
+      item.kind === "msg"
+        ? item.photoUrls.map((url, index) => ({
+            key: `${item.id}:${index}`,
+            url,
+          }))
+        : [],
+    );
+
+  const openPhotoViewer = (msg: Msg, photoIndex: number) => {
+    const photos = getChatPhotos();
+    const requestedKey = `${msg.id}:${photoIndex}`;
+    const requestedIndex = photos.findIndex(
+      (photo) => photo.key === requestedKey,
+    );
+
+    setPhotoViewer({
+      photos,
+      index: requestedIndex >= 0 ? requestedIndex : 0,
+    });
+  };
+
+  const setReplyFromMessage = (msg: Msg) => {
+    setReplyTarget({
+      id: msg.id,
+      senderId: msg.senderId,
+      senderName: msg.from === "me" ? "You" : msg.senderName || friendInfo.name,
+      content: summarizeMessageForReply(msg),
+      mediaType: msg.mediaType,
+    });
+  };
+
+  const persistHiddenMessageIds = (nextIds: Set<string>) => {
+    if (!currentConversation?.id || !user?.id || typeof window === "undefined")
+      return;
+    localStorage.setItem(
+      `chat_hidden_messages:${user.id}:${currentConversation.id}`,
+      JSON.stringify([...nextIds]),
+    );
+  };
+
+  const deleteMessageForMe = (msg: Msg) => {
+    setHiddenMessageIds((current) => {
+      const next = new Set(current);
+      msg.sourceIds.forEach((id) => next.add(id));
+      persistHiddenMessageIds(next);
+      return next;
+    });
+    if (replyTarget && msg.sourceIds.includes(replyTarget.id)) {
+      setReplyTarget(null);
+    }
+    setMessageActionTarget(null);
+  };
+
+  const deleteMessageForEveryone = async (msg: Msg) => {
+    if (!user?.id || msg.from !== "me") return;
+    setMessageActionTarget(null);
+    try {
+      await Promise.all(msg.sourceIds.map((id) => deleteMessage(id, user.id)));
+      if (replyTarget && msg.sourceIds.includes(replyTarget.id)) {
+        setReplyTarget(null);
+      }
+    } catch (error) {
+      console.error("[MessagingScreen] Failed to delete message:", error);
+      alert("Unable to delete this message for everyone.");
+    }
+  };
 
   const getCollapsed = (eventIndex: number): boolean => {
     let count = 0;
@@ -2349,6 +3480,15 @@ export default function MessagingScreen({
       longTimer.current = null;
     }
     const text = input.trim();
+    const replyPayload = replyTarget
+      ? {
+          id: replyTarget.id,
+          sender_id: replyTarget.senderId,
+          sender_name: replyTarget.senderName,
+          content: replyTarget.content,
+          media_type: replyTarget.mediaType || "TEXT",
+        }
+      : undefined;
     for (const m of [...text.matchAll(/@(\w+)/g)]) {
       const u = m[1];
       if (!trackedMentions.current.has(u)) {
@@ -2379,7 +3519,14 @@ export default function MessagingScreen({
         setTypingIndicator(currentConversation.id, false);
       }
       setStatus("delivered");
-      await sendRealTimeMessage(currentConversation.id, text);
+      await sendRealTimeMessage(
+        currentConversation.id,
+        text,
+        undefined,
+        undefined,
+        replyPayload,
+      );
+      setReplyTarget(null);
       console.log("[MessagingScreen] Message sent successfully");
       clearIgnoredTracking(currentConversation.id);
       setTimeout(() => setStatus("seen"), 2200);
@@ -2390,25 +3537,76 @@ export default function MessagingScreen({
     }
   }
 
+  async function sendPhotoFiles(files: FileList | null) {
+    if (!files?.length) return;
+    if (!currentConversation || !user?.id || frozenRef.current || currentMoodBlock)
+      return;
+
+    const photoFiles = Array.from(files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (photoFiles.length === 0) return;
+
+    const conversation = currentConversation;
+    const optimisticMessages = photoFiles.map((file, index) => ({
+      id: `optimistic-photo-${Date.now()}-${index}-${file.name}`,
+      conversationId: conversation.id,
+      localUrl: URL.createObjectURL(file),
+      file,
+      createdAt: Date.now() + index,
+    }));
+
+    setOptimisticPhotoMessages((current) => [
+      ...current,
+      ...optimisticMessages,
+    ]);
+    setSendingMedia(true);
+    setStatus("delivered");
+
+    void Promise.allSettled(
+      optimisticMessages.map(async (message) => {
+        try {
+          const uploadedPhoto = await uploadOptimizedMedia({
+            source: message.file,
+            userId: user.id,
+            context: "messages",
+            fileName: message.file.name,
+            mediaKind: "image",
+          });
+
+          setOptimisticPhotoMessages((current) =>
+            current.map((item) =>
+              item.id === message.id
+                ? { ...item, uploadedUrl: uploadedPhoto.url }
+                : item,
+            ),
+          );
+
+          await sendRealTimeMessage(
+            conversation.id,
+            "Photo",
+            uploadedPhoto.url,
+            "PHOTO",
+          );
+        } catch (err) {
+          console.error("[MessagingScreen] Failed to send photo:", err);
+          setOptimisticPhotoMessages((current) =>
+            current.map((item) =>
+              item.id === message.id ? { ...item, failed: true } : item,
+            ),
+          );
+        }
+      }),
+    ).then(() => {
+      clearIgnoredTracking(conversation.id);
+      setTimeout(() => setStatus("seen"), 2200);
+      setSendingMedia(false);
+    });
+  }
+
   const lastMineId = [...timeline]
     .reverse()
     .find((item): item is Msg => item.kind === "msg" && item.from === "me")?.id;
-
-  const msgUserProfiles = useProfileDataStore((s) => s.userProfiles);
-  const friendInfo = currentConversation?.other_user
-    ? {
-        name:
-          (currentConversation.other_user.user_id &&
-            msgUserProfiles[currentConversation.other_user.user_id]
-              ?.displayName) ||
-          currentConversation.other_user.display_name ||
-          currentConversation.other_user.username ||
-          "Unknown User",
-        avatar:
-          currentConversation.other_user.avatar_url ||
-          "https://picsum.photos/seed/default/100/100",
-      }
-    : FRIEND;
 
   const menuActions: [string, string, () => void, boolean][] = [
     [
@@ -2860,6 +4058,9 @@ export default function MessagingScreen({
                   showStatus={item.from === "me" && item.id === lastMineId}
                   status={status}
                   onOpenSharedPost={onOpenSharedPost}
+                  onOpenPhoto={openPhotoViewer}
+                  onReply={setReplyFromMessage}
+                  onLongPress={setMessageActionTarget}
                 />
               );
             })}
@@ -2945,11 +4146,82 @@ export default function MessagingScreen({
       <div
         style={{
           flexShrink: 0,
-          padding: "8px 14px calc(20px + env(safe-area-inset-bottom, 0px))",
+          padding: "8px 14px calc(20px + var(--safe-area-bottom))",
           background: "#000",
           boxShadow: "inset 0 -8px 0 #000",
         }}
       >
+        {replyTarget && !currentMoodBlock && !frozen && (
+          <div
+            style={{
+              position: "relative",
+              margin: "0 0 10px 54px",
+              padding: "10px 42px 10px 12px",
+              borderRadius: 16,
+              background:
+                "linear-gradient(135deg, rgba(61,245,127,0.12), rgba(255,255,255,0.045))",
+              border: "1px solid rgba(61,245,127,0.2)",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 3,
+                background: "#3df57f",
+                boxShadow: "0 0 18px rgba(61,245,127,0.8)",
+              }}
+            />
+            <div
+              style={{
+                color: "#86efac",
+                fontSize: 11,
+                fontWeight: 900,
+                marginBottom: 3,
+              }}
+            >
+              Replying to {replyTarget.senderName}
+            </div>
+            <div
+              style={{
+                color: "rgba(255,255,255,0.82)",
+                fontSize: 13,
+                lineHeight: 1.25,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {replyPreviewLabel(replyTarget)}
+            </div>
+            <button
+              type="button"
+              aria-label="Cancel reply"
+              onClick={() => setReplyTarget(null)}
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                width: 28,
+                height: 28,
+                borderRadius: "50%",
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(0,0,0,0.35)",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         {currentMoodBlock ? (
           <div style={{ height: 8 }} />
         ) : frozen ? (
@@ -2980,11 +4252,11 @@ export default function MessagingScreen({
                 height: 44,
                 borderRadius: "50%",
                 border: "none",
-                background: "#222",
+                background: sendingMedia ? "#151515" : "#222",
                 color: "#fff",
-                fontSize: 24,
+                fontSize: sendingMedia ? 13 : 24,
                 fontWeight: 300,
-                cursor: "pointer",
+                cursor: sendingMedia ? "default" : "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -2993,14 +4265,25 @@ export default function MessagingScreen({
                 boxShadow: "0 0 0 1px rgba(255,255,255,0.08)",
                 lineHeight: 1,
                 userSelect: "none",
+                opacity: sendingMedia ? 0.75 : 1,
               }}
             >
-              +
+              {sendingMedia ? "..." : "+"}
               <input
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*"
+                multiple
+                disabled={
+                  sendingMedia ||
+                  sendingMessage ||
+                  !!currentMoodBlock ||
+                  frozenRef.current
+                }
                 style={{ display: "none" }}
                 onChange={async (e) => {
+                  await sendPhotoFiles(e.target.files);
+                  e.target.value = "";
+                  /*
                   const file = e.target.files?.[0];
                   if (file && currentConversation) {
                     try {
@@ -3014,7 +4297,7 @@ export default function MessagingScreen({
                       console.error(err);
                     }
                   }
-                  e.target.value = "";
+                  */
                 }}
               />
             </label>
@@ -3466,6 +4749,169 @@ export default function MessagingScreen({
             </div>
           </div>
         </>
+      )}
+
+      {messageActionTarget && (
+        <div
+          onClick={() => setMessageActionTarget(null)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 70,
+            background: "rgba(0,0,0,0.42)",
+            display: "flex",
+            alignItems: "flex-end",
+            padding: "0 12px calc(14px + var(--safe-area-bottom))",
+            backdropFilter: "blur(8px)",
+            animation: "moodBackdropIn 0.18s ease-out",
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "100%",
+              borderRadius: 26,
+              border: "1px solid rgba(255,255,255,0.1)",
+              background:
+                "linear-gradient(180deg, rgba(24,24,24,0.96), rgba(8,8,8,0.98))",
+              boxShadow:
+                "0 24px 80px rgba(0,0,0,0.58), inset 0 1px 0 rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              transform: "translateY(0)",
+            }}
+          >
+            <div
+              style={{
+                width: 38,
+                height: 4,
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.22)",
+                margin: "10px auto 8px",
+              }}
+            />
+            <div
+              style={{
+                padding: "8px 18px 14px",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <div
+                style={{
+                  color: "#fff",
+                  fontSize: 15,
+                  fontWeight: 900,
+                  marginBottom: 5,
+                }}
+              >
+                Message options
+              </div>
+              <div
+                style={{
+                  color: "rgba(255,255,255,0.48)",
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {summarizeMessageForReply(messageActionTarget)}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setReplyFromMessage(messageActionTarget);
+                setMessageActionTarget(null);
+              }}
+              style={{
+                width: "100%",
+                minHeight: 54,
+                padding: "0 18px",
+                border: "none",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                background: "transparent",
+                color: "#e5e7eb",
+                fontSize: 16,
+                fontWeight: 750,
+                textAlign: "left",
+              }}
+            >
+              Reply
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteMessageForMe(messageActionTarget)}
+              style={{
+                width: "100%",
+                minHeight: 54,
+                padding: "0 18px",
+                border: "none",
+                borderBottom:
+                  messageActionTarget.from === "me" && !messageActionTarget.optimistic
+                    ? "1px solid rgba(255,255,255,0.06)"
+                    : "none",
+                background: "transparent",
+                color: "#f8fafc",
+                fontSize: 16,
+                fontWeight: 750,
+                textAlign: "left",
+              }}
+            >
+              Delete for me
+            </button>
+            {messageActionTarget.from === "me" && !messageActionTarget.optimistic && (
+              <button
+                type="button"
+                onClick={() => void deleteMessageForEveryone(messageActionTarget)}
+                style={{
+                  width: "100%",
+                  minHeight: 54,
+                  padding: "0 18px",
+                  border: "none",
+                  background: "transparent",
+                  color: "#ff8a8a",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  textAlign: "left",
+                }}
+              >
+                Delete for everyone
+              </button>
+            )}
+            <div style={{ padding: "8px" }}>
+              <button
+                type="button"
+                onClick={() => setMessageActionTarget(null)}
+                style={{
+                  width: "100%",
+                  minHeight: 50,
+                  borderRadius: 18,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.82)",
+                  fontSize: 15,
+                  fontWeight: 800,
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {photoViewer && (
+        <ChatPhotoViewer
+          photos={photoViewer.photos}
+          index={photoViewer.index}
+          onIndexChange={(index) =>
+            setPhotoViewer((current) =>
+              current ? { ...current, index } : current,
+            )
+          }
+          onClose={() => setPhotoViewer(null)}
+        />
       )}
     </div>
   );

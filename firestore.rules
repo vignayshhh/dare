@@ -355,7 +355,22 @@ service cloud.firestore {
     // Reads stay open so `onSnapshot` realtime remains unchanged.
     match /post_likes/{likeId} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow create: if isSignedIn()
+        && likeId == request.resource.data.post_id + "_" + request.auth.uid
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'post_id', 'user_id', 'tap_count', 'created_at', 'updated_at'
+           ])
+        && requiredString('post_id', 128)
+        && request.resource.data.tap_count == 1;
+      allow update: if isSignedIn()
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == resource.data.user_id
+        && request.resource.data.post_id == resource.data.post_id
+        && onlyChanges(['tap_count', 'updated_at'])
+        && request.resource.data.tap_count == resource.data.tap_count + 1;
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
     }
 
     // ─── POST COMMENTS ──────────────────────────────────────────────────
@@ -367,7 +382,16 @@ service cloud.firestore {
     match /post_comments/{commentId} {
       allow read: if isSignedIn();
 
-      allow create: if false; // server-only (API route)
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'post_id', 'user_id', 'content', 'text', 'likes',
+             'parent_id', 'created_at', 'updated_at'
+           ])
+        && requiredString('post_id', 128)
+        && stringUnder('content', 2000)
+        && stringUnder('text', 2000)
+        && request.resource.data.likes == 0;
 
       allow update: if isSignedIn()
         && resource.data.user_id == request.auth.uid

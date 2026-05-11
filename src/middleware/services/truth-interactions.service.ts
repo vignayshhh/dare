@@ -18,6 +18,7 @@ import {
   serverTimestamp,
   Unsubscribe,
 } from "firebase/firestore";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -254,7 +255,7 @@ class TruthInteractionsService {
       }
       return data;
     } catch (error) {
-      console.error("❌ getUserProfile:", error);
+      logFirestoreError("getUserProfile failed:", error);
       return null;
     }
   }

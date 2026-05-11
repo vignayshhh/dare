@@ -23,6 +23,23 @@ function readCookie(name: string): string | null {
   return null;
 }
 
+function ensureCsrfToken(): string | null {
+  const existing = readCookie("csrf-token");
+  if (existing || typeof document === "undefined") return existing;
+
+  const token =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  const sameSite = window.location.protocol === "https:" ? "Strict" : "Lax";
+  document.cookie = `csrf-token=${encodeURIComponent(
+    token,
+  )}; Path=/; Max-Age=3600; SameSite=${sameSite}${secure}`;
+
+  return token;
+}
+
 async function waitForIdToken(timeoutMs = 5000): Promise<string> {
   const user = auth.currentUser;
   if (user) return user.getIdToken();
@@ -55,7 +72,7 @@ export async function apiFetch<T = unknown>(
   opts: ApiFetchOptions = {},
 ): Promise<T> {
   const token = await waitForIdToken();
-  const csrf = readCookie("csrf-token");
+  const csrf = ensureCsrfToken();
   // Window.turnstile widget stashes the latest response on window; pick
   // it up if present. Ignored server-side when TURNSTILE_SECRET_KEY unset.
   const turnstile =

@@ -6,6 +6,7 @@ import { Avatar } from "../ui/Avatar";
 import { friendsService } from "../../middleware/services/service-factory";
 import { closeFriendsService } from "../../middleware/services/service-factory";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 interface FriendsScreenProps {
   onBack: () => void;
@@ -56,7 +57,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
           setFriendsList([]);
         }
       } catch (error) {
-        console.error("Error loading friends:", error);
+        logFirestoreError("Error loading friends:", error);
         setFriendsList([]);
       } finally {
         setLoadingFriends(false);
@@ -79,7 +80,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
         if (!isMounted) return;
         setCloseFriendsList(response.success ? response.friends || [] : []);
       } catch (error) {
-        console.error("Error loading close friends:", error);
+        logFirestoreError("Error loading close friends:", error);
         if (isMounted) {
           setCloseFriendsList([]);
         }
@@ -103,7 +104,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
         minHeight: "100dvh",
         background: "#0a0a0a",
         fontFamily: "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
-        paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
+        paddingBottom: "calc(20px + var(--safe-area-bottom))",
       }}
     >
       {/* Header */}

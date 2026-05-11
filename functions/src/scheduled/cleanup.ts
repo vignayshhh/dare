@@ -4,7 +4,7 @@
  *   - stories: delete expired stories (server-side authoritative).
  *   - ephemeral_events: prune > 7 days.
  */
-import { onSchedule } from "firebase-functions";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { logger } from "firebase-functions";
 import { adminDb } from "../lib/admin";
 

@@ -14,6 +14,7 @@ import {
   documentId,
 } from "firebase/firestore";
 import { userService, UserProfile } from "./user.service";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 export type FriendshipStatus = "pending" | "accepted" | "rejected";
 
@@ -287,7 +288,7 @@ class FriendsService {
       });
       return result;
     } catch (error) {
-      console.error("Error getting friendship between users:", error);
+      logFirestoreError("Error getting friendship between users:", error);
       return null;
     }
   }
@@ -320,7 +321,7 @@ class FriendsService {
 
       return requests;
     } catch (error) {
-      console.error("Error getting friend requests:", error);
+      logFirestoreError("Error getting friend requests:", error);
       return [];
     }
   }
@@ -343,7 +344,7 @@ class FriendsService {
       this.inFlightFriendsRequests.set(userId, request);
       return request;
     } catch (error) {
-      console.error("Error getting friends:", error);
+      logFirestoreError("Error getting friends:", error);
       return [];
     }
   }
@@ -430,7 +431,7 @@ class FriendsService {
       this.setCachedFriends(userId, friends);
       return friends;
     } catch (error) {
-      console.error("Error getting friends:", error);
+      logFirestoreError("Error getting friends:", error);
       return [];
     }
   }
@@ -451,7 +452,7 @@ class FriendsService {
       }
       return true;
     } catch (error) {
-      console.error("Error removing friend:", error);
+      logFirestoreError("Error removing friend:", error);
       return false;
     }
   }
@@ -499,7 +500,7 @@ class FriendsService {
       const friendship = await this.getFriendshipBetweenUsers(userId1, userId2);
       return friendship?.status === "accepted" || false;
     } catch (error) {
-      console.error("Error checking friendship status:", error);
+      logFirestoreError("Error checking friendship status:", error);
       return false;
     }
   }
@@ -509,7 +510,7 @@ class FriendsService {
       const friends = await this.getFriends(userId);
       return friends.length;
     } catch (error) {
-      console.error("Error getting friends count:", error);
+      logFirestoreError("Error getting friends count:", error);
       return 0;
     }
   }

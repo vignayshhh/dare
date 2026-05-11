@@ -27,7 +27,28 @@ function getAdminApp(): App {
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      return initializeApp({ credential: cert(parsed) });
+      const svcProject: string | undefined = parsed.project_id;
+      const clientProject = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+      if (svcProject && clientProject && svcProject !== clientProject) {
+        // This is the #1 reason for prod-only 401s on every authenticated
+        // route: the service account belongs to a different Firebase
+        // project than the client, so every ID token's `aud` fails
+        // verification. Log loudly so the deploy logs make it obvious.
+        // eslint-disable-next-line no-console
+        console.error(
+          `[firebase-admin] PROJECT MISMATCH: service account project_id="${svcProject}" ` +
+            `but NEXT_PUBLIC_FIREBASE_PROJECT_ID="${clientProject}". ` +
+            `All verifyIdToken calls will return 401. ` +
+            `Fix: replace FIREBASE_SERVICE_ACCOUNT_JSON with a key from project "${clientProject}".`,
+        );
+      } else if (svcProject) {
+        // eslint-disable-next-line no-console
+        console.log(`[firebase-admin] initialised for project="${svcProject}"`);
+      }
+      return initializeApp({
+        credential: cert(parsed),
+        projectId: svcProject,
+      });
     } catch (e) {
       throw new Error(
         "FIREBASE_SERVICE_ACCOUNT_JSON is set but not valid JSON: " +

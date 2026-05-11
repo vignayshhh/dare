@@ -28,6 +28,7 @@ import {
   validateOptionalBio,
   validateUsername,
 } from "@/security/appSecurity";
+import { isFirestoreOfflineError } from "@/utils/firestoreErrors";
 import { checkRateLimit } from "@/security/rateLimiter";
 import { twoFactorAuthService } from "@/security/twoFactorAuth";
 
@@ -236,6 +237,12 @@ class AuthService {
       );
     } catch (error) {
       secureLogError("loadProfile failed", error);
+      if (isFirestoreOfflineError(error)) {
+        const cachedUser = this.restoreFromCache();
+        if (cachedUser?.id === firebaseUser.uid) {
+          return cachedUser;
+        }
+      }
       return null;
     }
   }

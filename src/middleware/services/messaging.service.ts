@@ -8,6 +8,7 @@ import {
   query,
   where,
   getDocs,
+  deleteDoc,
   orderBy,
   limit,
   serverTimestamp,
@@ -25,6 +26,7 @@ import {
   resolveUserProfile,
 } from "@/utils/profileResolver";
 import { validateRequiredText, SECURITY_LIMITS } from "@/security/appSecurity";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 export interface Message {
   id: string;
@@ -37,6 +39,13 @@ export interface Message {
   updated_at: string;
   is_delivered: boolean;
   is_seen: boolean;
+  reply_to?: {
+    id: string;
+    sender_id: string;
+    sender_name: string;
+    content: string;
+    media_type?: "TEXT" | "PHOTO" | "VIDEO" | string | null;
+  } | null;
 }
 
 export interface Conversation {
@@ -224,7 +233,7 @@ class MessagingService {
       }
       return null;
     } catch (error) {
-      console.error("❌ getConversationBetweenUsers:", error);
+      logFirestoreError("getConversationBetweenUsers failed:", error);
       return null;
     }
   }
@@ -262,7 +271,7 @@ class MessagingService {
       if (!snap.exists()) return null;
       return { id: snap.id, ...snap.data() } as Conversation;
     } catch (error) {
-      console.error("❌ getConversation:", error);
+      logFirestoreError("getConversation failed:", error);
       return null;
     }
   }
@@ -319,7 +328,7 @@ class MessagingService {
         typing_speed: typingStatus?.typing_speed,
       };
     } catch (error) {
-      console.error("❌ getConversationWithUser:", error);
+      logFirestoreError("getConversationWithUser failed:", error);
       return null;
     }
   }
@@ -355,7 +364,7 @@ class MessagingService {
 
       return results;
     } catch (error) {
-      console.error("❌ getConversationsForUser:", error);
+      logFirestoreError("getConversationsForUser failed:", error);
       return [];
     }
   }
@@ -435,6 +444,7 @@ class MessagingService {
     mediaUrl?: string,
     mediaType?: "TEXT" | "PHOTO" | "VIDEO",
     recipientId?: string,
+    replyTo?: Message["reply_to"],
   ): Promise<MessageWithSender> {
     try {
       // SECURITY: Validate message content client-side before sending to Firestore
@@ -479,6 +489,7 @@ class MessagingService {
         is_seen: false,
       };
       if (mediaUrl) data.media_url = mediaUrl;
+      if (replyTo) data.reply_to = replyTo;
 
       await setDoc(messageRef, data);
 
@@ -519,6 +530,7 @@ class MessagingService {
         },
       };
       if (mediaUrl) (message as any).media_url = mediaUrl;
+      if (replyTo) (message as any).reply_to = replyTo;
 
       await this.createMessageEvent({
         conversation_id: conversationId,
@@ -530,6 +542,15 @@ class MessagingService {
       return message;
     } catch (error) {
       console.error("❌ sendMessageWithDelivery:", error);
+      throw error;
+    }
+  }
+
+  async deleteMessageForEveryone(messageId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, "messages", messageId));
+    } catch (error) {
+      console.error("❌ deleteMessageForEveryone:", error);
       throw error;
     }
   }
@@ -579,7 +600,7 @@ class MessagingService {
         };
       });
     } catch (error) {
-      console.error("❌ getOlderMessages:", error);
+      logFirestoreError("getOlderMessages failed:", error);
       return [];
     }
   }
@@ -594,7 +615,7 @@ class MessagingService {
       const snap = await getDocs(q);
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Message);
     } catch (error) {
-      console.error("❌ getMessages:", error);
+      logFirestoreError("getMessages failed:", error);
       return [];
     }
   }
@@ -1558,7 +1579,7 @@ class MessagingService {
         },
       };
     } catch (error) {
-      console.error("❌ getLastMessage:", error);
+      logFirestoreError("getLastMessage failed:", error);
       return undefined;
     }
   }
@@ -1582,7 +1603,7 @@ class MessagingService {
       });
       return count;
     } catch (error) {
-      console.error("❌ getUnreadCount:", error);
+      logFirestoreError("getUnreadCount failed:", error);
       return 0;
     }
   }
@@ -1752,7 +1773,7 @@ class MessagingService {
       if (!snap.exists()) return null;
       return primeResolvedUserProfile(userId, { id: snap.id, ...snap.data() });
     } catch (error) {
-      console.error("❌ getUserProfile:", error);
+      logFirestoreError("getUserProfile failed:", error);
       return null;
     }
   }

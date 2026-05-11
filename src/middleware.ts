@@ -32,6 +32,17 @@ function getClientIp(req: NextRequest): string | null {
   return null;
 }
 
+function getHostname(value?: string | null): string | null {
+  if (!value) return null;
+
+  try {
+    const normalized = value.includes("://") ? value : `https://${value}`;
+    return new URL(normalized).hostname.toLowerCase();
+  } catch {
+    return value.split(":")[0]?.toLowerCase() || null;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   // ── IP blocklist (§2.8) ─────────────────────────────────────────────
   if (redis) {
@@ -86,14 +97,24 @@ export async function middleware(request: NextRequest) {
           return new NextResponse("Invalid origin", { status: 403 });
         }
       } else {
-        // In production, allow specific production URLs or strict same-origin
-        const allowedProductionHosts = [
-          "dare-g5ijg25ue-vignayshhhs-projects.vercel.app",
-          "dare-web-app.vercel.app",
-        ];
+        // In production, prefer strict same-origin, but account for hosts
+        // rewritten by proxies/platforms and configured deployment URLs.
+        const allowedProductionHosts = new Set(
+          [
+            getHostname(host),
+            getHostname(request.headers.get("x-forwarded-host")),
+            getHostname(request.nextUrl.hostname),
+            getHostname(process.env.NEXT_PUBLIC_APP_URL),
+            getHostname(process.env.VERCEL_URL),
+            "dare-g5ijg25ue-vignayshhhs-projects.vercel.app",
+            "dare-web-app.vercel.app",
+          ]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.toLowerCase()),
+        );
         if (
           originUrl.hostname !== new URL(hostUrl).hostname &&
-          !allowedProductionHosts.includes(originUrl.hostname)
+          !allowedProductionHosts.has(originUrl.hostname.toLowerCase())
         ) {
           return new NextResponse("Invalid origin", { status: 403 });
         }

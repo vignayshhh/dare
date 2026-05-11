@@ -41,6 +41,8 @@ import { profileSyncService } from "../../services/profileSyncService";
 import { useProfileDataStore } from "../../stores/profileDataStore";
 import { surveillanceService } from "../../middleware/services/surveillance.service";
 import { backgroundPreCache } from "../../utils/backgroundPreCache";
+import { isFirestoreOfflineError, logFirestoreError } from "@/utils/firestoreErrors";
+import { usePwaScreenHistory } from "../../hooks/usePwaScreenHistory";
 import { dareService } from "../../middleware/services/service-factory";
 import type {
   TruthPost,
@@ -75,6 +77,20 @@ type DaresNavigationRequest = {
   highlightDareId?: string;
   highlightTruthId?: string;
   nonce: number;
+};
+
+type AppHistorySnapshot = {
+  chatConversationId: string;
+  daresNavigationRequest: DaresNavigationRequest | null;
+  dailyChallengeSkipWait: boolean;
+  lastActiveChatUserId: string;
+  lastActiveConversationId: string;
+  previousScreen: Screen;
+  selectedUserCommentId: string;
+  selectedUserDareId: string;
+  selectedUserId: string;
+  selectedUserPostId: string;
+  selectedUserTruthId: string;
 };
 
 function getScreenLayerClassName(
@@ -211,6 +227,39 @@ export default function AuthenticatedApp() {
   const [daresNavigationRequest, setDaresNavigationRequest] =
     useState<DaresNavigationRequest | null>(null);
   const [isStoryViewerOpen, setIsStoryViewerOpen] = useState(false);
+  const goBackInApp = usePwaScreenHistory<Screen, AppHistorySnapshot>(
+    currentScreen,
+    setCurrentScreen,
+    {
+      enabled: mounted && isAuthenticated && !!user,
+      snapshot: {
+        chatConversationId,
+        daresNavigationRequest,
+        dailyChallengeSkipWait,
+        lastActiveChatUserId,
+        lastActiveConversationId,
+        previousScreen,
+        selectedUserCommentId,
+        selectedUserDareId,
+        selectedUserId,
+        selectedUserPostId,
+        selectedUserTruthId,
+      },
+      restoreSnapshot: (snapshot) => {
+        setChatConversationId(snapshot.chatConversationId);
+        setDaresNavigationRequest(snapshot.daresNavigationRequest);
+        setDailyChallengeSkipWait(snapshot.dailyChallengeSkipWait);
+        setLastActiveChatUserId(snapshot.lastActiveChatUserId);
+        setLastActiveConversationId(snapshot.lastActiveConversationId);
+        setPreviousScreen(snapshot.previousScreen);
+        setSelectedUserCommentId(snapshot.selectedUserCommentId);
+        setSelectedUserDareId(snapshot.selectedUserDareId);
+        setSelectedUserId(snapshot.selectedUserId);
+        setSelectedUserPostId(snapshot.selectedUserPostId);
+        setSelectedUserTruthId(snapshot.selectedUserTruthId);
+      },
+    },
+  );
 
   useEffect(() => {
     if (!user?.id || !isAuthenticated) return;
@@ -469,7 +518,7 @@ export default function AuthenticatedApp() {
   };
 
   const handleBackToMain = () => {
-    setCurrentScreen("feed");
+    goBackInApp("feed");
   };
 
   const updateCurrentChatPresence = (
@@ -489,7 +538,7 @@ export default function AuthenticatedApp() {
       },
       { merge: true },
     ).catch((error) => {
-      console.error("Error updating current chat presence:", error);
+      logFirestoreError("Error updating current chat presence:", error);
     });
   };
 
@@ -556,6 +605,9 @@ export default function AuthenticatedApp() {
           previousChatUserId,
         );
       } catch (error) {
+        if (isFirestoreOfflineError(error)) {
+          return;
+        }
         console.error("Error emitting chat switch:", error);
       }
     })();
@@ -716,7 +768,7 @@ export default function AuthenticatedApp() {
         return (
           <div className="app-overlay-screen full-height-scroll">
             <MessagingScreen
-              onBack={() => setCurrentScreen("chat-list")}
+              onBack={() => goBackInApp("chat-list")}
               conversationId={chatConversationId || undefined}
               onConversationActiveChange={(id, otherUserId) => {
                 lastActiveConversationIdRef.current = id;
@@ -788,7 +840,7 @@ export default function AuthenticatedApp() {
         return (
           <div className="app-overlay-screen full-height-scroll">
             <UserProfileScreen
-              onBack={() => setCurrentScreen(previousScreen)}
+              onBack={() => goBackInApp(previousScreen)}
               userId={selectedUserId}
               onMessage={handleMessageUser}
               onNavigateToProfile={handleUserSelect}
@@ -854,7 +906,7 @@ export default function AuthenticatedApp() {
               isActive={effectiveScreen === "daily-match"}
               skipWaitEnabled={dailyChallengeSkipWait}
               onSkipWait={() => setDailyChallengeSkipWait(true)}
-              onBack={() => setCurrentScreen("daily")}
+              onBack={() => goBackInApp("daily")}
               onOpenConversation={handleChatSelect}
             />
           </div>
@@ -887,7 +939,8 @@ export default function AuthenticatedApp() {
   }
 
   return (
-    <div className="app-fixed-viewport relative overflow-hidden bg-[#0a0f0a]">
+    <LaunchGate>
+      <div className="app-fixed-viewport relative overflow-hidden bg-[#0a0f0a]">
       <div
         className={getScreenLayerClassName(effectiveScreen === "feed")}
       >
@@ -939,7 +992,7 @@ export default function AuthenticatedApp() {
         <DailyChallengeScreen
           isActive={effectiveScreen === "daily"}
           skipWaitEnabled={dailyChallengeSkipWait}
-          onBack={() => setCurrentScreen("feed")}
+          onBack={() => goBackInApp("feed")}
           onSkipWait={() => setDailyChallengeSkipWait(true)}
           onStartMatch={() => setCurrentScreen("daily-match")}
         />
@@ -968,6 +1021,7 @@ export default function AuthenticatedApp() {
           onCreateClick={handleCreateClick}
         />
       )}
-    </div>
+      </div>
+    </LaunchGate>
   );
 }

@@ -351,7 +351,6 @@ export function UserSearchScreen({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by username or display name"
                 className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-[#64748b]"
-                autoFocus
               />
               {searchQuery ? (
                 <button

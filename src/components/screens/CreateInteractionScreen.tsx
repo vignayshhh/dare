@@ -285,7 +285,7 @@ export function CreateInteractionScreen({
         </div>
       </div>
 
-      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-[calc(126px+env(safe-area-inset-bottom,0px))] pt-5">
+      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-[calc(126px+var(--safe-area-bottom))] pt-5">
         <div className="relative mb-5 overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(145deg,rgba(22,27,22,0.98),rgba(8,10,8,0.99))] p-5 shadow-[0_24px_72px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.055)]">
           <div
             className="pointer-events-none absolute inset-x-0 top-0 h-px"
@@ -504,7 +504,7 @@ export function CreateInteractionScreen({
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/8 bg-[linear-gradient(180deg,rgba(5,7,5,0.82),rgba(5,7,5,0.98))] px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))] pt-4 backdrop-blur-xl">
+      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/8 bg-[linear-gradient(180deg,rgba(5,7,5,0.82),rgba(5,7,5,0.98))] px-4 pb-[calc(16px+var(--safe-area-bottom))] pt-4 backdrop-blur-xl">
         <div className="mx-auto max-w-2xl">
           <button
             onClick={handleSubmit}

@@ -2,6 +2,7 @@ import { db } from "@/backend/lib/firebase";
 import { collection, query, where, getDocs, doc } from "firebase/firestore";
 import { useAvatarStore } from "../stores/avatarStore";
 import { userDocSubscriptionService } from "./userDocSubscriptionService";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 /**
  * Avatar Synchronization Service
@@ -176,7 +177,7 @@ class AvatarSyncService {
         }
       }
     } catch (error) {
-      console.error(`Error refreshing avatar for user ${userId}:`, error);
+      logFirestoreError(`Error refreshing avatar for user ${userId}:`, error);
     }
   }
 

@@ -4,8 +4,9 @@
 
 import { db } from "@/backend/lib/firebase";
 import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
-// ---------------------------------------------------------------------------  
+// ---------------------------------------------------------------------------
 // Types and DTOs
 // ---------------------------------------------------------------------------
 
@@ -25,7 +26,7 @@ export interface GhostModeActivationRequest {
   expiresAt?: string | Date;
 }
 
-// ---------------------------------------------------------------------------  
+// ---------------------------------------------------------------------------
 // Ghost Mode Service
 // ---------------------------------------------------------------------------
 
@@ -45,7 +46,7 @@ class GhostModeService {
   async getGhostModeStatus(userId: string): Promise<GhostModeStatus> {
     try {
       const ghostDoc = await getDoc(doc(db, this.COLLECTION_NAME, userId));
-      
+
       if (!ghostDoc.exists()) {
         return {
           userId,
@@ -70,12 +71,13 @@ class GhostModeService {
       return {
         userId,
         isActive: true,
-        activatedAt: data.activatedAt?.toDate?.()?.toISOString() || data.activatedAt,
+        activatedAt:
+          data.activatedAt?.toDate?.()?.toISOString() || data.activatedAt,
         expiresAt: expiresAt.toISOString(),
         dareId: data.dareId,
       };
     } catch (error) {
-      console.error("Error checking ghost mode status:", error);
+      logFirestoreError("Error checking ghost mode status:", error);
       return {
         userId,
         isActive: false,
@@ -88,8 +90,11 @@ class GhostModeService {
    */
   async activateGhostMode(request: GhostModeActivationRequest): Promise<void> {
     try {
-      const { userId, dareId, durationMinutes = this.DEFAULT_DURATION_MINUTES } =
-        request;
+      const {
+        userId,
+        dareId,
+        durationMinutes = this.DEFAULT_DURATION_MINUTES,
+      } = request;
       const activatedAt =
         this.resolveDateInput(request.activatedAt) || new Date();
       const explicitExpiresAt = this.resolveDateInput(request.expiresAt);
@@ -131,11 +136,16 @@ class GhostModeService {
       ancillaryWrites.forEach((result, index) => {
         if (result.status === "rejected") {
           const target = index === 0 ? "users" : "presence";
-          console.warn(`Ghost mode ancillary ${target} write failed:`, result.reason);
+          console.warn(
+            `Ghost mode ancillary ${target} write failed:`,
+            result.reason,
+          );
         }
       });
-      
-      console.log(`Ghost mode activated for user ${userId} until ${expiresAt.toISOString()}`);
+
+      console.log(
+        `Ghost mode activated for user ${userId} until ${expiresAt.toISOString()}`,
+      );
     } catch (error) {
       console.error("Error activating ghost mode:", error);
       throw error;
@@ -176,7 +186,7 @@ class GhostModeService {
           { merge: true },
         ),
       ]);
-      
+
       console.log(`Ghost mode deactivated for user ${userId}`);
     } catch (error) {
       console.error("Error deactivating ghost mode:", error);
@@ -198,7 +208,7 @@ class GhostModeService {
    */
   async getRemainingTime(userId: string): Promise<number> {
     const status = await this.getGhostModeStatus(userId);
-    
+
     if (!status.isActive || !status.expiresAt) {
       return 0;
     }
@@ -206,7 +216,7 @@ class GhostModeService {
     const now = new Date();
     const expiresAt = new Date(status.expiresAt);
     const remainingMs = expiresAt.getTime() - now.getTime();
-    
+
     return Math.max(0, Math.floor(remainingMs / 1000));
   }
 
@@ -215,15 +225,15 @@ class GhostModeService {
    */
   async getFormattedRemainingTime(userId: string): Promise<string> {
     const remainingSeconds = await this.getRemainingTime(userId);
-    
+
     if (remainingSeconds === 0) {
       return "00:00";
     }
 
     const minutes = Math.floor(remainingSeconds / 60);
     const seconds = remainingSeconds % 60;
-    
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
 
   /**
@@ -231,7 +241,7 @@ class GhostModeService {
    */
   subscribeToGhostMode(
     userId: string,
-    callback: (status: GhostModeStatus) => void
+    callback: (status: GhostModeStatus) => void,
   ): () => void {
     const unsubscribe = import("firebase/firestore").then(({ onSnapshot }) => {
       return onSnapshot(doc(db, this.COLLECTION_NAME, userId), (doc) => {
@@ -245,7 +255,8 @@ class GhostModeService {
 
         const data = doc.data();
         const now = new Date();
-        const expiresAt = data.expiresAt?.toDate?.() || new Date(data.expiresAt);
+        const expiresAt =
+          data.expiresAt?.toDate?.() || new Date(data.expiresAt);
 
         // Check if expired
         if (now > expiresAt) {
@@ -259,7 +270,8 @@ class GhostModeService {
         callback({
           userId,
           isActive: data.isActive || false,
-          activatedAt: data.activatedAt?.toDate?.()?.toISOString() || data.activatedAt,
+          activatedAt:
+            data.activatedAt?.toDate?.()?.toISOString() || data.activatedAt,
           expiresAt: expiresAt.toISOString(),
           dareId: data.dareId,
         });
@@ -267,7 +279,7 @@ class GhostModeService {
     });
 
     return () => {
-      unsubscribe.then(unsub => unsub());
+      unsubscribe.then((unsub) => unsub());
     };
   }
 }

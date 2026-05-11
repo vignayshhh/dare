@@ -159,46 +159,45 @@ export const useAlertStore = create<AlertState>((set, get) => ({
           query,
           where,
           onSnapshot,
-          orderBy,
-          limit,
         }) => {
           const db = getFirestore();
           const alertsRef = collection(db, "alerts");
-          const q = query(
-            alertsRef,
-            where("userId", "==", userId),
-            orderBy("createdAt", "desc"),
-            limit(50), // Keep enough recent alerts to cover both Social and Sus tabs
-          );
+          const q = query(alertsRef, where("userId", "==", userId));
 
           unsubscribe = onSnapshot(
             q,
             (snapshot) => {
-              const alerts = snapshot.docs.map((doc) => {
-                const data = doc.data();
+              const alerts = snapshot.docs
+                .map((doc) => {
+                  const data = doc.data();
 
-                // Create proper AlertEntity instance with methods
-                const alertEntity = AlertEntity.create({
-                  id: doc.id,
-                  userId: data.userId || "",
-                  type: data.type || "SYSTEM_NOTIFICATION",
-                  entityId: data.entityId || "",
-                  actorId: data.actorId || "",
-                  message: data.message || "",
-                  metadata: data.metadata || {},
-                  isRead: data.isRead || false,
-                  createdAt:
-                    data.createdAt?.toDate?.()?.toISOString?.() ||
-                    data.createdAt ||
-                    new Date().toISOString(),
-                  updatedAt:
-                    data.updatedAt?.toDate?.()?.toISOString?.() ||
-                    data.updatedAt ||
-                    new Date().toISOString(),
-                });
+                  // Create proper AlertEntity instance with methods
+                  const alertEntity = AlertEntity.create({
+                    id: doc.id,
+                    userId: data.userId || "",
+                    type: data.type || "SYSTEM_NOTIFICATION",
+                    entityId: data.entityId || "",
+                    actorId: data.actorId || "",
+                    message: data.message || "",
+                    metadata: data.metadata || {},
+                    isRead: data.isRead || false,
+                    createdAt:
+                      data.createdAt?.toDate?.()?.toISOString?.() ||
+                      data.createdAt ||
+                      new Date().toISOString(),
+                    updatedAt:
+                      data.updatedAt?.toDate?.()?.toISOString?.() ||
+                      data.updatedAt ||
+                      new Date().toISOString(),
+                  });
 
-                return alertEntity;
-              });
+                  return alertEntity;
+                })
+                .sort(
+                  (a, b) =>
+                    new Date(b.createdAt).getTime() -
+                    new Date(a.createdAt).getTime(),
+                );
 
               set({
                 alerts,

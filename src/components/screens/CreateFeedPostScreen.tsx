@@ -217,7 +217,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
         </div>
       </div>
 
-      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-[calc(124px+env(safe-area-inset-bottom,0px))] pt-5">
+      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-[calc(124px+var(--safe-area-bottom))] pt-5">
         {!selectedMedia && (
           <div className="mb-6">
             <button
@@ -427,7 +427,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/8 bg-[linear-gradient(180deg,rgba(5,7,5,0.82),rgba(5,7,5,0.98))] px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))] pt-4 backdrop-blur-xl">
+      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/8 bg-[linear-gradient(180deg,rgba(5,7,5,0.82),rgba(5,7,5,0.98))] px-4 pb-[calc(16px+var(--safe-area-bottom))] pt-4 backdrop-blur-xl">
         <div className="mx-auto max-w-2xl">
           <button
             onClick={handleCreatePost}

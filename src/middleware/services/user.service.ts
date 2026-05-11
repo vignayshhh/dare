@@ -11,6 +11,7 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import { redisCache } from "@/services/redisCache.server";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 export interface UserProfile {
   id: string;
@@ -80,7 +81,7 @@ class UserService {
 
       return profile;
     } catch (error) {
-      console.error("Error fetching profile:", error);
+      logFirestoreError("Error fetching profile:", error);
       return null;
     }
   }
@@ -300,7 +301,7 @@ class UserService {
 
       return uniqueUsers;
     } catch (error) {
-      console.error("Error searching profiles:", error);
+      logFirestoreError("Error searching profiles:", error);
       return [];
     }
   }
@@ -326,7 +327,7 @@ class UserService {
 
       return publicUsers;
     } catch (error) {
-      console.error("Error fetching public profiles:", error);
+      logFirestoreError("Error fetching public profiles:", error);
       return [];
     }
   }
@@ -363,7 +364,7 @@ class UserService {
       await updateDoc(userRef, updates);
       return true;
     } catch (error) {
-      console.error("Error updating dares stats:", error);
+      logFirestoreError("Error updating dares stats:", error);
       return false;
     }
   }

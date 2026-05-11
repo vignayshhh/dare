@@ -344,13 +344,31 @@ export function AlertsScreen({
     return () => unsub();
   }, [currentUser?.id]);
 
+  const getAlertActivityTime = (alert: AlertEntity) => {
+    if (alert.type !== "SUS_PROFILE_VIEWING") {
+      return alert.createdAt;
+    }
+
+    const profileViewTime = alert.metadata?.isLive
+      ? alert.metadata?.viewingStartTime
+      : alert.metadata?.viewingEndTime || alert.metadata?.viewingStartTime;
+
+    if (profileViewTime) {
+      return typeof profileViewTime === "number"
+        ? new Date(profileViewTime).toISOString()
+        : profileViewTime;
+    }
+
+    return alert.updatedAt || alert.createdAt;
+  };
+
   // Group alerts by time
   const groupAlertsByTime = (alerts: AlertEntity[]) => {
     const today: AlertEntity[] = [];
     const yesterday: AlertEntity[] = [];
 
     alerts.forEach((alert) => {
-      const alertTime = new Date(alert.createdAt);
+      const alertTime = new Date(getAlertActivityTime(alert));
       const now = new Date();
       const diffInHours =
         (now.getTime() - alertTime.getTime()) / (1000 * 60 * 60);
@@ -588,7 +606,10 @@ export function AlertsScreen({
           actorUsername: inactiveUsername.replace(/^@/, ""),
         })
         .updateMessage(
-          getProfileViewStatusMessage(alert.createdAt, inactiveUsername),
+          getProfileViewStatusMessage(
+            getAlertActivityTime(alert),
+            inactiveUsername,
+          ),
         );
     }
 
@@ -624,7 +645,8 @@ export function AlertsScreen({
         )
         .sort(
           (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+            new Date(getAlertActivityTime(b)).getTime() -
+            new Date(getAlertActivityTime(a)).getTime(),
         )[0];
 
       return latestForActor?.id === alert.id;
@@ -659,7 +681,9 @@ export function AlertsScreen({
     );
 
   const susAlertsForDisplay = [...syntheticLiveAlerts, ...mergedSusAlerts].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) =>
+      new Date(getAlertActivityTime(b)).getTime() -
+      new Date(getAlertActivityTime(a)).getTime(),
   );
 
   const { today: susToday, yesterday: susYesterday } =
@@ -1118,7 +1142,7 @@ export function AlertsScreen({
                 </span>
               </div>
               <span className="shrink-0 pt-1 text-[11px] font-medium text-[#64748b]">
-                {getTimeAgo(alert.createdAt)}
+                {getTimeAgo(getAlertActivityTime(alert))}
               </span>
             </div>
 
@@ -1394,7 +1418,7 @@ export function AlertsScreen({
                 </span>
               </div>
               <span className="shrink-0 pt-1 text-[11px] font-medium text-[#64748b]">
-                {getTimeAgo(alert.createdAt)}
+                {getTimeAgo(getAlertActivityTime(alert))}
               </span>
             </div>
 

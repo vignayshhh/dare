@@ -142,6 +142,7 @@ function DesktopNavigation({
 
 import { BottomNavigation } from "../navigation/BottomNavigation";
 import { GuestMainScreen } from "./GuestMainScreen";
+import { usePwaScreenHistory } from "../../hooks/usePwaScreenHistory";
 import { formatTimeAgo } from "../../utils/timeFormat";
 import {
   guestUser,
@@ -508,7 +509,7 @@ function GuestStoryViewerModal({
 
         <div className="flex-1" />
 
-        <div className="px-4 pb-[calc(28px+env(safe-area-inset-bottom))]">
+        <div className="px-4 pb-[calc(28px+var(--safe-area-bottom))]">
           <div className="rounded-[30px] border border-white/10 bg-black/30 p-4 backdrop-blur-xl">
             <div className="mb-3 flex items-center justify-between gap-3">
               <p className="text-base font-semibold text-white">
@@ -657,6 +658,16 @@ type Screen =
   | "user-profile"
   | "activity"
   | "create";
+
+type GuestHistorySnapshot = {
+  alertsActiveTab: "social" | "sus";
+  chatListSearchQuery: string;
+  daresActiveTab: "received" | "sent";
+  profileActiveTab: "posts" | "truths" | "dares";
+  searchText: string;
+  selectedConversationId: string;
+  selectedUserId: string;
+};
 
 const currentGuestProfile =
   guestUsers.find((user) => user.id === guestUser.id) ?? guestUsers[0];
@@ -1471,6 +1482,30 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
   const guestMainTruthVelocityY = useRef(0);
   const guestMainTruthDragFrame = useRef<number | null>(null);
   const guestMainTruthCanDragDeck = useRef(false);
+  const goBackInGuestApp = usePwaScreenHistory<Screen, GuestHistorySnapshot>(
+    currentScreen,
+    setCurrentScreen,
+    {
+      snapshot: {
+        alertsActiveTab,
+        chatListSearchQuery,
+        daresActiveTab,
+        profileActiveTab,
+        searchText,
+        selectedConversationId,
+        selectedUserId,
+      },
+      restoreSnapshot: (snapshot) => {
+        setAlertsActiveTab(snapshot.alertsActiveTab);
+        setChatListSearchQuery(snapshot.chatListSearchQuery);
+        setDaresActiveTab(snapshot.daresActiveTab);
+        setProfileActiveTab(snapshot.profileActiveTab);
+        setSearchText(snapshot.searchText);
+        setSelectedConversationId(snapshot.selectedConversationId);
+        setSelectedUserId(snapshot.selectedUserId);
+      },
+    },
+  );
 
   // Progress bar update for mood block
   useEffect(() => {
@@ -1669,7 +1704,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
           {backTo ? (
             <button
               type="button"
-              onClick={() => setCurrentScreen(backTo)}
+              onClick={() => goBackInGuestApp(backTo)}
               className="rounded-full border border-white/10 bg-white/5 p-2 text-white"
             >
               <ChevronLeft size={18} />
@@ -4786,7 +4821,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
                 setCreateMode("dare");
                 setShowCreateInteraction(true);
               } else if (action === "feed") {
-                setCurrentScreen("feed");
+                goBackInGuestApp("feed");
               }
             }}
           />
@@ -4924,7 +4959,7 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
         {!["feed", "main", "dares", "profile"].includes(currentScreen) ? (
           <button
             type="button"
-            onClick={() => setCurrentScreen("feed")}
+            onClick={() => goBackInGuestApp("feed")}
             className="fixed bottom-6 right-4 rounded-full border border-white/10 bg-[#0f1811] p-3 text-white shadow-[0_20px_45px_rgba(0,0,0,0.35)]"
           >
             <X size={18} />

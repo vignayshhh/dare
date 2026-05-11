@@ -27,6 +27,7 @@ export interface ExtendedMessage extends Message {
   isOwn: boolean;
   mediaUrl?: string;
   mediaType?: "image" | "video" | "audio" | null;
+  reply_to?: Message["reply_to"];
 }
 
 // ConversationWithUser type for current conversation
@@ -230,6 +231,7 @@ export interface MessagingStore {
     content: string,
     mediaUrl?: string,
     mediaType?: "TEXT" | "PHOTO" | "VIDEO",
+    replyTo?: Message["reply_to"],
   ) => Promise<void>;
   markMessageAsSeen: (messageId: string) => Promise<void>;
   setTypingIndicator: (
@@ -291,6 +293,7 @@ function normalizeMessage(msg: any, currentUserId: string): ExtendedMessage {
     mediaType: msg.media_type
       ? (msg.media_type.toLowerCase() as "image" | "video" | "audio")
       : undefined,
+    reply_to: msg.reply_to ?? null,
   };
 }
 
@@ -501,7 +504,21 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
   },
 
   setCurrentConversation: (conversation: ConversationWithUser | null) => {
-    set({ currentConversation: conversation });
+    set((state) => {
+      const previousConversationId = state.currentConversation?.id ?? null;
+      const nextConversationId = conversation?.id ?? null;
+      const conversationChanged = previousConversationId !== nextConversationId;
+
+      return {
+        currentConversation: conversation,
+        messages: conversationChanged ? [] : state.messages,
+        events: conversationChanged ? [] : state.events,
+        messageEvents: conversationChanged ? [] : state.messageEvents,
+        loadingMessages: conversationChanged && !!conversation,
+        hasMoreMessages: conversationChanged ? false : state.hasMoreMessages,
+        friendDraft: conversationChanged ? null : state.friendDraft,
+      };
+    });
   },
 
   clearError: () => {
@@ -855,6 +872,7 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
 
   deleteMessage: async (messageId: string, _userId: string) => {
     try {
+      await messagingService.deleteMessageForEveryone(messageId);
       set((state) => ({
         messages: state.messages.filter((msg) => msg.id !== messageId),
       }));
@@ -1036,9 +1054,22 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
       existingSub();
     }
 
+    set((state) => ({
+      messages:
+        state.currentConversation?.id === conversationId ? [] : state.messages,
+      loadingMessages: state.currentConversation?.id === conversationId,
+      hasMoreMessages:
+        state.currentConversation?.id === conversationId
+          ? false
+          : state.hasMoreMessages,
+    }));
+
     const unsubscribe = messagingService.subscribeToMessages(
       conversationId,
       (messages) => {
+        if (get().currentConversation?.id !== conversationId) {
+          return;
+        }
         console.log(
           `📦 Store: Received ${messages.length} messages from service for ${conversationId}`,
         );
@@ -1106,6 +1137,7 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
     content: string,
     mediaUrl?: string,
     mediaType?: "TEXT" | "PHOTO" | "VIDEO",
+    replyTo?: Message["reply_to"],
   ) => {
     const { user } = useAuthStore.getState();
     if (!user?.id) throw new Error("User not authenticated");
@@ -1135,6 +1167,7 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
         mediaUrl,
         mediaType,
         recipientId,
+        replyTo,
       );
       // onSnapshot fires automatically and updates messages state —
       // no manual state update needed here.
@@ -1270,9 +1303,21 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
     const existingSub = get().realTimeSubscriptions.get("events");
     if (existingSub) existingSub();
 
+    set((state) => ({
+      events:
+        state.currentConversation?.id === conversationId ? [] : state.events,
+      messageEvents:
+        state.currentConversation?.id === conversationId
+          ? []
+          : state.messageEvents,
+    }));
+
     const unsubscribe = messagingService.subscribeToEvents(
       conversationId,
       (events) => {
+        if (get().currentConversation?.id !== conversationId) {
+          return;
+        }
         const activeConversation =
           get().currentConversation?.id === conversationId
             ? get().currentConversation

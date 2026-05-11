@@ -31,24 +31,36 @@ export const POST = withSecurity(
     }
 
     const ref = adminDb.collection("post_likes").doc(likeId(postId, ctx.uid));
-    const existing = await ref.get();
-    if (existing.exists) {
-      // Idempotent: treat as success but bump tap_count for double-tap UX.
-      await ref.update({
-        tap_count: FieldValue.increment(1),
+    const postRef = adminDb.collection("posts").doc(postId);
+    let duplicate = false;
+
+    await adminDb.runTransaction(async (tx) => {
+      const existing = await tx.get(ref);
+
+      if (existing.exists) {
+        duplicate = true;
+        // Idempotent: treat as success but bump tap_count for double-tap UX.
+        tx.update(ref, {
+          tap_count: FieldValue.increment(1),
+          updated_at: FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      tx.set(ref, {
+        post_id: postId,
+        user_id: ctx.uid,
+        tap_count: 1,
+        created_at: FieldValue.serverTimestamp(),
         updated_at: FieldValue.serverTimestamp(),
       });
-      return NextResponse.json({ ok: true, liked: true, duplicate: true });
-    }
-
-    await ref.set({
-      post_id: postId,
-      user_id: ctx.uid,
-      tap_count: 1,
-      created_at: FieldValue.serverTimestamp(),
+      tx.update(postRef, {
+        likes_count: FieldValue.increment(1),
+        updated_at: FieldValue.serverTimestamp(),
+      });
     });
 
-    return NextResponse.json({ ok: true, liked: true });
+    return NextResponse.json({ ok: true, liked: true, duplicate });
   },
 );
 
@@ -60,7 +72,19 @@ export const DELETE = withSecurity(
       return NextResponse.json({ error: "bad post id" }, { status: 400 });
     }
     const ref = adminDb.collection("post_likes").doc(likeId(postId, ctx.uid));
-    await ref.delete().catch(() => undefined);
+    const postRef = adminDb.collection("posts").doc(postId);
+
+    await adminDb.runTransaction(async (tx) => {
+      const existing = await tx.get(ref);
+      if (!existing.exists) return;
+
+      tx.delete(ref);
+      tx.update(postRef, {
+        likes_count: FieldValue.increment(-1),
+        updated_at: FieldValue.serverTimestamp(),
+      });
+    });
+
     return NextResponse.json({ ok: true, liked: false });
   },
 );

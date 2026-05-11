@@ -20,6 +20,7 @@ import {
   Unsubscribe,
 } from "firebase/firestore";
 import { messagingService } from "./messaging.service";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -468,7 +469,7 @@ class DareInteractionsService {
       }
       return data;
     } catch (error) {
-      console.error("❌ getUserProfile:", error);
+      logFirestoreError("getUserProfile failed:", error);
       return null;
     }
   }

@@ -648,7 +648,7 @@ function GuestDareCard({
         style={{
           position: "absolute",
           right: 14,
-          bottom: "calc(200px + env(safe-area-inset-bottom))",
+          bottom: "calc(200px + var(--safe-area-bottom))",
           zIndex: 10,
           display: "flex",
           flexDirection: "column",
@@ -768,7 +768,7 @@ function GuestDareCard({
           }}
           style={{
             position: "absolute",
-            top: "calc(100% - 100px - env(safe-area-inset-bottom))",
+            top: "calc(100% - 100px - var(--safe-area-bottom))",
             left: "14px",
             right: "14px",
             zIndex: 2,
@@ -801,7 +801,7 @@ function GuestDareCard({
           left: 0,
           right: 0,
           zIndex: 1,
-          padding: "0 14px calc(95px + env(safe-area-inset-bottom))",
+          padding: "0 14px calc(95px + var(--safe-area-bottom))",
         }}
       >
         <div
@@ -2152,7 +2152,7 @@ export function GuestMainScreen({
             flexDirection: "column",
             overflow: "hidden",
             background: "#0a0a0a",
-            paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+            paddingBottom: "calc(80px + var(--safe-area-bottom))",
           }}
         >
           <NavHeader />

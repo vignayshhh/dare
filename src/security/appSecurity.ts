@@ -1,4 +1,5 @@
 import { auth } from "@/backend/lib/firebase";
+import { isFirestoreOfflineError } from "@/utils/firestoreErrors";
 export { firestoreRateLimiter, RATE_LIMITS } from "./firestoreRateLimit";
 
 export const SECURITY_LIMITS = {
@@ -251,6 +252,13 @@ export function validateOptionalText(
 }
 
 export function secureLogError(message: string, error: unknown) {
+  if (isFirestoreOfflineError(error)) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(message);
+    }
+    return;
+  }
+
   if (process.env.NODE_ENV !== "production") {
     console.error(message, error);
   } else {

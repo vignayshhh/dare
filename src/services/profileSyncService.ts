@@ -10,6 +10,7 @@ import {
 import { useProfileDataStore } from "../stores/profileDataStore";
 import { userDocSubscriptionService } from "./userDocSubscriptionService";
 import { avatarSyncService } from "./avatarSyncService";
+import { logFirestoreError } from "@/utils/firestoreErrors";
 
 /**
  * Profile Data Synchronization Service
@@ -102,7 +103,7 @@ class ProfileSyncService {
         }
       }
     } catch (error) {
-      console.error(`Error refreshing profile for user ${userId}:`, error);
+      logFirestoreError(`Error refreshing profile for user ${userId}:`, error);
     }
   }
 

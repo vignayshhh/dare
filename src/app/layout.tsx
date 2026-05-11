@@ -16,6 +16,7 @@ export const metadata: Metadata = {
   title: "DARE - Social Dare Challenge App",
   description: "Challenge your friends with dares and see who completes them",
   applicationName: "DARE",
+  manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     title: "DARE",
@@ -55,7 +56,13 @@ export const metadata: Metadata = {
     },
   },
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "64x64", type: "image/x-icon" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/favicon.ico",
   },
 };
 

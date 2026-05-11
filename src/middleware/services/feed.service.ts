@@ -54,6 +54,10 @@ export interface PostLike {
   updated_at?: string;
 }
 
+function getPostLikeDocId(postId: string, userId: string) {
+  return `${postId}_${userId}`;
+}
+
 export interface PostView {
   id: string;
   post_id: string;
@@ -442,7 +446,13 @@ class FeedService {
       // Firestore).
       secureLogError("likePost failed", error);
       console.error("❌ [LIKE API] failed:", postId, error);
-      throw error;
+      if (!this.isApiAuthFailure(error)) {
+        throw error;
+      }
+
+      await this.likePostDirect(postId, userId);
+      this.postEnrichmentCache.delete(postId);
+      return true;
     }
   }
 
@@ -458,8 +468,46 @@ class FeedService {
     } catch (error) {
       secureLogError("unlikePost failed", error);
       console.error("❌ [UNLIKE API] failed:", postId, error);
-      throw error;
+      if (!this.isApiAuthFailure(error)) {
+        throw error;
+      }
+
+      await this.unlikePostDirect(postId, userId);
+      this.postEnrichmentCache.delete(postId);
+      return true;
     }
+  }
+
+  private isApiAuthFailure(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("API 401") || message.includes("API 403");
+  }
+
+  private async likePostDirect(postId: string, userId: string): Promise<void> {
+    requireAuthenticatedUser(userId);
+    const likeRef = doc(db, "post_likes", getPostLikeDocId(postId, userId));
+    const existing = await getDoc(likeRef);
+
+    if (existing.exists()) {
+      await updateDoc(likeRef, {
+        tap_count: increment(1),
+        updated_at: serverTimestamp(),
+      });
+      return;
+    }
+
+    await setDoc(likeRef, {
+      post_id: postId,
+      user_id: userId,
+      tap_count: 1,
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+    });
+  }
+
+  private async unlikePostDirect(postId: string, userId: string): Promise<void> {
+    requireAuthenticatedUser(userId);
+    await deleteDoc(doc(db, "post_likes", getPostLikeDocId(postId, userId)));
   }
 
   private async getPostLike(
