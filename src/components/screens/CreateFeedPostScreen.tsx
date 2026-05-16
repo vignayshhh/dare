@@ -201,7 +201,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
     <div className="min-h-screen overflow-x-hidden bg-[#050705] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(74,222,128,0.12),transparent_30%),radial-gradient(circle_at_88%_12%,rgba(96,165,250,0.06),transparent_28%)]" />
 
-      <div className="sticky top-0 z-30 border-b border-white/6 bg-[linear-gradient(180deg,rgba(5,7,5,0.98),rgba(5,7,5,0.88))] px-4 pb-4 pt-[calc(16px+env(safe-area-inset-top,0px))] backdrop-blur-xl">
+      <div className="sticky top-0 z-30 border-b border-white/6 bg-[linear-gradient(180deg,rgba(5,7,5,0.98),rgba(5,7,5,0.88))] px-4 pb-4 pt-[calc(var(--safe-area-top)+16px)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <button
             onClick={onBack}

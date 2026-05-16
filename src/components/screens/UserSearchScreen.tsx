@@ -49,6 +49,48 @@ function normalizeUser(user: UserProfile, cached?: {
   };
 }
 
+function profileTime(value: unknown): number {
+  if (!value) return 0;
+
+  if (typeof value === "string" || typeof value === "number") {
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? time : 0;
+  }
+
+  if (typeof value === "object") {
+    const timestamp = value as {
+      toDate?: () => Date;
+      seconds?: number;
+      nanoseconds?: number;
+    };
+
+    if (typeof timestamp.toDate === "function") {
+      const time = timestamp.toDate().getTime();
+      return Number.isFinite(time) ? time : 0;
+    }
+
+    if (typeof timestamp.seconds === "number") {
+      return (
+        timestamp.seconds * 1000 +
+        Math.floor((timestamp.nanoseconds || 0) / 1000000)
+      );
+    }
+  }
+
+  return 0;
+}
+
+function profileCreatedTime(user: Partial<UserProfile> & { createdAt?: unknown }) {
+  return profileTime(user.created_at ?? user.createdAt);
+}
+
+function compareRecentProfiles(a: UserProfile, b: UserProfile) {
+  const timeDiff = profileCreatedTime(b) - profileCreatedTime(a);
+  if (timeDiff !== 0) return timeDiff;
+
+  return (a.user_id || a.id || "").localeCompare(b.user_id || b.id || "");
+}
+
 function getHistoryStorageKey(userId?: string) {
   return `dare-user-search-history:${userId || "guest"}`;
 }
@@ -116,10 +158,7 @@ export function UserSearchScreen({
             const profileId = profile.user_id || profile.id;
             return profileId && profileId !== currentUser?.id;
           })
-          .sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-          );
+          .sort(compareRecentProfiles);
 
         setPublicUsers(filtered);
       } finally {
@@ -271,10 +310,11 @@ export function UserSearchScreen({
     subtitle?: string;
     badge?: string;
   }) => (
-    <div className="group flex items-center gap-3 rounded-[26px] border border-white/6 bg-[linear-gradient(180deg,rgba(28,34,28,0.98),rgba(16,20,16,0.98))] px-4 py-4 text-left shadow-[0_12px_30px_rgba(0,0,0,0.24)] transition-all duration-200 hover:border-[#4ade80]/25 hover:bg-[linear-gradient(180deg,rgba(31,39,31,1),rgba(18,23,18,1))]">
+    <div className="daily-panel group relative overflow-hidden rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,20,17,0.96),rgba(7,9,8,0.98))] px-4 py-4 text-left shadow-[0_18px_44px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/25">
+      <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.45),rgba(74,222,128,0))]" />
       <button
         onClick={() => handleUserClick(user)}
-        className="flex flex-1 items-center gap-3 text-left"
+        className="relative z-10 flex w-full items-center gap-3 text-left"
       >
         <Avatar
           src={user.avatarUrl}
@@ -285,20 +325,22 @@ export function UserSearchScreen({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="truncate text-[15px] font-semibold text-white group-hover:text-[#dfffe9]">
+            <p className="truncate text-[16px] font-black text-white group-hover:text-[#dfffe9]">
               {user.displayName}
             </p>
             {badge ? (
-              <span className="rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#86efac]">
+              <span className="rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-[#86efac]">
                 {badge}
               </span>
             ) : null}
           </div>
-          <p className="truncate text-sm font-medium text-[#4ade80]">
+          <p className="truncate text-sm font-semibold text-[#6ee7b7]">
             @{user.username.replace(/^@/, "")}
           </p>
           {subtitle ? (
-            <p className="mt-1 truncate text-xs text-[#7f8b7f]">{subtitle}</p>
+            <p className="mt-1 truncate text-[12px] font-semibold text-[#64748b]">
+              {subtitle}
+            </p>
           ) : null}
         </div>
       </button>
@@ -314,11 +356,11 @@ export function UserSearchScreen({
   }) => (
     <div className="mb-3 flex items-center justify-between gap-3">
       <div className="flex items-center gap-2">
-        <div className="rounded-full border border-white/8 bg-white/5 p-2 text-[#9be8b1]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/8 bg-white/[0.04] text-[#86efac] shadow-[0_12px_28px_rgba(0,0,0,0.24)]">
           {icon}
         </div>
         <div>
-          <h2 className="text-sm font-semibold tracking-[0.02em] text-white">
+          <h2 className="text-[12px] font-black uppercase tracking-[0.18em] text-[#94a3b8]">
             {title}
           </h2>
         </div>
@@ -327,49 +369,86 @@ export function UserSearchScreen({
   );
 
   return (
-    <div className="screen-container bg-[radial-gradient(circle_at_top,#162016_0%,#0b100b_45%,#070a07_100%)]">
-      <div className="safe-area-top border-b border-white/6 bg-[linear-gradient(180deg,rgba(11,16,11,0.96),rgba(11,16,11,0.78))] backdrop-blur-xl">
-        <div className="px-4 pb-5 pt-4">
-          <div className="mb-4 flex items-center gap-4">
+    <div className="screen-container user-search-screen">
+      <style>{`
+        .user-search-screen {
+          background:
+            radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%),
+            radial-gradient(circle at 12% 18%, rgba(14,165,233,0.12), transparent 28%),
+            linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%);
+          font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        @keyframes dailySweep {
+          0% { transform: translateX(-120%); }
+          42% { transform: translateX(120%); }
+          100% { transform: translateX(120%); }
+        }
+        @keyframes dailyFloatIn {
+          from { opacity: 0; transform: translateY(16px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .daily-shine::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.13), transparent);
+          animation: dailySweep 6.6s ease-in-out infinite;
+        }
+      `}</style>
+
+      <div
+        className="custom-scrollbar flex-1 min-h-0 overflow-y-auto px-4"
+        style={{
+          paddingTop: "calc(var(--safe-area-top) + 12px)",
+          paddingBottom: "calc(var(--bottom-nav-total-height) + 24px)",
+          WebkitOverflowScrolling: "touch",
+          overscrollBehaviorY: "contain",
+        }}
+      >
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={onBack}
-              className="rounded-full border border-white/8 bg-white/5 p-2.5 text-[#94a3b8] transition-colors hover:text-white"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_18px_44px_rgba(0,0,0,0.32)] transition-colors hover:border-[#4ade80]/30 hover:text-white"
+              aria-label="Back"
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={21} />
             </button>
             <div className="min-w-0">
-              <h1 className="text-xl font-bold text-white">Search users</h1>
+              <h1 className="text-[32px] font-black leading-none tracking-tight text-white">
+                Search Users
+              </h1>
             </div>
           </div>
-
-          <div className="rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(17,21,17,0.98))] p-3 shadow-[0_18px_50px_rgba(0,0,0,0.3)]">
-            <div className="flex items-center gap-3 rounded-full border border-white/6 bg-black/20 px-4 py-3">
-              <Search size={18} className="text-[#7f8b7f]" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by username or display name"
-                className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-[#64748b]"
-              />
-              {searchQuery ? (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="rounded-full bg-white/6 p-1.5 text-[#94a3b8] transition-colors hover:text-white"
-                  aria-label="Clear search"
-                >
-                  <X size={14} />
-                </button>
-              ) : null}
-            </div>
-
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] border border-white/8 bg-white/[0.04] text-[#4ade80] shadow-[0_18px_44px_rgba(0,0,0,0.32)]">
+            <Search size={24} />
           </div>
         </div>
-      </div>
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-[calc(var(--safe-area-bottom)+2rem)] pt-4">
+        <div className="daily-panel daily-shine relative mb-5 overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.92),rgba(10,14,10,0.96))] p-3 shadow-[0_24px_70px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <div className="relative z-10 flex min-h-[56px] items-center gap-3 rounded-full border border-white/8 bg-[#070907] px-4">
+            <Search size={18} className="shrink-0 text-[#86efac]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by username or display name"
+              className="min-w-0 flex-1 bg-transparent text-[15px] font-semibold text-white outline-none placeholder:text-[#3d463f]"
+            />
+            {searchQuery ? (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/8 bg-white/[0.04] text-[#94a3b8] transition-colors hover:text-white"
+                aria-label="Clear search"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
         {error ? (
-          <div className="mb-4 rounded-3xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="mb-4 rounded-[20px] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200">
             {error}
           </div>
         ) : null}
@@ -379,7 +458,7 @@ export function UserSearchScreen({
             {[0, 1, 2].map((item) => (
               <div
                 key={item}
-                className="animate-pulse rounded-[26px] border border-white/6 bg-white/[0.03] px-4 py-4"
+                className="animate-pulse rounded-[26px] border border-white/8 bg-white/[0.035] px-4 py-4"
               >
                 <div className="flex items-center gap-3">
                   <div className="h-[56px] w-[56px] rounded-full bg-white/8" />
@@ -394,7 +473,7 @@ export function UserSearchScreen({
         ) : searchQuery.trim() ? (
           searchResults.length > 0 ? (
             <div className="space-y-5">
-              <div className="rounded-[28px] border border-[#4ade80]/15 bg-[#4ade80]/[0.08] px-4 py-3 text-sm text-[#d8ffe3]">
+              <div className="rounded-[24px] border border-[#4ade80]/20 bg-[#4ade80]/10 px-4 py-3 text-sm font-semibold text-[#d1fae5]">
                 Found {searchResults.length}{" "}
                 {searchResults.length === 1 ? "person" : "people"} for "
                 {searchQuery}"
@@ -416,34 +495,37 @@ export function UserSearchScreen({
               </div>
             </div>
           ) : (
-            <div className="rounded-[30px] border border-white/6 bg-[linear-gradient(180deg,rgba(22,26,22,0.98),rgba(15,18,15,0.98))] px-6 py-10 text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-white/8 bg-white/5 text-[#7f8b7f]">
+            <div className="daily-panel relative overflow-hidden rounded-[34px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,20,17,0.96),rgba(7,9,8,0.98))] px-6 py-10 text-center shadow-[0_30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.82),rgba(74,222,128,0))]" />
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-[28px] border border-white/8 bg-white/[0.04] text-[#64748b]">
                 <User size={28} />
               </div>
-              <p className="text-lg font-semibold text-white">
+              <p className="text-xl font-black text-white">
                 No users found for "{searchQuery}"
               </p>
-              <p className="mt-2 text-sm text-[#7f8b7f]">
+              <p className="mt-2 text-sm font-semibold text-[#64748b]">
                 Try another name or username.
               </p>
             </div>
           )
         ) : (
           <div className="space-y-6">
-            <div className="rounded-[30px] border border-white/6 bg-[linear-gradient(135deg,rgba(20,28,20,0.98),rgba(13,16,13,0.98))] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.26)]">
-              <div className="flex items-start justify-between gap-4">
+            <div className="daily-panel relative overflow-hidden rounded-[34px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,20,17,0.96),rgba(7,9,8,0.98))] p-5 shadow-[0_30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.82),rgba(74,222,128,0))]" />
+              <div className="pointer-events-none absolute right-8 top-8 h-32 w-32 rounded-full bg-[#4ade80]/10 blur-3xl" />
+              <div className="relative z-10 flex items-start justify-between gap-4">
                 <div>
-                  <div className="mb-3 inline-flex rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86efac]">
+                  <div className="mb-3 inline-flex rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-[#86efac]">
                     Discovery
                   </div>
-                  <h2 className="text-xl font-bold text-white">
+                  <h2 className="text-[24px] font-black leading-tight text-white">
                     Find the newest people joining Dare
                   </h2>
-                  <p className="mt-2 max-w-md text-sm leading-6 text-[#8ea18e]">
+                  <p className="mt-2 max-w-md text-sm font-semibold leading-6 text-[#6ee7b7]">
                     Find new people worth following fast.
                   </p>
                 </div>
-                <div className="rounded-[24px] bg-[radial-gradient(circle_at_top,#4ade80_0%,rgba(74,222,128,0.12)_35%,transparent_70%)] p-3 text-[#86efac]">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[24px] border border-[#4ade80]/20 bg-[#4ade80]/10 text-[#86efac] shadow-[0_18px_48px_rgba(74,222,128,0.12)]">
                   <Sparkles size={24} />
                 </div>
               </div>
@@ -470,7 +552,7 @@ export function UserSearchScreen({
                     );
                   })
                 ) : (
-                  <div className="rounded-[24px] border border-white/6 bg-white/[0.03] px-4 py-5 text-sm text-[#7f8b7f]">
+                  <div className="rounded-[24px] border border-white/8 bg-white/[0.035] px-4 py-5 text-sm font-semibold text-[#64748b]">
                     New user suggestions will appear here as people join the
                     app.
                   </div>
@@ -499,7 +581,7 @@ export function UserSearchScreen({
                     />
                   ))
                 ) : (
-                  <div className="rounded-[24px] border border-white/6 bg-white/[0.03] px-4 py-5 text-sm text-[#7f8b7f]">
+                  <div className="rounded-[24px] border border-white/8 bg-white/[0.035] px-4 py-5 text-sm font-semibold text-[#64748b]">
                     Profiles you open most will surface here after a little usage.
                   </div>
                 )}

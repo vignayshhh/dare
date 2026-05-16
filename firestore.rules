@@ -50,6 +50,16 @@ service cloud.firestore {
     function isConversationParticipant(conversationId) {
       let conv = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
       return conv.user1_id == request.auth.uid
+        || conv.user2_id == request.auth.uid
+        || (
+          conv.temporary_participant_ids is list
+          && request.auth.uid in conv.temporary_participant_ids
+        );
+    }
+
+    function isOriginalConversationParticipant(conversationId) {
+      let conv = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+      return conv.user1_id == request.auth.uid
         || conv.user2_id == request.auth.uid;
     }
 
@@ -466,6 +476,114 @@ service cloud.firestore {
     }
 
     // ─── DARES ──────────────────────────────────────────────────────────
+    // Challenge room proof docs live here before personal dare docs.
+    // Community challenge room proof feed. One user can submit or replace
+    // their own proof for a challenge day; everyone signed in can read the
+    // room feed. Vote counters remain client-read only here until moved to a
+    // dedicated vote document / Cloud Function path.
+    match /challenge_room_proofs/{proofId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'challenge_id',
+          'challenge_title',
+          'submitter_id',
+          'submitter_username',
+          'submitter_name',
+          'submitter_avatar',
+          'day',
+          'total_days',
+          'media_url',
+          'media_type',
+          'thumbnail_url',
+          'caption',
+          'real_votes',
+          'fake_votes',
+          'comments',
+          'client_created_at',
+          'created_at',
+          'updated_at'
+        ])
+        && request.resource.data.submitter_id == request.auth.uid
+        && requiredString('challenge_id', 160)
+        && requiredString('challenge_title', 180)
+        && requiredString('submitter_username', 40)
+        && requiredString('submitter_name', 80)
+        && stringUnder('submitter_avatar', 2000)
+        && request.resource.data.day is number
+        && request.resource.data.day >= 1
+        && request.resource.data.day <= 365
+        && request.resource.data.total_days is number
+        && request.resource.data.total_days >= request.resource.data.day
+        && request.resource.data.total_days <= 365
+        && requiredString('media_url', 2000)
+        && isAllowedMediaUrl('media_url')
+        && stringUnder('thumbnail_url', 2000)
+        && isAllowedMediaUrl('thumbnail_url')
+        && request.resource.data.media_type in ['image', 'video']
+        && stringUnder('caption', 240)
+        && request.resource.data.real_votes == 0
+        && request.resource.data.fake_votes == 0
+        && request.resource.data.comments == 0
+        && request.resource.data.client_created_at is number
+        && request.resource.data.client_created_at <= request.time.toMillis() + 60000;
+
+      allow update: if isSignedIn()
+        && resource.data.submitter_id == request.auth.uid
+        && request.resource.data.submitter_id == resource.data.submitter_id
+        && request.resource.data.challenge_id == resource.data.challenge_id
+        && request.resource.data.day == resource.data.day
+        && request.resource.data.keys().hasOnly([
+          'challenge_id',
+          'challenge_title',
+          'submitter_id',
+          'submitter_username',
+          'submitter_name',
+          'submitter_avatar',
+          'day',
+          'total_days',
+          'media_url',
+          'media_type',
+          'thumbnail_url',
+          'caption',
+          'real_votes',
+          'fake_votes',
+          'comments',
+          'client_created_at',
+          'created_at',
+          'updated_at'
+        ])
+        && requiredString('challenge_id', 160)
+        && requiredString('challenge_title', 180)
+        && requiredString('submitter_username', 40)
+        && requiredString('submitter_name', 80)
+        && stringUnder('submitter_avatar', 2000)
+        && request.resource.data.day is number
+        && request.resource.data.day >= 1
+        && request.resource.data.day <= 365
+        && request.resource.data.total_days is number
+        && request.resource.data.total_days >= request.resource.data.day
+        && request.resource.data.total_days <= 365
+        && requiredString('media_url', 2000)
+        && isAllowedMediaUrl('media_url')
+        && stringUnder('thumbnail_url', 2000)
+        && isAllowedMediaUrl('thumbnail_url')
+        && request.resource.data.media_type in ['image', 'video']
+        && stringUnder('caption', 240)
+        && request.resource.data.real_votes is number
+        && request.resource.data.real_votes >= 0
+        && request.resource.data.fake_votes is number
+        && request.resource.data.fake_votes >= 0
+        && request.resource.data.comments is number
+        && request.resource.data.comments >= 0
+        && request.resource.data.client_created_at is number
+        && request.resource.data.client_created_at <= request.time.toMillis() + 60000;
+
+      allow delete: if isSignedIn()
+        && resource.data.submitter_id == request.auth.uid;
+    }
+
     // Doc fields: challenger_id, receiver_id, state, proof_media_url, etc.
     match /dares/{dareId} {
       allow read: if isSignedIn();
@@ -475,7 +593,8 @@ service cloud.firestore {
         && request.resource.data.challenger_id != request.resource.data.receiver_id
         && stringUnder('description', 2000)
         && stringUnder('prompt', 2000)
-        && stringUnder('proof_media_url', 2000);
+        && stringUnder('proof_media_url', 2000)
+        && stringUnder('proof_thumbnail_url', 2000);
 
       // Challenger can update/delete until accepted; receiver can change state
       // (ACCEPTED/REFUSED/COMPLETED) and upload proof.
@@ -485,7 +604,8 @@ service cloud.firestore {
       ) && doesNotChange(['challenger_id', 'receiver_id', 'created_at'])
         && stringUnder('description', 2000)
         && stringUnder('prompt', 2000)
-        && stringUnder('proof_media_url', 2000);
+        && stringUnder('proof_media_url', 2000)
+        && stringUnder('proof_thumbnail_url', 2000);
 
       allow delete: if isSignedIn() && (
         resource.data.challenger_id == request.auth.uid ||
@@ -510,6 +630,18 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn()
         && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /dare_media_likes/{likeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && likeId == request.resource.data.dare_id + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['dare_id', 'user_id', 'created_at'])
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.dare_id is string
+        && request.resource.data.dare_id.size() > 0
+        && request.resource.data.dare_id.size() <= 200;
       allow update, delete: if false;
     }
 
@@ -609,7 +741,11 @@ service cloud.firestore {
     match /conversations/{conversationId} {
       allow read: if isSignedIn() && (
         resource.data.user1_id == request.auth.uid ||
-        resource.data.user2_id == request.auth.uid
+        resource.data.user2_id == request.auth.uid ||
+        (
+          resource.data.temporary_participant_ids is list
+          && request.auth.uid in resource.data.temporary_participant_ids
+        )
       );
 
       // Creator must be a participant
@@ -621,9 +757,23 @@ service cloud.firestore {
       // Either participant can update (last_message_id, is_frozen, etc.).
       // Participants are immutable.
       allow update: if isSignedIn() && (
-        resource.data.user1_id == request.auth.uid ||
-        resource.data.user2_id == request.auth.uid
-      ) && doesNotChange(['user1_id', 'user2_id', 'created_at']);
+        (
+          (
+            resource.data.user1_id == request.auth.uid ||
+            resource.data.user2_id == request.auth.uid ||
+            (
+              resource.data.temporary_participant_ids is list
+              && request.auth.uid in resource.data.temporary_participant_ids
+            )
+          ) && doesNotChange(['user1_id', 'user2_id', 'created_at'])
+        )
+        ||
+        (
+          onlyChanges(['temporary_participant_ids', 'updated_at'])
+          && exists(/databases/$(database)/documents/chat_invites/$(conversationId + '_' + request.auth.uid))
+          && get(/databases/$(database)/documents/chat_invites/$(conversationId + '_' + request.auth.uid)).data.invitee_id == request.auth.uid
+        )
+      );
 
       // Only participants can delete (leave/purge)
       allow delete: if isSignedIn() && (
@@ -656,10 +806,8 @@ service cloud.firestore {
       // Used for conversation-level settings: freeze state, mood blocks.
       // Either participant of the conversation can read/write.
       match /meta/{key} {
-        allow read, create, update, delete: if isSignedIn() && (
-          get(/databases/$(database)/documents/conversations/$(conversationId)).data.user1_id == request.auth.uid
-          || get(/databases/$(database)/documents/conversations/$(conversationId)).data.user2_id == request.auth.uid
-        );
+        allow read, create, update, delete: if isSignedIn()
+          && isConversationParticipant(conversationId);
       }
     }
 
@@ -671,7 +819,11 @@ service cloud.firestore {
       // 1. User is a conversation participant (for messaging), OR
       // 2. User is the message sender (for activity feed showing shared posts)
       allow read: if isSignedIn() && (
-        isConversationParticipant(resource.data.conversation_id)
+        isOriginalConversationParticipant(resource.data.conversation_id)
+        || (
+          request.auth.uid in resource.data.participants
+          && isConversationParticipant(resource.data.conversation_id)
+        )
         || resource.data.sender_id == request.auth.uid
       );
 
@@ -686,7 +838,8 @@ service cloud.firestore {
       // media URLs.
       allow create: if isSignedIn()
         && request.resource.data.sender_id == request.auth.uid
-        && request.resource.data.participants.size() == 2
+        && request.resource.data.participants.size() >= 2
+        && request.resource.data.participants.size() <= 8
         && request.auth.uid in request.resource.data.participants
         && stringUnder('content', 10000)
         && stringUnder('media_url', 16000)
@@ -728,12 +881,22 @@ service cloud.firestore {
     // Fields: message_id, event_type, user_id, event_data, conversation_id (if set)
     match /message_events/{eventId} {
       // TEMPORARILY SIMPLIFIED: Allow authenticated reads if user is conversation participant
-      allow read: if isSignedIn()
-        && isConversationParticipant(resource.data.conversation_id);
+      allow read: if isSignedIn() && (
+        isOriginalConversationParticipant(resource.data.conversation_id)
+        || (
+          resource.data.participants is list
+          && request.auth.uid in resource.data.participants
+          && isConversationParticipant(resource.data.conversation_id)
+        )
+      );
       allow create: if isSignedIn()
         && request.resource.data.user_id == request.auth.uid
         && requiredString('conversation_id', 128)
         && stringUnder('event_type', 64)
+        && (
+          !('participants' in request.resource.data)
+          || request.resource.data.participants.size() <= 8
+        )
         && isConversationParticipant(request.resource.data.conversation_id);
       allow update, delete: if false;
     }
@@ -758,6 +921,57 @@ service cloud.firestore {
     // SECURITY FIX (§1.9): Strict field whitelist, enumerated types, size
     // caps, isRead=false on create, and update rule no longer lets a
     // random user hijack somebody else's alert by setting actorId=self.
+    match /chat_invites/{inviteId} {
+      allow read: if isSignedIn() && (
+        resource == null
+        || resource.data.invitee_id == request.auth.uid
+        || resource.data.inviter_id == request.auth.uid
+        || (
+          resource.data.original_participant_ids is list
+          && request.auth.uid in resource.data.original_participant_ids
+        )
+      );
+
+      allow create: if isSignedIn()
+        && request.resource.data.inviter_id == request.auth.uid
+        && request.resource.data.invitee_id != request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.original_participant_ids is list
+        && request.auth.uid in request.resource.data.original_participant_ids
+        && request.resource.data.keys().hasOnly([
+             'conversation_id', 'inviter_id', 'inviter_name',
+             'invitee_id', 'invitee_name', 'original_participant_ids',
+             'status', 'created_at', 'updated_at', 'joined_at',
+             'entered_at', 'ended_at'
+           ])
+        && stringUnder('inviter_name', 120)
+        && stringUnder('invitee_name', 120)
+        && isOriginalConversationParticipant(request.resource.data.conversation_id);
+
+      allow update: if isSignedIn() && (
+        (
+          resource.data.invitee_id == request.auth.uid
+          && request.resource.data.status in ['accepted', 'rejected', 'left']
+          && doesNotChange([
+               'conversation_id', 'inviter_id', 'invitee_id',
+               'original_participant_ids', 'created_at'
+             ])
+        )
+        ||
+        (
+          resource.data.original_participant_ids is list
+          && request.auth.uid in resource.data.original_participant_ids
+          && request.resource.data.status in ['pending', 'removed']
+          && doesNotChange([
+               'conversation_id', 'inviter_id', 'invitee_id',
+               'original_participant_ids', 'created_at'
+             ])
+        )
+      );
+
+      allow delete: if false;
+    }
+
     match /alerts/{alertId} {
       allow read: if isSignedIn() && (
         resource.data.userId == request.auth.uid
@@ -774,8 +988,9 @@ service cloud.firestore {
         && request.resource.data.type in [
              'FRIEND_REQUEST', 'FRIEND_ACCEPTED',
              'DARE_RECEIVED', 'DARE_ACCEPTED', 'DARE_COMPLETED', 'DARE_REFUSED',
-             'DARE_APPROVED', 'DARE_REJECTED',
+             'DARE_APPROVED', 'DARE_REJECTED', 'DARE_FRIEND_ACTIVITY',
              'TRUTH_RECEIVED', 'TRUTH_ANSWERED', 'TRUTH_REFUSED', 'TRUTH_COMPLETED',
+             'TRUTH_FRIEND_ACTIVITY',
              'MESSAGE_RECEIVED',
              'POST_LIKE', 'POST_LIKED', 'POST_COMMENT', 'COMMENT_RECEIVED', 'COMMENT_REPLY', 'COMMENT_LIKE',
              'STORY_VIEW', 'STORY_REACTION', 'STORY_REPLY',

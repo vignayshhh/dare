@@ -900,7 +900,6 @@ export function PostsScreen({
           style={{
             backgroundColor: "rgba(0, 0, 0, 0.7)",
             animation: "backdropFadeIn 0.25s ease-out forwards",
-            overscrollBehavior: "contain",
           }}
           onClick={closeCommentsModal}
         >
@@ -925,9 +924,7 @@ export function PostsScreen({
           <div
             className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col overflow-hidden"
             style={{
-              maxHeight: "98vh",
-              touchAction: "pan-y",
-              overscrollBehavior: "contain",
+              minHeight: "min(68dvh, 720px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -945,7 +942,7 @@ export function PostsScreen({
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden pb-6">
+            <div className="app-modal-sheet-content">
               {currentUser && (
                 <CommentSection
                   comments={selectedPost.comments.map(
@@ -1014,9 +1011,7 @@ export function PostsScreen({
           <div
             className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
             style={{
-              maxHeight: "98vh",
-              minHeight: "60vh",
-              touchAction: "pan-y",
+              minHeight: "min(60dvh, 640px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1041,7 +1036,7 @@ export function PostsScreen({
                 No likes yet
               </p>
             ) : (
-              <div className="overflow-y-auto flex-1 px-6 pb-6 space-y-4">
+              <div className="app-modal-sheet-scroll px-6 pb-[calc(var(--safe-area-bottom)+16px)] space-y-4">
                 {Object.values(selectedPost.likesByUser || {})
                   .sort(
                     (a: any, b: any) => (b?.tapCount || 0) - (a?.tapCount || 0),
@@ -1118,7 +1113,8 @@ export function PostsScreen({
           onClick={() => setShowShareModal(null)}
         >
           <div
-            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl p-6"
+            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl p-6 flex flex-col"
+            style={{ height: "min(86dvh, 760px)" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-10 h-1 bg-[#3a3a3a] rounded-full mx-auto mb-4" />
@@ -1150,7 +1146,7 @@ export function PostsScreen({
                 </div>
               </div>
             )}
-            <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+            <div className="app-modal-sheet-scroll px-4 py-3 pb-[calc(var(--safe-area-bottom)+12px)] space-y-2">
               {loadingFriends ? (
                 <p className="text-[#64748b] text-center py-10 text-sm">
                   Loading friends...

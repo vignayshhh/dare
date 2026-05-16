@@ -198,6 +198,58 @@ const sortFeedPosts = (posts: FeedPost[]): FeedPost[] =>
     return b.id.localeCompare(a.id);
   });
 
+const preserveCurrentUserLike = (
+  incoming: FeedPost,
+  existing: FeedPost | undefined,
+  currentUserId: string,
+): FeedPost => {
+  const localLike = existing?.likesByUser[currentUserId];
+  if (!localLike?.tapCount) return incoming;
+
+  const incomingLike = incoming.likesByUser[currentUserId];
+  if (incomingLike && incomingLike.tapCount >= localLike.tapCount) {
+    return incoming;
+  }
+
+  const likesByUser = {
+    ...incoming.likesByUser,
+    [currentUserId]: localLike,
+  };
+
+  return {
+    ...incoming,
+    likesByUser,
+    likes_count: Math.max(
+      incoming.likes_count || 0,
+      Object.keys(likesByUser).length,
+    ),
+  };
+};
+
+const applyCachedLikedState = (
+  post: FeedPost,
+  likedPostIds: Set<string>,
+  current: ReturnType<typeof getCurrentUserDisplay>,
+): FeedPost => {
+  if (!likedPostIds.has(post.id) || post.likesByUser[current.userId]) {
+    return post;
+  }
+
+  return {
+    ...post,
+    likesByUser: {
+      ...post.likesByUser,
+      [current.userId]: {
+        userId: current.userId,
+        name: current.name,
+        username: current.username,
+        avatar: current.avatar || "",
+        tapCount: 1,
+      },
+    },
+  };
+};
+
 export const usePostsStore = create<PostsStore>()(
   persist(
     (set, get) => ({
@@ -1042,6 +1094,23 @@ export const usePostsStore = create<PostsStore>()(
           feedUnsubscribe();
         }
 
+        const cachedLikedPostIds =
+          optimizedFeedService.getCachedLikedPostIds(userId);
+        if (cachedLikedPostIds.size > 0) {
+          const currentDisplay = {
+            ...getCurrentUserDisplay(),
+            userId,
+          };
+          set((state) => ({
+            posts: state.posts.map((post) =>
+              applyCachedLikedState(post, cachedLikedPostIds, currentDisplay),
+            ),
+            userPosts: state.userPosts.map((post) =>
+              applyCachedLikedState(post, cachedLikedPostIds, currentDisplay),
+            ),
+          }));
+        }
+
         // ALWAYS show loading until first complete data arrives
         set({ loading: true, feedBootstrapping: true });
 
@@ -1062,45 +1131,57 @@ export const usePostsStore = create<PostsStore>()(
               })),
             );
 
-            const frontendPosts: FeedPost[] = backendPosts.map((post) => ({
-              id: post.id,
-              author: {
-                id: post.author_id || post.author.user_id,
-                name: post.author.display_name || post.author.username,
-                avatar: post.author.avatar_url || "",
-                username: post.author.username,
-              },
-              content: post.content || "",
-              media: post.media_url
-                ? {
-                    type:
-                      post.media_type === "PHOTO"
-                        ? "image"
-                        : post.media_type === "VIDEO"
-                          ? "video"
-                          : "audio",
-                    url: post.media_url,
-                    thumbnail: post.media_url,
-                  }
-                : undefined,
-              stats: { views: post.view_count || 0 },
-              likesByUser: post.is_liked_by_user
-                ? {
-                    [userId]: {
-                      userId,
-                      name: "Anonymous",
-                      username: "anonymous",
-                      avatar: "",
-                      tapCount: 1,
-                    },
-                  }
-                : {},
-              likes_count: post.likes_count || 0,
-              comments: [],
-              comments_count: post.comments_count || 0,
-              timestamp: post.created_at,
-              taggedFriends: [],
-            }));
+            const existingPostsById = new Map(
+              get().posts.map((post) => [post.id, post]),
+            );
+
+            const frontendPosts: FeedPost[] = backendPosts.map((post) => {
+              const mappedPost: FeedPost = {
+                id: post.id,
+                author: {
+                  id: post.author_id || post.author.user_id,
+                  name: post.author.display_name || post.author.username,
+                  avatar: post.author.avatar_url || "",
+                  username: post.author.username,
+                },
+                content: post.content || "",
+                media: post.media_url
+                  ? {
+                      type:
+                        post.media_type === "PHOTO"
+                          ? "image"
+                          : post.media_type === "VIDEO"
+                            ? "video"
+                            : "audio",
+                      url: post.media_url,
+                      thumbnail: post.media_url,
+                    }
+                  : undefined,
+                stats: { views: post.view_count || 0 },
+                likesByUser: post.is_liked_by_user
+                  ? {
+                      [userId]: {
+                        userId,
+                        name: "Anonymous",
+                        username: "anonymous",
+                        avatar: "",
+                        tapCount: 1,
+                      },
+                    }
+                  : {},
+                likes_count: post.likes_count || 0,
+                comments: [],
+                comments_count: post.comments_count || 0,
+                timestamp: post.created_at,
+                taggedFriends: [],
+              };
+
+              return preserveCurrentUserLike(
+                mappedPost,
+                existingPostsById.get(post.id),
+                userId,
+              );
+            });
 
             console.log(
               "🔍 STORE DEBUG: Transformed to frontend:",
@@ -1321,11 +1402,11 @@ export const usePostsStore = create<PostsStore>()(
           likeUnsubscribes[postId]();
         }
 
-        // Set loading state
+        // Set loading state only when we have no local like data to show.
         set((state) =>
           updatePostInCollections(state, postId, (post) => ({
             ...post,
-            likesLoading: true,
+            likesLoading: Object.keys(post.likesByUser).length === 0,
           })),
         );
 
@@ -1346,11 +1427,16 @@ export const usePostsStore = create<PostsStore>()(
                     const optimisticCurrentUserLike = currentUserId
                       ? post.likesByUser[currentUserId]
                       : undefined;
+                    const syncedCurrentUserLike = currentUserId
+                      ? likesByUser[currentUserId]
+                      : undefined;
 
                     if (
                       currentUserId &&
                       optimisticCurrentUserLike?.tapCount &&
-                      !likesByUser[currentUserId]
+                      (!syncedCurrentUserLike ||
+                        optimisticCurrentUserLike.tapCount >
+                          (syncedCurrentUserLike.tapCount || 0))
                     ) {
                       likesByUser[currentUserId] = optimisticCurrentUserLike;
                     }

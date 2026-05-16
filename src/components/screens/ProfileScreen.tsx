@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ChangeEvent,
+  type MouseEvent,
+} from "react";
 import {
   Target,
   Eye,
@@ -20,7 +27,6 @@ import {
   Activity,
   MessageSquare,
   ChevronRight,
-  Users,
 } from "lucide-react";
 import "@/styles/design-system.css";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
@@ -33,6 +39,7 @@ import { FriendsScreen } from "./FriendsScreen";
 import { Avatar } from "../ui/Avatar";
 import { useProfileDataStore } from "../../stores/profileDataStore";
 import { getAggressiveAvatar, useAvatarStore } from "../../stores/avatarStore";
+import { avatarSyncService } from "@/services/avatarSyncService";
 import { friendsService } from "../../middleware/services/service-factory";
 import { closeFriendsService } from "../../middleware/services/service-factory";
 import { formatTimeAgo } from "../../utils/timeFormat";
@@ -233,7 +240,7 @@ export function ProfileScreen({
   const [activeTab, setActiveTab] = useState<"posts" | "truths" | "dares">(
     "posts",
   );
-  const { user, signOut, subscribe } = useAuthStore();
+  const { user, signOut, subscribe, uploadAvatar } = useAuthStore();
   const {
     posts: storePosts,
     userPosts,
@@ -248,6 +255,7 @@ export function ProfileScreen({
   const [showPostsScreen, setShowPostsScreen] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showFriendsScreen, setShowFriendsScreen] = useState(false);
   const [showAvatarPreview, setShowAvatarPreview] = useState(false);
   const [showTruthsListScreen, setShowTruthsListScreen] = useState(false);
@@ -266,14 +274,7 @@ export function ProfileScreen({
     truthsLoadedForUserId: null,
     daresLoadedForUserId: null,
   });
-  const avatarLongPressTimer = useRef<number | null>(null);
-
-  const clearAvatarLongPressTimer = useCallback(() => {
-    if (avatarLongPressTimer.current !== null) {
-      window.clearTimeout(avatarLongPressTimer.current);
-      avatarLongPressTimer.current = null;
-    }
-  }, []);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   // Handle logout
   const handleLogout = async () => {
@@ -300,10 +301,6 @@ export function ProfileScreen({
     const unsubscribe = subscribe((_updatedUser) => {});
     return () => unsubscribe();
   }, [subscribe]);
-
-  useEffect(() => {
-    return () => clearAvatarLongPressTimer();
-  }, [clearAvatarLongPressTimer]);
 
   // Load user profile and friends count when component mounts or user changes
   useEffect(() => {
@@ -460,16 +457,41 @@ export function ProfileScreen({
       username,
     ) || "/default-avatar.png";
 
-  const handleAvatarPressStart = () => {
-    clearAvatarLongPressTimer();
-    avatarLongPressTimer.current = window.setTimeout(() => {
-      setShowAvatarPreview(true);
-      avatarLongPressTimer.current = null;
-    }, 420);
+  const handleAvatarTap = () => {
+    setShowAvatarPreview(true);
   };
 
-  const handleAvatarPressEnd = () => {
-    clearAvatarLongPressTimer();
+  const handleAvatarUploadClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    avatarFileInputRef.current?.click();
+  };
+
+  const handleAvatarFileSelect = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    setIsUploadingAvatar(true);
+    try {
+      const response = await uploadAvatar(file);
+      if (!response.success) {
+        alert(response.error || "Unable to upload avatar.");
+        return;
+      }
+
+      if (user?.id) {
+        await avatarSyncService.refreshUserAvatar(user.id);
+      }
+    } catch (error) {
+      alert(
+        error instanceof Error ? error.message : "Unable to upload avatar.",
+      );
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   };
 
   const allUserDares = [...sentDares, ...receivedDares];
@@ -764,7 +786,7 @@ export function ProfileScreen({
                         height: "52px",
                         background: "rgba(255,255,255,0.15)",
                         borderRadius: "50%",
-                        display: "flex",
+                        display: "none",
                         alignItems: "center",
                         justifyContent: "center",
                         backdropFilter: "blur(4px)",
@@ -872,11 +894,11 @@ export function ProfileScreen({
       style={{
         minHeight: "100vh",
         background:
-          "radial-gradient(circle at 50% -10%, rgba(74,222,128,0.11), transparent 30%), radial-gradient(circle at 88% 16%, rgba(96,165,250,0.055), transparent 26%), #050705",
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)",
         fontFamily:
           "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
-        paddingTop: "var(--safe-area-top)",
-        paddingBottom: "calc(100px + var(--safe-area-bottom))",
+        paddingTop: "calc(var(--safe-area-top) + 12px)",
+        paddingBottom: "calc(var(--bottom-nav-total-height) + 24px)",
         position: "relative",
         overflowX: "hidden",
         overflowY: "auto",
@@ -886,34 +908,66 @@ export function ProfileScreen({
         .profile-posts-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 8px;
+          gap: 10px;
           margin-bottom: 0;
         }
         .profile-hero-card {
           display: flex;
-          align-items: flex-start;
-          gap: 20px;
+          flex-direction: column;
+          gap: 18px;
         }
         .profile-stat-capsule {
           min-height: 68px;
         }
+        .profile-ig-stat {
+          align-items: center;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-width: 0;
+          min-height: 66px;
+          text-align: center;
+        }
+        .profile-ig-stat-value {
+          color: #fff;
+          font-size: 26px;
+          font-weight: 950;
+          line-height: 1;
+          margin: 0 0 9px;
+          letter-spacing: -0.02em;
+        }
+        .profile-ig-stat-label {
+          color: rgba(148, 163, 184, 0.9);
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.18em;
+          line-height: 1;
+          margin: 0;
+          text-transform: uppercase;
+        }
         @media (max-width: 480px) {
           .profile-posts-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 6px;
+            gap: 8px;
           }
           .profile-hero-card {
-            gap: 14px;
-            padding: 18px !important;
-            border-radius: 26px !important;
+            gap: 16px;
+            padding: 24px 26px 18px !important;
+            border-radius: 34px !important;
           }
           .profile-hero-card h2 {
-            font-size: 24px !important;
+            font-size: 20px !important;
           }
           .profile-stat-capsule {
             min-height: 58px;
             padding: 8px 7px !important;
             border-radius: 16px !important;
+          }
+          .profile-ig-stat-value {
+            font-size: 23px;
+          }
+          .profile-ig-stat-label {
+            font-size: 9px;
           }
         }
         @keyframes fadeInUp {
@@ -932,8 +986,17 @@ export function ProfileScreen({
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        @keyframes dailySweep {
+          0% { transform: translateX(-120%); }
+          42% { transform: translateX(120%); }
+          100% { transform: translateX(120%); }
+        }
+        @keyframes dailyFloatIn {
+          from { opacity: 0; transform: translateY(16px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
         .animate-fade-in-up {
-          animation: fadeInUp 0.6s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+          animation: dailyFloatIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
         }
         .animate-pulse {
           animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -942,6 +1005,14 @@ export function ProfileScreen({
           background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
           background-size: 200% 100%;
           animation: shimmer 1.5s infinite;
+        }
+        .profile-daily-shine::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.13), transparent);
+          animation: dailySweep 6.6s ease-in-out infinite;
+          pointer-events: none;
         }
       `}</style>
 
@@ -965,7 +1036,65 @@ export function ProfileScreen({
       <div
         className="animate-fade-in-up"
         style={{
-          padding: "24px 20px 16px",
+          padding: "0 20px 18px",
+          maxWidth: "1100px",
+          margin: "0 auto",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                color: "#fff",
+                fontSize: "32px",
+                fontWeight: 900,
+                lineHeight: 1,
+                margin: 0,
+                letterSpacing: 0,
+              }}
+            >
+              Profile
+            </h1>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setShowEditProfile(true);
+            }}
+            aria-label="Edit profile"
+            style={{
+              width: "56px",
+              height: "56px",
+              flexShrink: 0,
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.04)",
+              color: "#4ade80",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 18px 44px rgba(0,0,0,0.32)",
+            }}
+          >
+            <Settings size={24} />
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="animate-fade-in-up"
+        style={{
+          padding: "0 20px 16px",
           position: "relative",
           zIndex: 1,
           maxWidth: "1100px",
@@ -975,14 +1104,14 @@ export function ProfileScreen({
         <div
           className="profile-hero-card"
           style={{
-            marginBottom: "18px",
-            padding: "22px",
-            borderRadius: "30px",
+            marginBottom: "14px",
+            padding: "24px 26px 18px",
+            borderRadius: "34px",
             border: "1px solid rgba(255,255,255,0.08)",
             background:
-              "linear-gradient(145deg, rgba(24,30,24,0.98) 0%, rgba(11,14,11,0.99) 54%, rgba(6,8,6,0.99) 100%)",
+              "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, rgba(6,8,6,0.96) 0%, rgba(10,15,10,0.96) 48%, rgba(3,4,3,0.98) 100%)",
             boxShadow:
-              "0 24px 72px rgba(0,0,0,0.34), 0 0 44px rgba(74,222,128,0.055), inset 0 1px 0 rgba(255,255,255,0.055)",
+              "0 24px 64px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)",
             overflow: "hidden",
             position: "relative",
           }}
@@ -993,8 +1122,9 @@ export function ProfileScreen({
               inset: "0 0 auto 0",
               height: "1px",
               background:
-                "linear-gradient(90deg, transparent 0%, rgba(74,222,128,0.55) 46%, rgba(96,165,250,0.22) 64%, transparent 100%)",
+                "linear-gradient(90deg, rgba(74,222,128,0), rgba(74,222,128,0.82), rgba(74,222,128,0))",
               pointerEvents: "none",
+              opacity: 0.42,
             }}
           />
           <div
@@ -1005,7 +1135,7 @@ export function ProfileScreen({
               width: "180px",
               height: "180px",
               borderRadius: "999px",
-              background: "rgba(74,222,128,0.11)",
+              background: "rgba(74,222,128,0.10)",
               filter: "blur(38px)",
               pointerEvents: "none",
             }}
@@ -1023,352 +1153,260 @@ export function ProfileScreen({
               pointerEvents: "none",
             }}
           />
-          {/* Avatar */}
-          <div style={{ position: "relative", flexShrink: 0 }}>
-            <div
-              onPointerDown={handleAvatarPressStart}
-              onPointerUp={handleAvatarPressEnd}
-              onPointerCancel={handleAvatarPressEnd}
-              onPointerLeave={handleAvatarPressEnd}
-              onContextMenu={(event) => event.preventDefault()}
-              style={{
-                padding: "3px",
-                borderRadius: "50%",
-                background:
-                  "linear-gradient(135deg, rgba(74,222,128,0.9), rgba(255,255,255,0.18) 42%, rgba(96,165,250,0.38))",
-                boxShadow:
-                  "0 12px 38px rgba(0,0,0,0.45), 0 0 28px rgba(74,222,128,0.14), inset 0 1px 0 rgba(255,255,255,0.16)",
-                width: "90px",
-                height: "90px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                position: "relative",
-                zIndex: 1,
-                cursor: "zoom-in",
-                touchAction: "manipulation",
-                WebkitUserSelect: "none",
-                userSelect: "none",
-              }}
-            >
-              <Avatar
-                src={user?.avatar || ""}
-                alt={displayName || "User"}
-                size="xl"
-                userId={user?.id}
-              />
-            </div>
-            <button
-              style={{
-                position: "absolute",
-                bottom: "0px",
-                right: "0px",
-                width: "26px",
-                height: "26px",
-                borderRadius: "50%",
-                background: "#141714",
-                border: "2px solid #0b100b",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                color: "#fff",
-                boxShadow: "0 8px 18px rgba(0,0,0,0.22)",
-              }}
-            >
-              <Camera size={13} />
-            </button>
-            {onNavigateToActivity && (
-              <button
-                onClick={onNavigateToActivity}
-                style={{
-                  position: "absolute",
-                  bottom: "0px",
-                  left: "-8px",
-                  width: "26px",
-                  height: "26px",
-                  borderRadius: "50%",
-                  background: "#4ade80",
-                  border: "2px solid #0b100b",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  color: "#000",
-                  boxShadow: "0 10px 22px rgba(74,222,128,0.26)",
-                }}
-              >
-                <Activity size={13} />
-              </button>
-            )}
-          </div>
-
-          {/* Name + username + bio */}
           <div
             style={{
-              flex: 1,
-              minWidth: 0,
-              paddingTop: "12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "20px",
+              width: "100%",
               position: "relative",
               zIndex: 1,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 0,
-                position: "absolute",
-                top: "4px",
-                right: 0,
-              }}
-            >
-              <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
-                <button
-                  onClick={() => setIsGhostMode(!isGhostMode)}
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "50%",
-                    border: isGhostMode
-                      ? "1.5px solid rgba(74,222,128,0.4)"
-                      : "1px solid rgba(255,255,255,0.08)",
-                    background: isGhostMode
-                      ? "linear-gradient(180deg, rgba(74,222,128,0.2), rgba(74,222,128,0.08))"
-                      : "rgba(255,255,255,0.04)",
-                    color: isGhostMode ? "#4ade80" : "rgba(255,255,255,0.5)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
-                    boxShadow: isGhostMode
-                      ? "0 0 22px rgba(74,222,128,0.24)"
-                      : "0 8px 18px rgba(0,0,0,0.18)",
-                  }}
-                >
-                  <Shield size={14} strokeWidth={2} />
-                </button>
-                <button
-                  onClick={() => {
-                    setShowEditProfile(true);
-                  }}
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "50%",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    background: "rgba(255,255,255,0.04)",
-                    color: "rgba(255,255,255,0.5)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
-                    boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(74,222,128,0.3)";
-                    e.currentTarget.style.background = "rgba(74,222,128,0.1)";
-                    e.currentTarget.style.color = "#4ade80";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor =
-                      "rgba(255,255,255,0.08)";
-                    e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-                    e.currentTarget.style.color = "rgba(255,255,255,0.5)";
-                  }}
-                >
-                  <Settings size={14} strokeWidth={2} />
-                </button>
-              </div>
-            </div>
-            <h2
-              style={{
-                color: "#fff",
-                fontSize: "30px",
-                fontWeight: 850,
-                lineHeight: 1.05,
-                margin: "0 0 7px",
-                letterSpacing: "-0.035em",
-                textShadow: "0 12px 30px rgba(0,0,0,0.38)",
-              }}
-            >
-              {displayName}
-            </h2>
-            <p
-              style={{
-                color: "rgba(74,222,128,0.7)",
-                fontSize: "15px",
-                fontWeight: 700,
-                letterSpacing: "-0.01em",
-                margin: user?.bio ? "0 0 11px" : 0,
-              }}
-            >
-              {username.startsWith("@") ? username : `@${username}`}
-            </p>
-            {user?.bio && (
-              <p
+            {/* Avatar */}
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <div
+                onClick={handleAvatarTap}
+                onContextMenu={(event) => event.preventDefault()}
                 style={{
-                  color: "rgba(255,255,255,0.68)",
-                  fontSize: "14px",
-                  lineHeight: 1.55,
-                  margin: 0,
-                  maxWidth: "560px",
+                  padding: 0,
+                  borderRadius: "50%",
+                  background: "transparent",
+                  boxShadow: "0 16px 38px rgba(0,0,0,0.42)",
+                  width: "94px",
+                  height: "94px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  position: "relative",
+                  zIndex: 1,
+                  cursor: "zoom-in",
+                  touchAction: "manipulation",
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
                 }}
               >
-                {user.bio}
+                <Avatar
+                  src={user?.avatar || ""}
+                  alt={displayName || "User"}
+                  size="xl"
+                  userId={user?.id}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleAvatarUploadClick}
+                disabled={isUploadingAvatar}
+                aria-label="Change avatar"
+                style={{
+                  position: "absolute",
+                  bottom: "2px",
+                  right: "2px",
+                  width: "27px",
+                  height: "27px",
+                  borderRadius: "50%",
+                  background: "#111611",
+                  border: "2px solid #050805",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: isUploadingAvatar ? "default" : "pointer",
+                  color: "#fff",
+                  boxShadow: "0 8px 18px rgba(0,0,0,0.28)",
+                  opacity: isUploadingAvatar ? 0.72 : 1,
+                }}
+              >
+                {isUploadingAvatar ? (
+                  <span
+                    style={{
+                      width: "12px",
+                      height: "12px",
+                      borderRadius: "999px",
+                      border: "2px solid rgba(255,255,255,0.45)",
+                      borderTopColor: "#fff",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                ) : (
+                  <Camera size={13} />
+                )}
+              </button>
+              {onNavigateToActivity && (
+                <button
+                  onClick={onNavigateToActivity}
+                  style={{
+                    position: "absolute",
+                    bottom: "2px",
+                    left: "-5px",
+                    width: "27px",
+                    height: "27px",
+                    borderRadius: "50%",
+                    background: "#4ade80",
+                    border: "2px solid #050805",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    color: "#000",
+                    boxShadow: "0 10px 22px rgba(74,222,128,0.26)",
+                  }}
+                >
+                  <Activity size={13} />
+                </button>
+              )}
+            </div>
+
+            <div style={{ minWidth: 0, flex: 1, paddingTop: "2px" }}>
+              <h2
+                style={{
+                  color: "#fff",
+                  fontSize: "27px",
+                  fontWeight: 950,
+                  lineHeight: 1.05,
+                  margin: "0 0 8px",
+                  letterSpacing: "-0.02em",
+                  textShadow: "0 12px 30px rgba(0,0,0,0.36)",
+                }}
+              >
+                {displayName}
+              </h2>
+              <p
+                style={{
+                  color: "rgba(203,213,225,0.82)",
+                  fontSize: "15px",
+                  fontWeight: 800,
+                  letterSpacing: 0,
+                  margin: 0,
+                }}
+              >
+                {username.startsWith("@") ? username : `@${username}`}
               </p>
-            )}
+            </div>
+          </div>
+
+          {/* Reference-style stats */}
+          <div
+            style={{
+              width: "100%",
+              position: "relative",
+              zIndex: 1,
+              borderTop: "1px solid rgba(255,255,255,0.07)",
+              paddingTop: "13px",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              {[
+                { label: "Completed", value: profileStats.daresCompleted },
+                { label: "Surrendered", value: profileStats.daresSurrendered },
+                { label: "Friends", value: profileStats.friends },
+              ].map((stat) => (
+                <button
+                  key={stat.label}
+                  type="button"
+                  onClick={
+                    stat.label === "Friends" ? handleFriendsClick : undefined
+                  }
+                  className="profile-ig-stat"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: "0 1px",
+                    cursor: stat.label === "Friends" ? "pointer" : "default",
+                    WebkitTapHighlightColor: "transparent",
+                  }}
+                >
+                  <p className="profile-ig-stat-value">{stat.value}</p>
+                  <p className="profile-ig-stat-label">{stat.label}</p>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Profile info and actions */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: "8px",
-            marginBottom: "0px",
+            marginBottom: "0",
+            padding: user?.bio ? "6px 0 0" : "10px 0 0",
           }}
         >
-          {[
-            {
-              label: "Friends",
-              sublabel: "Circle",
-              value: profileStats.friends,
-              onClick: handleFriendsClick,
-              accent: "#4ade80",
-              icon: <Users size={14} strokeWidth={2.4} />,
-            },
-            {
-              label: "Dares",
-              sublabel: "Completed",
-              value: profileStats.daresCompleted,
-              onClick: undefined,
-              accent: "#22c55e",
-              icon: <CheckCircle size={14} strokeWidth={2.4} />,
-            },
-            {
-              label: "Dares",
-              sublabel: "Surrendered",
-              value: profileStats.daresSurrendered,
-              onClick: undefined,
-              accent: "#f59e0b",
-              icon: <X size={14} strokeWidth={2.4} />,
-            },
-          ].map(({ label, sublabel, value, onClick, accent, icon }) => (
-            <div
-              key={`${label}-${sublabel}`}
-              className="profile-stat-capsule"
-              onClick={onClick}
+          {user?.bio && (
+            <p
               style={{
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.024))",
-                border: `1px solid ${accent}22`,
-                borderRadius: "18px",
-                padding: "10px 10px 9px",
-                cursor: onClick ? "pointer" : "default",
-                transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
-                boxShadow:
-                  "0 10px 26px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.045)",
-                position: "relative",
-                overflow: "hidden",
-              }}
-              onMouseEnter={(e) => {
-                if (onClick) {
-                  e.currentTarget.style.borderColor = "rgba(74,222,128,0.32)";
-                  e.currentTarget.style.background =
-                    "linear-gradient(180deg, rgba(74,222,128,0.095), rgba(255,255,255,0.026))";
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (onClick) {
-                  e.currentTarget.style.borderColor = `${accent}22`;
-                  e.currentTarget.style.background =
-                    "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.024))";
-                  e.currentTarget.style.transform = "translateY(0)";
-                }
+                color: "rgba(255,255,255,0.7)",
+                fontSize: "14px",
+                lineHeight: 1.45,
+                margin: "0 0 14px",
+                maxWidth: "560px",
               }}
             >
-              <div
-                style={{
-                  position: "absolute",
-                  inset: "0 0 auto 0",
-                  height: "1px",
-                  background: `linear-gradient(90deg, transparent, ${accent}88, transparent)`,
-                  opacity: 0.7,
-                }}
-              />
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "6px",
-                  marginBottom: "7px",
-                }}
-              >
-                <p
-                  style={{
-                    color: "#fff",
-                    fontWeight: 900,
-                    fontSize: "19px",
-                    lineHeight: 1,
-                    margin: 0,
-                    letterSpacing: "-0.03em",
-                  }}
-                >
-                  {value}
-                </p>
-                <div
-                  style={{
-                    width: "26px",
-                    height: "26px",
-                    borderRadius: "999px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: accent,
-                    background: `${accent}14`,
-                    border: `1px solid ${accent}24`,
-                    boxShadow: `0 0 18px ${accent}20`,
-                    flexShrink: 0,
-                  }}
-                >
-                  {icon}
-                </div>
-              </div>
-              <p
-                style={{
-                  color: "rgba(255,255,255,0.82)",
-                  fontSize: "10px",
-                  lineHeight: 1.1,
-                  margin: "0 0 2px",
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  fontWeight: 800,
-                }}
-              >
-                {label}
-              </p>
-              <p
-                style={{
-                  color: "rgba(255,255,255,0.38)",
-                  fontSize: "9px",
-                  lineHeight: 1.1,
-                  margin: 0,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  fontWeight: 600,
-                }}
-              >
-                {sublabel}
-              </p>
-            </div>
-          ))}
+              {user.bio}
+            </p>
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto",
+              gap: "8px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={onNavigateToActivity}
+              disabled={!onNavigateToActivity}
+              style={{
+                minHeight: "42px",
+                borderRadius: "16px",
+                border: "1px solid rgba(74,222,128,0.24)",
+                background:
+                  "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(56,189,248,0.08)), linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.028))",
+                color: "#d7ffe6",
+                fontSize: "13px",
+                fontWeight: 900,
+                cursor: onNavigateToActivity ? "pointer" : "default",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                boxShadow:
+                  "0 14px 32px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.07)",
+                opacity: onNavigateToActivity ? 1 : 0.58,
+              }}
+            >
+              <Activity size={16} strokeWidth={2.4} />
+              View activity
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsGhostMode(!isGhostMode)}
+              aria-label="Toggle ghost mode"
+              style={{
+                width: "42px",
+                height: "42px",
+                borderRadius: "16px",
+                border: isGhostMode
+                  ? "1px solid rgba(74,222,128,0.42)"
+                  : "1px solid rgba(255,255,255,0.08)",
+                background: isGhostMode
+                  ? "linear-gradient(180deg, rgba(74,222,128,0.18), rgba(74,222,128,0.07))"
+                  : "rgba(255,255,255,0.045)",
+                color: isGhostMode ? "#4ade80" : "#94a3b8",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              <Shield size={17} strokeWidth={2.2} />
+            </button>
+          </div>
         </div>
 
         {/* Tab Bar */}
@@ -1377,14 +1415,14 @@ export function ProfileScreen({
             display: "grid",
             gridTemplateColumns: "1fr 1fr 1fr",
             background:
-              "linear-gradient(180deg, rgba(24,29,24,0.98), rgba(17,21,17,0.98))",
+              "linear-gradient(180deg, rgba(21,27,21,0.92), rgba(10,14,10,0.96))",
             borderRadius: "999px",
             padding: "5px",
-            marginTop: "30px",
-            marginBottom: "20px",
-            border: "1px solid rgba(255,255,255,0.06)",
+            marginTop: "20px",
+            marginBottom: "14px",
+            border: "1px solid rgba(255,255,255,0.08)",
             boxShadow:
-              "0 16px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.05)",
+              "0 18px 48px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)",
           }}
         >
           {(["posts", "truths", "dares"] as const).map((tab) => (
@@ -1397,19 +1435,19 @@ export function ProfileScreen({
                 border: "none",
                 cursor: "pointer",
                 fontSize: "13px",
-                fontWeight: 800,
+                fontWeight: 900,
                 textTransform: "capitalize",
                 transition: "all 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
                 background:
                   activeTab === tab
                     ? "linear-gradient(135deg, #4ade80, #22c55e)"
                     : "transparent",
-                color: activeTab === tab ? "#000" : "rgba(255,255,255,0.4)",
+                color: activeTab === tab ? "#061006" : "#94a3b8",
                 boxShadow:
                   activeTab === tab
                     ? "0 4px 24px rgba(74,222,128,0.35), inset 0 1px 0 rgba(255,255,255,0.3)"
                     : "none",
-                letterSpacing: "0.02em",
+                letterSpacing: 0,
               }}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -1421,68 +1459,13 @@ export function ProfileScreen({
         {activeTab === "posts" && (
           <div
             style={{
-              padding: "20px",
-              borderRadius: "28px",
-              border: "1px solid rgba(255,255,255,0.06)",
-              background:
-                "linear-gradient(180deg, rgba(18,20,18,0.98), rgba(10,12,10,0.98))",
-              boxShadow:
-                "0 20px 56px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)",
+              padding: "8px 0 0",
+              borderRadius: 0,
+              border: "none",
+              background: "transparent",
+              boxShadow: "none",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "12px",
-                marginBottom: "16px",
-              }}
-            >
-              <div>
-                <p
-                  style={{
-                    color: "#fff",
-                    fontSize: "15px",
-                    fontWeight: 800,
-                    margin: "0 0 4px",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  Post Grid
-                </p>
-                <p
-                  style={{
-                    color: "rgba(255,255,255,0.42)",
-                    fontSize: "12px",
-                    margin: 0,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    fontWeight: 600,
-                  }}
-                >
-                  {sortedPosts.length} published moments
-                </p>
-              </div>
-              {sortedPosts.length > 0 && (
-                <button
-                  onClick={() => setShowPostsScreen(true)}
-                  style={{
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    background: "rgba(255,255,255,0.03)",
-                    color: "#fff",
-                    padding: "10px 14px",
-                    borderRadius: "999px",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  View All
-                </button>
-              )}
-            </div>
             {sortedPosts.length === 0 ? (
               <div
                 style={{
@@ -1523,26 +1506,28 @@ export function ProfileScreen({
               </div>
             ) : (
               <div className="profile-posts-grid">
-                {sortedPosts.slice(0, 4).map((post) => (
+                {sortedPosts.map((post) => (
                   <div
                     key={post.id}
                     style={{
                       width: "100%",
                       aspectRatio: "1/1",
-                      borderRadius: "16px",
+                      borderRadius: "20px",
                       overflow: "hidden",
-                      border: "1px solid rgba(255,255,255,0.08)",
+                      border: "1px solid rgba(255,255,255,0.09)",
                       cursor: "pointer",
                       position: "relative",
                       transition: "all 0.2s cubic-bezier(0.32, 0.72, 0, 1)",
                       backdropFilter: "blur(10px)",
-                      background: "rgba(20,20,20,0.95)",
+                      background:
+                        "linear-gradient(180deg, rgba(18,25,20,0.96), rgba(7,10,8,0.98))",
                       WebkitUserSelect: "none",
                       userSelect: "none",
                       WebkitTapHighlightColor: "transparent",
                       touchAction: "manipulation",
                       zIndex: 1,
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+                      boxShadow:
+                        "0 16px 34px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.045)",
                     }}
                   >
                     <button
@@ -1592,7 +1577,7 @@ export function ProfileScreen({
                           width: "100%",
                           height: "100%",
                           objectFit: "cover",
-                          borderRadius: "16px",
+                          borderRadius: "20px",
                         }}
                       />
                     ) : (
@@ -1601,13 +1586,13 @@ export function ProfileScreen({
                           width: "100%",
                           height: "100%",
                           background:
-                            "linear-gradient(135deg, rgba(74,222,128,0.15), rgba(34,197,94,0.08))",
+                            "radial-gradient(circle at 25% 20%, rgba(74,222,128,0.16), transparent 44%), radial-gradient(circle at 80% 70%, rgba(56,189,248,0.12), transparent 42%), linear-gradient(135deg, rgba(14,24,18,0.98), rgba(5,8,6,0.98))",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
                           padding: "12px",
                           textAlign: "center",
-                          borderRadius: "16px",
+                          borderRadius: "20px",
                         }}
                       >
                         <p
@@ -1629,22 +1614,25 @@ export function ProfileScreen({
                         position: "absolute",
                         inset: 0,
                         background:
-                          "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%)",
+                          "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.16) 46%, transparent 78%)",
                         display: "flex",
                         alignItems: "flex-end",
+                        justifyContent: "space-between",
                         padding: "10px",
                         opacity: 0,
                         transition: "opacity 0.2s ease",
-                        borderRadius: "16px",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.opacity = "1";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.opacity = "0";
+                        borderRadius: "20px",
+                        pointerEvents: "none",
                       }}
                     >
-                      <div style={{ display: "flex", gap: "8px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          minWidth: 0,
+                        }}
+                      >
                         <span
                           style={{
                             color: "#fff",
@@ -1662,6 +1650,64 @@ export function ProfileScreen({
                           }}
                         >
                           💬 {post.comments_count || 0}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        alignItems: "flex-end",
+                        padding: "10px",
+                        borderRadius: "20px",
+                        background:
+                          "linear-gradient(to top, rgba(0,0,0,0.74) 0%, rgba(0,0,0,0.14) 44%, transparent 76%)",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          maxWidth: "100%",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(2,4,3,0.42)",
+                          padding: "5px 8px",
+                          backdropFilter: "blur(10px)",
+                          WebkitBackdropFilter: "blur(10px)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            color: "#fff",
+                            fontSize: "11px",
+                            fontWeight: 850,
+                            textShadow: "0 2px 8px rgba(0,0,0,0.55)",
+                          }}
+                        >
+                          <Heart size={12} strokeWidth={2.3} />
+                          {Object.keys(post.likesByUser || {}).length}
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            color: "#fff",
+                            fontSize: "11px",
+                            fontWeight: 850,
+                            textShadow: "0 2px 8px rgba(0,0,0,0.55)",
+                          }}
+                        >
+                          <MessageCircle size={12} strokeWidth={2.3} />
+                          {post.comments_count || 0}
                         </span>
                       </div>
                     </div>
@@ -1709,7 +1755,17 @@ export function ProfileScreen({
         )}
 
         {activeTab === "truths" && (
-          <div style={{ padding: "10px 16px 24px" }}>
+          <div
+            style={{
+              padding: "20px",
+              borderRadius: "34px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              background:
+                "linear-gradient(180deg, rgba(16,20,17,0.96), rgba(7,9,8,0.98))",
+              boxShadow:
+                "0 30px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
+          >
             {loadingTruth ? (
               <div
                 style={{
@@ -2004,7 +2060,17 @@ export function ProfileScreen({
         )}
 
         {activeTab === "dares" && (
-          <div style={{ padding: "10px 16px 24px" }}>
+          <div
+            style={{
+              padding: "20px",
+              borderRadius: "34px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              background:
+                "linear-gradient(180deg, rgba(16,20,17,0.96), rgba(7,9,8,0.98))",
+              boxShadow:
+                "0 30px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
+          >
             {loadingDares ? (
               <div
                 style={{
@@ -2335,6 +2401,14 @@ export function ProfileScreen({
         </button>
       </div>
 
+      <input
+        ref={avatarFileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAvatarFileSelect}
+        style={{ display: "none" }}
+      />
+
       {showAvatarPreview && (
         <div
           className="app-modal-backdrop"
@@ -2362,7 +2436,7 @@ export function ProfileScreen({
             }}
             style={{
               position: "absolute",
-              top: "calc(18px + env(safe-area-inset-top))",
+              top: "calc(18px + var(--safe-area-top))",
               right: "18px",
               width: "42px",
               height: "42px",
@@ -2394,6 +2468,7 @@ export function ProfileScreen({
                 "linear-gradient(135deg, rgba(74,222,128,0.95), rgba(255,255,255,0.22) 44%, rgba(96,165,250,0.42))",
               boxShadow:
                 "0 30px 100px rgba(0,0,0,0.58), 0 0 60px rgba(74,222,128,0.14), inset 0 1px 0 rgba(255,255,255,0.2)",
+              position: "relative",
             }}
           >
             <img
@@ -2408,6 +2483,45 @@ export function ProfileScreen({
                 background: "#111611",
               }}
             />
+            <button
+              type="button"
+              onClick={handleAvatarUploadClick}
+              disabled={isUploadingAvatar}
+              aria-label="Change avatar"
+              style={{
+                position: "absolute",
+                right: "10px",
+                bottom: "10px",
+                width: "48px",
+                height: "48px",
+                borderRadius: "999px",
+                border: "3px solid #080d08",
+                background: "#4ade80",
+                color: "#061006",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: isUploadingAvatar ? "default" : "pointer",
+                boxShadow:
+                  "0 16px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.16)",
+                opacity: isUploadingAvatar ? 0.78 : 1,
+              }}
+            >
+              {isUploadingAvatar ? (
+                <span
+                  style={{
+                    width: "18px",
+                    height: "18px",
+                    borderRadius: "999px",
+                    border: "2px solid rgba(6,16,6,0.32)",
+                    borderTopColor: "#061006",
+                    animation: "spin 0.8s linear infinite",
+                  }}
+                />
+              ) : (
+                <Camera size={21} />
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -2458,3 +2572,4 @@ export function ProfileScreen({
     </div>
   );
 }
+

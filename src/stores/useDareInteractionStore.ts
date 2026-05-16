@@ -22,6 +22,10 @@ interface DareInteractionState {
   comments: Record<string, DareComment[]>;
   // Vote data keyed by dareId
   voteData: Record<string, DareVoteData>;
+  // Media like counts keyed by dareId
+  mediaLikeCounts: Record<string, number>;
+  // Current user's media like state keyed by dareId
+  mediaLikedByUser: Record<string, boolean>;
   // Loading states
   loadingComments: Record<string, boolean>;
   loadingVotes: Record<string, boolean>;
@@ -30,6 +34,8 @@ interface DareInteractionState {
   _commentCountSubs: Record<string, Unsubscribe>;
   _commentSubs: Record<string, Unsubscribe>;
   _voteSubs: Record<string, Unsubscribe>;
+  _mediaLikeCountSubs: Record<string, Unsubscribe>;
+  _userMediaLikeSubs: Record<string, Unsubscribe>;
 
   // Actions
   recordView: (dareId: string, userId: string) => void;
@@ -37,8 +43,12 @@ interface DareInteractionState {
   loadCommentCounts: (dareIds: string[]) => Promise<void>;
   subscribeToViewCount: (dareId: string) => void;
   subscribeToCommentCount: (dareId: string) => void;
+  subscribeToMediaLikeCount: (dareId: string) => void;
+  subscribeToUserMediaLike: (dareId: string, userId: string) => void;
   unsubscribeFromViewCount: (dareId: string) => void;
   unsubscribeFromCommentCount: (dareId: string) => void;
+  unsubscribeFromMediaLikeCount: (dareId: string) => void;
+  unsubscribeFromUserMediaLike: (dareId: string) => void;
   subscribeToComments: (dareId: string) => void;
   unsubscribeFromComments: (dareId: string) => void;
   unsubscribeAll: () => void;
@@ -52,6 +62,7 @@ interface DareInteractionState {
     parentId?: string | null,
   ) => Promise<DareComment | null>;
   likeComment: (commentId: string) => void;
+  likeMedia: (dareId: string, userId: string) => Promise<void>;
   recordVote: (
     dareId: string,
     voterId: string,
@@ -79,12 +90,16 @@ export const useDareInteractionStore = create<DareInteractionState>(
     commentCounts: {},
     comments: {},
     voteData: {},
+    mediaLikeCounts: {},
+    mediaLikedByUser: {},
     loadingComments: {},
     loadingVotes: {},
     _viewSubs: {},
     _commentCountSubs: {},
     _commentSubs: {},
     _voteSubs: {},
+    _mediaLikeCountSubs: {},
+    _userMediaLikeSubs: {},
 
     // Record a view (fire-and-forget)
     recordView: (dareId: string, userId: string) => {
@@ -145,6 +160,52 @@ export const useDareInteractionStore = create<DareInteractionState>(
       }));
     },
 
+    subscribeToMediaLikeCount: (dareId: string) => {
+      const { _mediaLikeCountSubs } = get();
+      if (_mediaLikeCountSubs[dareId]) return;
+
+      const unsub = dareInteractionsService.subscribeToMediaLikeCount(
+        dareId,
+        (count) => {
+          set((state) => ({
+            mediaLikeCounts: { ...state.mediaLikeCounts, [dareId]: count },
+          }));
+        },
+      );
+
+      set((state) => ({
+        _mediaLikeCountSubs: {
+          ...state._mediaLikeCountSubs,
+          [dareId]: unsub,
+        },
+      }));
+    },
+
+    subscribeToUserMediaLike: (dareId: string, userId: string) => {
+      const { _userMediaLikeSubs } = get();
+      if (_userMediaLikeSubs[dareId]) return;
+
+      const unsub = dareInteractionsService.subscribeToUserMediaLike(
+        dareId,
+        userId,
+        (liked) => {
+          set((state) => ({
+            mediaLikedByUser: {
+              ...state.mediaLikedByUser,
+              [dareId]: liked,
+            },
+          }));
+        },
+      );
+
+      set((state) => ({
+        _userMediaLikeSubs: {
+          ...state._userMediaLikeSubs,
+          [dareId]: unsub,
+        },
+      }));
+    },
+
     unsubscribeFromViewCount: (dareId: string) => {
       const { _viewSubs } = get();
       if (_viewSubs[dareId]) {
@@ -162,6 +223,26 @@ export const useDareInteractionStore = create<DareInteractionState>(
         const newSubs = { ...get()._commentCountSubs };
         delete newSubs[dareId];
         set({ _commentCountSubs: newSubs });
+      }
+    },
+
+    unsubscribeFromMediaLikeCount: (dareId: string) => {
+      const { _mediaLikeCountSubs } = get();
+      if (_mediaLikeCountSubs[dareId]) {
+        _mediaLikeCountSubs[dareId]();
+        const newSubs = { ...get()._mediaLikeCountSubs };
+        delete newSubs[dareId];
+        set({ _mediaLikeCountSubs: newSubs });
+      }
+    },
+
+    unsubscribeFromUserMediaLike: (dareId: string) => {
+      const { _userMediaLikeSubs } = get();
+      if (_userMediaLikeSubs[dareId]) {
+        _userMediaLikeSubs[dareId]();
+        const newSubs = { ...get()._userMediaLikeSubs };
+        delete newSubs[dareId];
+        set({ _userMediaLikeSubs: newSubs });
       }
     },
 
@@ -257,16 +338,27 @@ export const useDareInteractionStore = create<DareInteractionState>(
 
     // Clean up all subscriptions
     unsubscribeAll: () => {
-      const { _viewSubs, _commentCountSubs, _commentSubs, _voteSubs } = get();
+      const {
+        _viewSubs,
+        _commentCountSubs,
+        _commentSubs,
+        _voteSubs,
+        _mediaLikeCountSubs,
+        _userMediaLikeSubs,
+      } = get();
       Object.values(_viewSubs).forEach((unsub) => unsub());
       Object.values(_commentCountSubs).forEach((unsub) => unsub());
       Object.values(_commentSubs).forEach((unsub) => unsub());
       Object.values(_voteSubs).forEach((unsub) => unsub());
+      Object.values(_mediaLikeCountSubs).forEach((unsub) => unsub());
+      Object.values(_userMediaLikeSubs).forEach((unsub) => unsub());
       set({
         _viewSubs: {},
         _commentCountSubs: {},
         _commentSubs: {},
         _voteSubs: {},
+        _mediaLikeCountSubs: {},
+        _userMediaLikeSubs: {},
       });
     },
 
@@ -391,6 +483,37 @@ export const useDareInteractionStore = create<DareInteractionState>(
         ),
       }));
       dareInteractionsService.likeComment(commentId);
+    },
+
+    likeMedia: async (dareId: string, userId: string) => {
+      if (get().mediaLikedByUser[dareId]) return;
+
+      set((state) => ({
+        mediaLikedByUser: {
+          ...state.mediaLikedByUser,
+          [dareId]: true,
+        },
+        mediaLikeCounts: {
+          ...state.mediaLikeCounts,
+          [dareId]: (state.mediaLikeCounts[dareId] || 0) + 1,
+        },
+      }));
+
+      try {
+        await dareInteractionsService.likeMedia(dareId, userId);
+      } catch (error) {
+        console.error("❌ likeMedia error:", error);
+        set((state) => ({
+          mediaLikedByUser: {
+            ...state.mediaLikedByUser,
+            [dareId]: false,
+          },
+          mediaLikeCounts: {
+            ...state.mediaLikeCounts,
+            [dareId]: Math.max((state.mediaLikeCounts[dareId] || 1) - 1, 0),
+          },
+        }));
+      }
     },
 
     // Share dare to DM

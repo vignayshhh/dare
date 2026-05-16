@@ -106,7 +106,7 @@ export class DataAdapter {
         ? {
             type: this.mapProofMediaType(entity.proofMediaType),
             url: entity.proofMediaUrl,
-            thumbnail: entity.proofMediaUrl, // Use same URL for now
+            thumbnail: entity.proofThumbnailUrl || entity.proofMediaUrl,
           }
         : undefined,
       state: this.mapDareState(entity.state),

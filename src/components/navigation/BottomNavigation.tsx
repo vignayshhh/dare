@@ -1,8 +1,8 @@
 "use client";
 
-import { Home, Target, User, Plus, Grid3X3 } from "lucide-react";
+import { BadgeCheck, Flame, Home, User, Plus } from "lucide-react";
 
-type Screen = "main" | "dares" | "profile" | "feed";
+type Screen = "truth" | "main" | "dares" | "profile" | "feed";
 
 interface BottomNavigationProps {
   currentScreen: Screen;
@@ -16,27 +16,29 @@ export function BottomNavigation({
   onCreateClick,
 }: BottomNavigationProps) {
   const navItems = [
-    { id: "dares" as Screen, label: "Dares", icon: Target },
+    { id: "truth" as Screen, label: "Feed", icon: BadgeCheck },
+    { id: "main" as Screen, label: "Dares", icon: Flame },
     { id: "feed" as Screen, label: "Home", icon: Home },
-    { id: "main" as Screen, label: "Feed", icon: Grid3X3 },
   ];
 
   return (
     <div
-      className="app-bottom-nav-motion fixed bottom-0 left-0 right-0 safe-area-x bg-[#0a0f0a]/95 backdrop-blur-lg border-t border-[#2a2a2a] z-9999"
+      className="app-bottom-nav-motion fixed bottom-0 left-0 right-0 backdrop-blur-lg z-9999"
       style={{
         position: "fixed",
-        bottom: 0,
-        left: 0,
-        right: 0,
+        bottom: "var(--bottom-nav-bottom-offset)",
+        left: "max(var(--safe-area-left), var(--bottom-nav-inline-inset))",
+        right: "max(var(--safe-area-right), var(--bottom-nav-inline-inset))",
         zIndex: 9999,
-        background: "rgba(10, 15, 10, 0.95)",
+        background:
+          "radial-gradient(ellipse at 28% -42%, rgba(74,222,128,0.1), transparent 66%), radial-gradient(ellipse at 76% -34%, rgba(14,165,233,0.06), transparent 64%), linear-gradient(180deg, rgba(6,8,6,0.93) 0%, rgba(10,15,10,0.92) 54%, rgba(3,4,3,0.93) 100%)",
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
-        borderTop: "1px solid rgba(42, 42, 42, 1)",
-        paddingBottom: "var(--safe-area-bottom)",
+        borderRadius: "var(--bottom-nav-radius)",
+        overflow: "hidden",
+        paddingBottom: "var(--bottom-nav-bottom-padding)",
         boxShadow:
-          "0 16px 0 rgba(10, 15, 10, 0.98), 0 -16px 40px rgba(0, 0, 0, 0.32)",
+          "0 -12px 32px rgba(0, 0, 0, 0.24)",
       }}
     >
       <div

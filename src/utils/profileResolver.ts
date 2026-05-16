@@ -22,35 +22,62 @@ const inFlightProfileRequests = new Map<
   Promise<ResolvedUserProfile | null>
 >();
 
+function cleanProfileText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function fallbackUsernameForUser(userId: string): string {
+  return userId ? `user_${userId.slice(-6)}` : "user";
+}
+
+function isPlaceholderProfileText(value: unknown, userId?: string): boolean {
+  const text = cleanProfileText(value).toLowerCase().replace(/^@/, "");
+  if (!text) return true;
+
+  const generated = userId ? fallbackUsernameForUser(userId).toLowerCase() : "";
+  return (
+    text === "someone" ||
+    text === "unknown" ||
+    text === "unknown user" ||
+    text === "user" ||
+    text === "guest" ||
+    (!!generated && text === generated)
+  );
+}
+
+function hasMeaningfulProfileName(
+  profile: Pick<ResolvedUserProfile, "displayName" | "username" | "userId">,
+): boolean {
+  return (
+    !isPlaceholderProfileText(profile.displayName, profile.userId) ||
+    !isPlaceholderProfileText(profile.username, profile.userId)
+  );
+}
+
 function normalizeResolvedUserProfile(
   userId: string,
   rawProfile: any,
 ): ResolvedUserProfile | null {
   if (!rawProfile) return null;
 
+  const username = cleanProfileText(rawProfile.username);
+  const displayName =
+    cleanProfileText(rawProfile.displayName) ||
+    cleanProfileText(rawProfile.display_name) ||
+    cleanProfileText(rawProfile.nickname) ||
+    username ||
+    fallbackUsernameForUser(userId);
+  const resolvedUsername = username || fallbackUsernameForUser(userId);
+
   return {
     id: userId,
     userId,
     user_id: userId,
-    displayName:
-      rawProfile.displayName ||
-      rawProfile.display_name ||
-      rawProfile.nickname ||
-      rawProfile.username ||
-      "Someone",
-    display_name:
-      rawProfile.displayName ||
-      rawProfile.display_name ||
-      rawProfile.nickname ||
-      rawProfile.username ||
-      "Someone",
-    username: rawProfile.username || "someone",
+    displayName,
+    display_name: displayName,
+    username: resolvedUsername,
     nickname:
-      rawProfile.nickname ||
-      rawProfile.displayName ||
-      rawProfile.display_name ||
-      rawProfile.username ||
-      "Someone",
+      cleanProfileText(rawProfile.nickname) || displayName || resolvedUsername,
     avatarUrl:
       rawProfile.avatarUrl ||
       rawProfile.avatar_url ||
@@ -83,7 +110,7 @@ export function getCachedResolvedUserProfile(
   if (!userId) return null;
 
   const memoryCached = resolvedProfileCache.get(userId);
-  if (memoryCached) {
+  if (memoryCached && hasMeaningfulProfileName(memoryCached)) {
     return memoryCached;
   }
 
@@ -100,8 +127,11 @@ export function getCachedResolvedUserProfile(
     avatarUrl: profileStoreEntry?.avatarUrl || avatarStoreEntry,
   });
 
-  if (resolvedProfile) {
+  if (resolvedProfile && hasMeaningfulProfileName(resolvedProfile)) {
     resolvedProfileCache.set(userId, resolvedProfile);
+  } else if (resolvedProfile) {
+    resolvedProfileCache.delete(userId);
+    return null;
   }
 
   return resolvedProfile;
@@ -113,6 +143,11 @@ export function primeResolvedUserProfile(
 ): ResolvedUserProfile | null {
   const resolvedProfile = normalizeResolvedUserProfile(userId, rawProfile);
   if (!resolvedProfile) {
+    return null;
+  }
+
+  if (!hasMeaningfulProfileName(resolvedProfile)) {
+    resolvedProfileCache.delete(userId);
     return null;
   }
 
@@ -160,3 +195,5 @@ export async function resolveUserProfile(
   inFlightProfileRequests.set(userId, request);
   return request;
 }
+
+

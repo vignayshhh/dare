@@ -170,6 +170,32 @@ class FeedService {
       console.log("🔍 Media URL before validation:", request.media_url);
       const sanitizedMediaUrl = validateOptionalMediaUrl(request.media_url);
       console.log("✅ Media URL after validation:", sanitizedMediaUrl);
+      try {
+        const { apiFetch } = await import("@/lib/apiClient");
+        const response = await apiFetch<{ ok: boolean; post: Post }>(
+          "/api/posts",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              content: sanitizedContent || "",
+              media_url: sanitizedMediaUrl || null,
+              media_type: request.media_type || "TEXT",
+            }),
+          },
+        );
+
+        if (response?.post?.id) {
+          redisCache.invalidatePattern("feed:*").catch(() => {});
+          return response.post;
+        }
+      } catch (error) {
+        secureLogError("createPost API failed", error);
+        console.error("❌ [CREATE POST API] failed:", error);
+        if (!this.isApiAuthFailure(error)) {
+          throw error;
+        }
+      }
+
       const postRef = doc(collection(db, "posts"));
 
       // Fetch author profile to denormalize onto post doc
@@ -1272,6 +1298,7 @@ class FeedService {
   ): Unsubscribe {
     const likesRef = collection(db, "post_likes");
     const q = query(likesRef, where("post_id", "==", postId));
+    const authorCache = new Map<string, PostWithAuthor["author"]>();
 
     return onSnapshot(
       q,
@@ -1280,10 +1307,17 @@ class FeedService {
           (docSnap) => docSnap.data() as PostLike,
         );
         const authorIds = [...new Set(rawLikes.map((like) => like.user_id))];
-        const authorsMap = await this.batchGetAuthors(authorIds);
+        const missingAuthorIds = authorIds.filter((id) => !authorCache.has(id));
+
+        if (missingAuthorIds.length > 0) {
+          const fetchedAuthors = await this.batchGetAuthors(missingAuthorIds);
+          fetchedAuthors.forEach((author, id) => {
+            if (author) authorCache.set(id, author);
+          });
+        }
 
         const likes = rawLikes.map((like) => {
-          const author = authorsMap.get(like.user_id);
+          const author = authorCache.get(like.user_id);
           const fallbackUsername = `user_${like.user_id.slice(0, 8)}`;
 
           return {

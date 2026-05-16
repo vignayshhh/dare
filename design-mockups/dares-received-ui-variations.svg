@@ -1,0 +1,301 @@
+<svg width="1800" height="1320" viewBox="0 0 1800 1320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="appBg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(900 -60) rotate(90) scale(680 950)">
+      <stop stop-color="#4ADE80" stop-opacity="0.18"/>
+      <stop offset="0.45" stop-color="#0EA5E9" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#030403" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="screenBg" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#060806"/>
+      <stop offset="0.52" stop-color="#0A0F0A"/>
+      <stop offset="1" stop-color="#030403"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#151B15" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#080C09" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="panelSoft" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#101611" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#070908" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="activeGreen" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#8BE4AA"/>
+      <stop offset="1" stop-color="#35B96F"/>
+    </linearGradient>
+    <linearGradient id="cyanGreen" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#4ADE80"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="warmTiny" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#F5B452"/>
+      <stop offset="1" stop-color="#4ADE80"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#000000" flood-opacity="0.42"/>
+    </filter>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="15" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+    <style>
+      .label { font-family: Inter, Arial, sans-serif; fill: #FFFFFF; font-weight: 900; letter-spacing: 0; }
+      .muted { font-family: Inter, Arial, sans-serif; fill: #94A3B8; font-weight: 700; }
+      .tiny { font-family: Inter, Arial, sans-serif; fill: #86EFAC; font-weight: 900; letter-spacing: 1.7px; }
+      .body { font-family: Inter, Arial, sans-serif; fill: #CBD5E1; font-weight: 750; }
+      .caption { font-family: Inter, Arial, sans-serif; fill: #64748B; font-weight: 750; }
+      .phone { fill: url(#screenBg); stroke: rgba(255,255,255,0.08); stroke-width: 1.2; }
+      .shine { stroke: rgba(134,239,172,0.70); stroke-width: 1; }
+      .glass { fill: rgba(255,255,255,0.045); stroke: rgba(255,255,255,0.09); stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1320" fill="#030403"/>
+  <rect width="1800" height="1320" fill="url(#appBg)"/>
+
+  <text x="80" y="82" class="label" font-size="40">Dares Received UI Directions</text>
+  <text x="80" y="122" class="muted" font-size="18">Mobile-only SVG concepts using the app's current premium emerald, cyan, dark glass, and Daily Challenge language.</text>
+
+  <!-- Variation 1 -->
+  <g transform="translate(80 180)">
+    <text x="0" y="-34" class="label" font-size="25">1. Daily Inbox Hero</text>
+    <text x="0" y="-8" class="muted" font-size="15">Closest to Daily Challenge: cinematic top card, strong first capsule, premium queue feeling.</text>
+    <rect x="0" y="0" width="360" height="760" rx="44" class="phone" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="360" height="760" rx="44" fill="url(#appBg)" opacity="0.85"/>
+
+    <rect x="18" y="28" width="324" height="142" rx="32" fill="url(#panel)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+    <line x1="58" y1="29" x2="302" y2="29" class="shine"/>
+    <circle cx="48" cy="67" r="22" class="glass"/>
+    <path d="M55 59 L47 67 L55 75" stroke="#94A3B8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="84" y="77" class="label" font-size="28">Dares &amp;</text>
+    <text x="84" y="108" class="label" font-size="28">Truths</text>
+    <circle cx="301" cy="72" r="25" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/>
+    <path d="M291 73 C294 62 309 62 312 73 C309 83 294 83 291 73Z" stroke="#4ADE80" stroke-width="2.4"/>
+    <circle cx="301.5" cy="73" r="3.5" fill="#4ADE80"/>
+
+    <rect x="34" y="121" width="292" height="36" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.08)"/>
+    <rect x="40" y="126" width="136" height="26" rx="13" fill="url(#activeGreen)"/>
+    <text x="75" y="144" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="12">RECEIVED</text>
+    <text x="220" y="144" class="muted" font-size="12">SENT</text>
+
+    <rect x="18" y="190" width="324" height="96" rx="28" fill="url(#panel)" stroke="rgba(74,222,128,0.25)" filter="url(#softShadow)"/>
+    <line x1="52" y1="190" x2="308" y2="190" class="shine"/>
+    <rect x="36" y="211" width="54" height="54" rx="20" fill="rgba(74,222,128,0.10)" stroke="rgba(74,222,128,0.22)"/>
+    <path d="M58 231 L68 237 L58 243" stroke="#86EFAC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="106" y="229" class="tiny" font-size="10">ACTIVE QUEUE</text>
+    <text x="106" y="253" class="label" font-size="18">3 challenges waiting</text>
+    <circle cx="304" cy="238" r="17" class="glass"/>
+    <path d="M299 232 L306 238 L299 244" stroke="#CBD5E1" stroke-width="2.3" stroke-linecap="round"/>
+
+    <g transform="translate(18 314)">
+      <rect width="324" height="146" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <line x1="34" y1="0" x2="290" y2="0" class="shine"/>
+      <circle cx="43" cy="39" r="22" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="76" y="34" class="tiny" font-size="9">CHALLENGER</text>
+      <text x="76" y="56" class="label" font-size="16">@aarav</text>
+      <rect x="253" y="22" width="52" height="24" rx="12" fill="rgba(74,222,128,0.12)" stroke="rgba(74,222,128,0.28)"/>
+      <text x="264" y="38" class="tiny" font-size="9">TRUTH</text>
+      <rect x="18" y="76" width="288" height="52" rx="18" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.07)"/>
+      <rect x="34" y="90" width="48" height="4" rx="2" fill="#4ADE80"/>
+      <text x="34" y="113" class="body" font-size="13">What's one thing you never admit?</text>
+    </g>
+
+    <g transform="translate(18 478)">
+      <rect width="324" height="158" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <circle cx="43" cy="39" r="22" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="76" y="34" class="tiny" font-size="9">CHALLENGER</text>
+      <text x="76" y="56" class="label" font-size="16">@maya</text>
+      <rect x="260" y="22" width="45" height="24" rx="12" fill="rgba(245,180,82,0.10)" stroke="rgba(245,180,82,0.20)"/>
+      <text x="271" y="38" fill="#FFD98A" font-family="Inter, Arial" font-weight="900" font-size="9">DARE</text>
+      <rect x="18" y="76" width="288" height="50" rx="18" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.07)"/>
+      <rect x="34" y="90" width="48" height="4" rx="2" fill="url(#warmTiny)"/>
+      <text x="34" y="113" class="body" font-size="13">Send proof before the timer ends.</text>
+      <rect x="18" y="136" width="140" height="28" rx="14" fill="url(#activeGreen)"/>
+      <text x="65" y="154" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="12">ACCEPT</text>
+      <rect x="166" y="136" width="140" height="28" rx="14" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/>
+      <text x="217" y="154" class="muted" font-size="12">REFUSE</text>
+    </g>
+  </g>
+
+  <!-- Variation 2 -->
+  <g transform="translate(520 180)">
+    <text x="0" y="-34" class="label" font-size="25">2. Chat Stack Inbox</text>
+    <text x="0" y="-8" class="muted" font-size="15">Most readable: like Messages, dares feel like urgent conversations with action states.</text>
+    <rect x="0" y="0" width="360" height="760" rx="44" class="phone" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="360" height="760" rx="44" fill="url(#appBg)" opacity="0.8"/>
+
+    <rect x="18" y="28" width="324" height="92" rx="32" fill="url(#panel)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+    <line x1="58" y1="29" x2="302" y2="29" class="shine"/>
+    <circle cx="48" cy="74" r="22" class="glass"/>
+    <path d="M55 66 L47 74 L55 82" stroke="#94A3B8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="84" y="82" class="label" font-size="32">Inbox</text>
+    <circle cx="301" cy="74" r="24" fill="rgba(74,222,128,0.10)" stroke="rgba(74,222,128,0.24)"/>
+    <path d="M291 73 H311 M301 63 V83" stroke="#4ADE80" stroke-width="2.5" stroke-linecap="round"/>
+
+    <rect x="18" y="140" width="324" height="66" rx="26" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)"/>
+    <rect x="26" y="148" width="150" height="50" rx="22" fill="url(#activeGreen)"/>
+    <text x="70" y="179" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="14">Received</text>
+    <text x="232" y="179" class="muted" font-size="14">Sent</text>
+
+    <g transform="translate(18 230)">
+      <rect width="324" height="94" rx="28" fill="url(#panel)" stroke="rgba(74,222,128,0.26)" filter="url(#softShadow)"/>
+      <line x1="34" y1="0" x2="290" y2="0" class="shine"/>
+      <circle cx="44" cy="47" r="25" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <circle cx="56" cy="60" r="5" fill="#22C55E" stroke="#0A0F0A" stroke-width="2"/>
+      <text x="82" y="41" class="label" font-size="17">New truth from @riya</text>
+      <text x="82" y="63" class="caption" font-size="12">Tap to answer honestly</text>
+      <rect x="257" y="36" width="46" height="22" rx="11" fill="rgba(74,222,128,0.12)" stroke="rgba(74,222,128,0.25)"/>
+      <text x="270" y="51" class="tiny" font-size="8">NEW</text>
+    </g>
+
+    <g transform="translate(18 340)">
+      <rect width="324" height="106" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <circle cx="44" cy="43" r="24" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="82" y="35" class="label" font-size="16">@kabir dared you</text>
+      <text x="82" y="56" class="caption" font-size="12">Waiting for your response</text>
+      <rect x="82" y="73" width="92" height="24" rx="12" fill="url(#activeGreen)"/>
+      <text x="106" y="89" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="10">ACCEPT</text>
+      <rect x="182" y="73" width="92" height="24" rx="12" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/>
+      <text x="207" y="89" class="muted" font-size="10">REFUSE</text>
+      <path d="M296 47 L304 53 L296 59" stroke="#64748B" stroke-width="2.3" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(18 462)">
+      <rect width="324" height="106" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <circle cx="44" cy="43" r="24" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="82" y="35" class="label" font-size="16">@aarav truth</text>
+      <text x="82" y="56" class="caption" font-size="12">Waiting for approval</text>
+      <rect x="82" y="73" width="142" height="24" rx="12" fill="rgba(245,180,82,0.10)" stroke="rgba(245,180,82,0.20)"/>
+      <text x="104" y="89" fill="#FFD98A" font-family="Inter, Arial" font-weight="900" font-size="10">PENDING REVIEW</text>
+      <path d="M296 47 L304 53 L296 59" stroke="#64748B" stroke-width="2.3" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(18 584)">
+      <rect width="324" height="84" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.07)" filter="url(#softShadow)"/>
+      <circle cx="44" cy="42" r="24" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="82" y="37" class="label" font-size="16">@neha completed</text>
+      <text x="82" y="58" class="caption" font-size="12">Dare completed</text>
+      <circle cx="286" cy="42" r="17" fill="rgba(74,222,128,0.10)" stroke="rgba(74,222,128,0.22)"/>
+      <path d="M278 42 L284 48 L295 35" stroke="#4ADE80" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- Variation 3 -->
+  <g transform="translate(960 180)">
+    <text x="0" y="-34" class="label" font-size="25">3. Search Capsule Command</text>
+    <text x="0" y="-8" class="muted" font-size="15">Cleanest: Search screen style, compact filter/search capsule, more controlled and professional.</text>
+    <rect x="0" y="0" width="360" height="760" rx="44" class="phone" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="360" height="760" rx="44" fill="url(#appBg)" opacity="0.78"/>
+
+    <g transform="translate(18 30)">
+      <circle cx="30" cy="30" r="23" class="glass"/>
+      <path d="M37 22 L29 30 L37 38" stroke="#94A3B8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="68" y="40" class="label" font-size="32">Dares</text>
+      <circle cx="283" cy="30" r="25" class="glass"/>
+      <path d="M274 30 H292 M283 21 V39" stroke="#4ADE80" stroke-width="2.5" stroke-linecap="round"/>
+    </g>
+
+    <rect x="18" y="106" width="324" height="86" rx="30" fill="url(#panel)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+    <line x1="52" y1="106" x2="308" y2="106" class="shine"/>
+    <rect x="34" y="122" width="292" height="54" rx="27" fill="#070907" stroke="rgba(255,255,255,0.08)"/>
+    <circle cx="61" cy="149" r="8" stroke="#86EFAC" stroke-width="2"/>
+    <path d="M67 155 L75 163" stroke="#86EFAC" stroke-width="2" stroke-linecap="round"/>
+    <text x="90" y="154" class="caption" font-size="14">Find received dares</text>
+
+    <rect x="18" y="214" width="324" height="54" rx="24" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)"/>
+    <rect x="26" y="222" width="96" height="38" rx="19" fill="url(#activeGreen)"/>
+    <text x="55" y="246" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="12">All</text>
+    <text x="152" y="246" class="muted" font-size="12">Truth</text>
+    <text x="242" y="246" class="muted" font-size="12">Dare</text>
+
+    <g transform="translate(18 292)">
+      <rect width="324" height="130" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <line x1="34" y1="0" x2="290" y2="0" class="shine"/>
+      <text x="20" y="30" class="tiny" font-size="9">QUESTION</text>
+      <text x="20" y="58" class="label" font-size="17">One thing you avoid saying?</text>
+      <rect x="20" y="80" width="130" height="30" rx="15" fill="url(#activeGreen)"/>
+      <text x="62" y="100" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="11">ANSWER</text>
+      <circle cx="278" cy="48" r="24" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="247" y="92" class="caption" font-size="11">@riya</text>
+    </g>
+
+    <g transform="translate(18 438)">
+      <rect width="324" height="130" rx="28" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <text x="20" y="30" fill="#FFD98A" font-family="Inter, Arial" font-weight="900" font-size="9" letter-spacing="1.7">DARE</text>
+      <text x="20" y="58" class="label" font-size="17">Post a real proof clip.</text>
+      <rect x="20" y="80" width="130" height="30" rx="15" fill="url(#activeGreen)"/>
+      <text x="62" y="100" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="11">ACCEPT</text>
+      <rect x="158" y="80" width="86" height="30" rx="15" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/>
+      <text x="181" y="100" class="muted" font-size="11">Skip</text>
+      <circle cx="278" cy="48" r="24" fill="#121A14" stroke="rgba(255,255,255,0.10)"/>
+      <text x="244" y="92" class="caption" font-size="11">@maya</text>
+    </g>
+
+    <g transform="translate(18 584)">
+      <rect width="324" height="74" rx="26" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.07)"/>
+      <text x="20" y="32" class="label" font-size="15">Waiting for approval</text>
+      <text x="20" y="54" class="caption" font-size="12">2 submissions in review</text>
+      <rect x="240" y="23" width="64" height="28" rx="14" fill="rgba(245,180,82,0.10)" stroke="rgba(245,180,82,0.18)"/>
+      <text x="258" y="42" fill="#FFD98A" font-family="Inter, Arial" font-weight="900" font-size="10">VIEW</text>
+    </g>
+  </g>
+
+  <!-- Variation 4 -->
+  <g transform="translate(1400 180)">
+    <text x="0" y="-34" class="label" font-size="25">4. Proof Queue Cards</text>
+    <text x="0" y="-8" class="muted" font-size="15">Most app-specific: dares feel like premium tasks, with status as the visual driver.</text>
+    <rect x="0" y="0" width="360" height="760" rx="44" class="phone" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="360" height="760" rx="44" fill="url(#appBg)" opacity="0.82"/>
+
+    <rect x="18" y="28" width="324" height="178" rx="34" fill="url(#panel)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+    <line x1="58" y1="29" x2="302" y2="29" class="shine"/>
+    <circle cx="48" cy="67" r="22" class="glass"/>
+    <path d="M55 59 L47 67 L55 75" stroke="#94A3B8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="84" y="76" class="label" font-size="30">Challenge</text>
+    <text x="84" y="108" class="label" font-size="30">Queue</text>
+    <rect x="36" y="132" width="88" height="46" rx="18" fill="rgba(74,222,128,0.10)" stroke="rgba(74,222,128,0.20)"/>
+    <text x="57" y="151" class="tiny" font-size="8">NEW</text>
+    <text x="67" y="171" class="label" font-size="18">3</text>
+    <rect x="136" y="132" width="88" height="46" rx="18" fill="rgba(14,165,233,0.08)" stroke="rgba(14,165,233,0.16)"/>
+    <text x="151" y="151" fill="#67E8F9" font-family="Inter, Arial" font-weight="900" font-size="8" letter-spacing="1.7">ACTIVE</text>
+    <text x="170" y="171" class="label" font-size="18">1</text>
+    <rect x="236" y="132" width="70" height="46" rx="18" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)"/>
+    <text x="250" y="151" class="caption" font-size="8">DONE</text>
+    <text x="263" y="171" class="label" font-size="18">8</text>
+
+    <rect x="18" y="228" width="324" height="54" rx="24" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)"/>
+    <rect x="26" y="236" width="150" height="38" rx="19" fill="url(#activeGreen)"/>
+    <text x="71" y="260" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="12">Received</text>
+    <text x="235" y="260" class="muted" font-size="12">Sent</text>
+
+    <g transform="translate(18 306)">
+      <rect width="324" height="150" rx="30" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <rect x="0" y="0" width="5" height="150" rx="2.5" fill="url(#cyanGreen)"/>
+      <text x="22" y="32" class="tiny" font-size="9">TRUTH CARD</text>
+      <text x="22" y="62" class="label" font-size="18">Answer honestly</text>
+      <text x="22" y="86" class="caption" font-size="12">From @aarav</text>
+      <rect x="22" y="106" width="280" height="28" rx="14" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)"/>
+      <rect x="26" y="110" width="132" height="20" rx="10" fill="url(#activeGreen)"/>
+      <text x="64" y="124" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="10">ANSWER</text>
+      <text x="205" y="124" class="caption" font-size="10">Later</text>
+    </g>
+
+    <g transform="translate(18 474)">
+      <rect width="324" height="150" rx="30" fill="url(#panelSoft)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+      <rect x="0" y="0" width="5" height="150" rx="2.5" fill="url(#warmTiny)"/>
+      <text x="22" y="32" fill="#FFD98A" font-family="Inter, Arial" font-weight="900" font-size="9" letter-spacing="1.7">DARE CARD</text>
+      <text x="22" y="62" class="label" font-size="18">Complete with proof</text>
+      <text x="22" y="86" class="caption" font-size="12">From @maya</text>
+      <rect x="22" y="106" width="132" height="28" rx="14" fill="rgba(74,222,128,0.12)" stroke="rgba(74,222,128,0.25)"/>
+      <text x="52" y="124" class="tiny" font-size="9">15:00 LEFT</text>
+      <rect x="166" y="106" width="136" height="28" rx="14" fill="url(#activeGreen)"/>
+      <text x="204" y="124" fill="#041006" font-family="Inter, Arial" font-weight="900" font-size="10">COMPLETE</text>
+    </g>
+  </g>
+
+  <g transform="translate(80 1010)">
+    <rect width="1640" height="210" rx="34" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.08)" filter="url(#softShadow)"/>
+    <text x="34" y="48" class="label" font-size="25">Quick read</text>
+    <text x="34" y="86" class="body" font-size="17">Best match for your app: Direction 1 or 2. Direction 1 feels closest to Daily Challenge. Direction 2 is the most usable for a received/sent inbox.</text>
+    <text x="34" y="124" class="body" font-size="17">Direction 3 is the safest professional UI. Direction 4 is more unique and task-driven, but it changes the personality of the screen the most.</text>
+    <text x="34" y="162" class="muted" font-size="16">Recommendation: hybrid of 1 + 2. Use the Daily Inbox Hero at the top, then Chat Stack cards below, keeping existing data and sorting untouched.</text>
+  </g>
+</svg>

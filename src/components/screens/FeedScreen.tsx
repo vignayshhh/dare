@@ -2,12 +2,15 @@
 "use client";
 
 import {
+  Fragment,
+  startTransition,
   useState,
   useRef,
   useCallback,
   useEffect,
   useMemo,
   useLayoutEffect,
+  type PointerEvent,
 } from "react";
 import {
   Heart,
@@ -15,6 +18,7 @@ import {
   Plus,
   MessageSquare,
   Send,
+  Volume2,
   X,
   Music,
   Search,
@@ -29,6 +33,17 @@ import {
   Wand2,
   Sparkles,
   Play,
+  PauseCircle,
+  MoreHorizontal,
+  Pencil,
+  Undo2,
+  Redo2,
+  Palette,
+  AlignCenter,
+  ChevronDown,
+  ArrowRight,
+  SlidersHorizontal,
+  Target,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { CommentSection, type CommentItem } from "../ui/CommentSection";
@@ -36,6 +51,11 @@ import { useMessagingStore } from "../../stores/useMessagingStore";
 import { usePostsStore, type FeedPost } from "../../stores/usePostsStore";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
 import { useStoryStore } from "../../stores/useStoryStore";
+import { useContentStore } from "../../stores/useContentStore";
+import type {
+  DarePost,
+  TruthPost,
+} from "../../middleware/adapters/data-adapters";
 import {
   StoryDTO,
   CreateStoryDTO,
@@ -55,10 +75,17 @@ import { useUserGhostModes } from "../../hooks/useUserGhostModes";
 import { commentLikePersistence } from "../../utils/commentLikePersistence";
 import { GhostModeTimer } from "../ui/GhostModeTimer";
 import { StoryViewer } from "../app/StoryViewer";
+import { CommunityChallengePreviewScreen } from "./CommunityChallengePreviewScreen";
+import {
+  COMMUNITY_CHALLENGES,
+  getCommunityChallengeTitle,
+  type CommunityChallenge,
+} from "./communityChallengeData";
 import { ghostModeService } from "../../middleware/services/ghost-mode.service";
 import { storyReactionService } from "../../middleware/services/story-reaction.service";
 import alertService from "../../middleware/services/alert.service.new";
 import {
+  createGeneratedStoryMusicPlayer,
   STORY_FILTER_PRESETS,
   STORY_MUSIC_PRESETS,
   getStoryFilterPreset,
@@ -118,17 +145,19 @@ const totalLikes = (post: FeedPost) => {
   if (typeof post.likes_count === "number") {
     return post.likes_count;
   }
-  return Object.keys(post.likesByUser || {}).length;
+  return Object.keys(getLikesByUser(post)).length;
 };
 
+const getLikesByUser = (post?: FeedPost | null) => post?.likesByUser || {};
+
 const totalLikeTaps = (post: FeedPost) =>
-  Object.values(post.likesByUser).reduce(
+  Object.values(getLikesByUser(post)).reduce(
     (sum, entry) => sum + entry.tapCount,
     0,
   );
 
 const iLiked = (post: FeedPost, currentUserId: string) =>
-  (post.likesByUser[currentUserId]?.tapCount ?? 0) > 0;
+  (getLikesByUser(post)[currentUserId]?.tapCount ?? 0) > 0;
 
 const formatNumber = (n: number | undefined) =>
   n === undefined || n === 0
@@ -154,6 +183,42 @@ const sortStoriesForPlayback = (stories: StoryDTO[]) =>
 const STORY_REPLY_PAYLOAD_URL_LIMIT = 7000;
 const STORY_REPLY_ENCODED_PAYLOAD_LIMIT = 15000;
 const STORY_TEXT_COLORS = ["#ffffff", "#4ade80", "#facc15", "#fb7185", "#38bdf8"];
+const STORY_TEXT_FONTS = [
+  "Bubble",
+  "Deco",
+  "Squeeze",
+  "Typewriter",
+  "Classic",
+];
+const STORY_TEXT_SIZE_MIN = 16;
+const STORY_TEXT_SIZE_MAX = 72;
+const STORY_BRUSHES = ["Pen", "Neon", "Marker", "Chalk"] as const;
+const STORY_TEXT_VERTICAL_SNAP_THRESHOLD = 2.4;
+const STORY_MEDIA_VERTICAL_SNAP_THRESHOLD = 18;
+
+type StoryComposerStage = "audience" | "capture" | "editor";
+type StoryGallerySnap = 25 | 60 | 100;
+type StoryBrushId = (typeof STORY_BRUSHES)[number];
+
+function smoothSnapToCenter(value: number, center: number, threshold: number) {
+  const distance = value - center;
+  const absoluteDistance = Math.abs(distance);
+  if (absoluteDistance > threshold) {
+    return { value, snapped: false };
+  }
+
+  const closeness = 1 - absoluteDistance / threshold;
+  const pull = 0.38 + closeness * 0.42;
+  const snappedValue = value - distance * pull;
+
+  return {
+    value:
+      Math.abs(snappedValue - center) < threshold * 0.08
+        ? center
+        : snappedValue,
+    snapped: true,
+  };
+}
 
 async function createStoryReplyPreviewUrl(story: StoryDTO): Promise<string> {
   const mediaUrl = story.media.url;
@@ -311,6 +376,296 @@ function PostSkeleton() {
   );
 }
 
+const COMMUNITY_RAIL_FIRST_INSERT_AFTER = 3;
+const COMMUNITY_RAIL_REPEAT_EVERY = 12;
+const SOCIAL_DARES_RAIL_FIRST_INSERT_AFTER = 5;
+const TRUTHS_RAIL_FIRST_INSERT_AFTER = 7;
+const SOCIAL_CONTENT_RAIL_REPEAT_EVERY = 12;
+
+const shouldShowRailAfterPost = (
+  postIndex: number,
+  totalPosts: number,
+  firstInsertAfter: number,
+  repeatEvery: number,
+) => {
+  const visiblePostNumber = postIndex + 1;
+  if (totalPosts < firstInsertAfter) return false;
+  if (visiblePostNumber === firstInsertAfter) return true;
+  if (visiblePostNumber < firstInsertAfter) return false;
+  return (
+    (visiblePostNumber - firstInsertAfter) % repeatEvery ===
+    0
+  );
+};
+
+const getCreatedAtMs = (createdAt?: string) => {
+  if (!createdAt) return 0;
+  const parsed = new Date(createdAt).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getTruthPreviewText = (truth: TruthPost) =>
+  truth.answer?.trim() || truth.question;
+
+function CommunityDareFeedRail({
+  joinedChallengeIds,
+  onPreview,
+  onExploreAll,
+}: {
+  joinedChallengeIds: Set<string>;
+  onPreview: (challenge: CommunityChallenge) => void;
+  onExploreAll: () => void;
+}) {
+  const displayChallenges = COMMUNITY_CHALLENGES.slice(0, 5);
+
+  return (
+    <section
+      aria-label="Community dares"
+      className="relative overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(17,23,18,0.94),rgba(7,10,8,0.98))] py-3 shadow-[0_16px_38px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.055)]"
+    >
+      <style>{`
+        .community-feed-rail::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.58),rgba(56,189,248,0.28),transparent)]" />
+      <div className="mb-3 flex items-center justify-between gap-3 px-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#4ade80]/20 bg-[#4ade80]/12 text-[#86efac] shadow-[0_10px_24px_rgba(74,222,128,0.08)]">
+              <Sparkles size={16} fill="currentColor" strokeWidth={0} />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-black uppercase tracking-[0.13em] text-[#bbf7d0]">
+                Community dares
+              </p>
+              <p className="truncate text-xs font-semibold text-[#7c8c80]">
+                Open now
+              </p>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onExploreAll}
+          className="app-pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.055] text-white transition-colors hover:border-[#4ade80]/30 hover:text-[#86efac]"
+          aria-label="Explore community dares"
+        >
+          <ArrowRight size={16} />
+        </button>
+      </div>
+
+      <div
+        className="community-feed-rail flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-4 pb-1"
+        style={{
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+          scrollPaddingInline: "16px",
+        }}
+      >
+        {displayChallenges.map((challenge) => {
+          const challengeTitle = getCommunityChallengeTitle(challenge);
+          const isJoined = joinedChallengeIds.has(challenge.id);
+
+          return (
+            <button
+              key={challenge.id}
+              type="button"
+              onClick={() => onPreview(challenge)}
+              className="app-pressable relative flex h-[92px] w-[232px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-[22px] border p-3 text-left shadow-[0_14px_30px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
+              style={{
+                borderColor: `${challenge.accent}38`,
+                background: `linear-gradient(135deg, ${challenge.accent}26, rgba(255,255,255,0.055) 48%, ${challenge.secondaryAccent}20), linear-gradient(180deg, rgba(10,15,11,0.98), rgba(5,8,6,0.99))`,
+              }}
+              aria-label={`Open ${challengeTitle}`}
+            >
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full opacity-35 blur-2xl"
+                style={{ backgroundColor: challenge.accent }}
+              />
+              <span className="relative z-[1] inline-flex w-fit items-center rounded-full border border-white/10 bg-black/28 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white/78">
+                {isJoined ? "Joined" : challenge.durationLabel}
+              </span>
+              <span className="relative z-[1] line-clamp-2 pr-4 text-[15px] font-black uppercase leading-[1.08] text-white">
+                {challengeTitle}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SocialDaresFeedRail({
+  dares,
+  onExploreAll,
+}: {
+  dares: DarePost[];
+  onExploreAll: () => void;
+}) {
+  if (dares.length === 0) return null;
+
+  return (
+    <section
+      aria-label="Social dares"
+      className="relative overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,23,20,0.94),rgba(7,9,8,0.98))] py-3 shadow-[0_16px_38px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.055)]"
+    >
+      <style>{`
+        .feed-inline-rail::-webkit-scrollbar { display: none; }
+      `}</style>
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(250,204,21,0.58),rgba(74,222,128,0.38),transparent)]" />
+      <div className="mb-3 flex items-center justify-between gap-3 px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#facc15]/20 bg-[#facc15]/12 text-[#fde68a] shadow-[0_10px_24px_rgba(250,204,21,0.08)]">
+            <Target size={16} />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-black uppercase tracking-[0.13em] text-[#fef3c7]">
+              Social dares
+            </p>
+            <p className="truncate text-xs font-semibold text-[#8b8f7f]">
+              Proofs your friends approved
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onExploreAll}
+          className="app-pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.055] text-white transition-colors hover:border-[#facc15]/30 hover:text-[#fde68a]"
+          aria-label="Explore social dares"
+        >
+          <ArrowRight size={16} />
+        </button>
+      </div>
+
+      <div
+        className="feed-inline-rail flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-4 pb-1"
+        style={{
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+          scrollPaddingInline: "16px",
+        }}
+      >
+        {dares.map((dare) => {
+          const thumbnailUrl = dare.proof?.thumbnail || dare.proof?.url;
+
+          return (
+            <button
+              key={dare.id}
+              type="button"
+              onClick={onExploreAll}
+              className="app-pressable relative flex h-[118px] w-[250px] shrink-0 snap-start flex-col justify-end overflow-hidden rounded-[22px] border border-white/10 p-3 text-left shadow-[0_14px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
+              aria-label={`Open dare ${dare.description}`}
+            >
+              {thumbnailUrl ? (
+                <img
+                  src={thumbnailUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 h-full w-full object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <span className="absolute inset-0 bg-[linear-gradient(135deg,rgba(250,204,21,0.18),rgba(74,222,128,0.12),rgba(8,12,10,0.98))]" />
+              )}
+              <span className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.1),rgba(0,0,0,0.36)_42%,rgba(0,0,0,0.86))]" />
+              <span className="relative z-[1] mb-2 inline-flex w-fit items-center rounded-full border border-white/10 bg-black/36 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#fde68a] backdrop-blur-md">
+                Real dare
+              </span>
+              <span className="relative z-[1] line-clamp-2 text-[15px] font-black uppercase leading-[1.08] text-white">
+                {dare.description}
+              </span>
+              <span className="relative z-[1] mt-2 truncate text-xs font-bold text-white/68">
+                {dare.challenger.nickname} dared {dare.receiver.nickname}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function TruthsFeedRail({
+  truths,
+  onExploreAll,
+}: {
+  truths: TruthPost[];
+  onExploreAll: () => void;
+}) {
+  if (truths.length === 0) return null;
+
+  return (
+    <section
+      aria-label="Truths"
+      className="relative overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,22,19,0.94),rgba(6,9,8,0.98))] py-3 shadow-[0_16px_38px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.055)]"
+    >
+      <style>{`
+        .feed-inline-rail::-webkit-scrollbar { display: none; }
+      `}</style>
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.62),rgba(56,189,248,0.34),transparent)]" />
+      <div className="mb-3 flex items-center justify-between gap-3 px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#4ade80]/20 bg-[#4ade80]/12 text-[#86efac] shadow-[0_10px_24px_rgba(74,222,128,0.08)]">
+            <MessageSquare size={16} />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-black uppercase tracking-[0.13em] text-[#bbf7d0]">
+              Truths
+            </p>
+            <p className="truncate text-xs font-semibold text-[#7c8c80]">
+              Fresh answers from friends
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onExploreAll}
+          className="app-pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.055] text-white transition-colors hover:border-[#4ade80]/30 hover:text-[#86efac]"
+          aria-label="Explore truths"
+        >
+          <ArrowRight size={16} />
+        </button>
+      </div>
+
+      <div
+        className="feed-inline-rail flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-4 pb-1"
+        style={{
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+          scrollPaddingInline: "16px",
+        }}
+      >
+        {truths.map((truth) => (
+          <button
+            key={truth.id}
+            type="button"
+            onClick={onExploreAll}
+            className="app-pressable relative flex h-[118px] w-[250px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-[22px] border border-[#4ade80]/16 bg-[linear-gradient(145deg,rgba(74,222,128,0.14),rgba(255,255,255,0.055)_48%,rgba(56,189,248,0.12)),linear-gradient(180deg,rgba(9,15,12,0.98),rgba(5,8,6,0.99))] p-3 text-left shadow-[0_14px_30px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
+            aria-label={`Open truth ${truth.question}`}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full bg-[#4ade80] opacity-20 blur-2xl"
+            />
+            <span className="relative z-[1] inline-flex w-fit items-center rounded-full border border-white/10 bg-black/28 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
+              Truth
+            </span>
+            <span className="relative z-[1] line-clamp-3 text-[15px] font-black leading-[1.15] text-white">
+              {getTruthPreviewText(truth)}
+            </span>
+            <span className="relative z-[1] truncate text-xs font-bold text-white/62">
+              {truth.challenger.nickname} asked {truth.receiver.nickname}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main FeedScreen
 // ---------------------------------------------------------------------------
@@ -322,8 +677,13 @@ export function FeedScreen({
   onNavigateToChat,
   onNavigateToAlerts,
   onNavigateToSearch,
-  onNavigateToDaily,
+  onNavigateToDares,
+  onNavigateToSocialDares,
+  onNavigateToTruths,
+  onNavigateToCommunityDares,
+  onNavigateToDareCenter,
   onNavigateToProfile,
+  onStoryComposerOpenChange,
   onStoryViewerOpenChange,
 }: {
   isActive?: boolean;
@@ -332,8 +692,13 @@ export function FeedScreen({
   onNavigateToChat: () => void;
   onNavigateToAlerts: () => void;
   onNavigateToSearch: () => void;
-  onNavigateToDaily: () => void;
+  onNavigateToDares: () => void;
+  onNavigateToSocialDares: () => void;
+  onNavigateToTruths: () => void;
+  onNavigateToCommunityDares: () => void;
+  onNavigateToDareCenter: () => void;
   onNavigateToProfile?: (userId: string) => void;
+  onStoryComposerOpenChange?: (isOpen: boolean) => void;
   onStoryViewerOpenChange?: (isOpen: boolean) => void;
 }) {
   const { getOrCreateConversation, sendRealTimeMessage } = useMessagingStore();
@@ -357,6 +722,16 @@ export function FeedScreen({
     unsubscribeFromPostLikes,
     loadMorePosts,
   } = usePostsStore();
+  const {
+    truthPosts,
+    darePosts,
+    truthPostsUserId,
+    darePostsUserId,
+    truthPostsScope,
+    darePostsScope,
+    loadTruthPosts,
+    loadDarePosts,
+  } = useContentStore();
   const { user } = useAuthStore();
   const userProfiles = useProfileDataStore((s) => s.userProfiles);
   const currentDisplayName = useProfileDataStore((s) => s.currentDisplayName);
@@ -426,14 +801,21 @@ export function FeedScreen({
   const [showLikesModal, setShowLikesModal] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showDareCenterPrompt, setShowDareCenterPrompt] = useState(false);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [animatingPosts, setAnimatingPosts] = useState<Set<string>>(new Set());
+  const [showStoryTypeSheet, setShowStoryTypeSheet] = useState(false);
   const [showStoryUploadModal, setShowStoryUploadModal] = useState(false);
+  const [storyComposerStage, setStoryComposerStage] =
+    useState<StoryComposerStage>("audience");
+  const [storyPostedPulse, setStoryPostedPulse] = useState(false);
   const [storyUploadMode, setStoryUploadMode] = useState<StoryType | null>(
     null,
   );
+  const [storyGallerySnap, setStoryGallerySnap] =
+    useState<StoryGallerySnap>(25);
   const [dedicationRecipient, setDedicationRecipient] =
     useState<Friend | null>(null);
   const [storyDraftFiles, setStoryDraftFiles] = useState<File[]>([]);
@@ -441,15 +823,50 @@ export function FeedScreen({
     [],
   );
   const [selectedStoryDraftIndex, setSelectedStoryDraftIndex] = useState(0);
+  const [storyMediaTransform, setStoryMediaTransform] = useState({
+    x: 0,
+    y: 0,
+    scale: 1,
+    rotation: 0,
+  });
+  const [isStoryMediaDragging, setIsStoryMediaDragging] = useState(false);
   const [storyDraftText, setStoryDraftText] = useState("");
   const [storyDraftTextColor, setStoryDraftTextColor] = useState("#ffffff");
   const [storyDraftTextX, setStoryDraftTextX] = useState(50);
   const [storyDraftTextY, setStoryDraftTextY] = useState(50);
   const [storyDraftTextSize, setStoryDraftTextSize] = useState(22);
+  const [storyDraftTextScale, setStoryDraftTextScale] = useState(1);
+  const [storyDraftTextRotation, setStoryDraftTextRotation] = useState(0);
+  const [storyDraftTextFont, setStoryDraftTextFont] = useState("Bubble");
+  const [storyDraftTextBg, setStoryDraftTextBg] = useState(true);
+  const [storyDraftTextAlign, setStoryDraftTextAlign] = useState<
+    "left" | "center" | "right"
+  >("center");
   const [isStoryTextDragging, setIsStoryTextDragging] = useState(false);
+  const [isStoryTextEditorOpen, setIsStoryTextEditorOpen] = useState(false);
+  const [storyTextSelected, setStoryTextSelected] = useState(false);
+  const [storyDeleteActive, setStoryDeleteActive] = useState(false);
+  const [storyDeleteArmed, setStoryDeleteArmed] = useState(false);
   const [storyDraftFilter, setStoryDraftFilter] =
     useState<StoryFilterId>("original");
   const [storyDraftMusicId, setStoryDraftMusicId] = useState("none");
+  const [storyPublishAudience, setStoryPublishAudience] = useState<
+    "story" | "close-friends"
+  >("story");
+  const [storyToolbarCollapsed, setStoryToolbarCollapsed] = useState(false);
+  const [isStoryMusicModalOpen, setIsStoryMusicModalOpen] = useState(false);
+  const [storyMusicSearch, setStoryMusicSearch] = useState("");
+  const [storyMusicTrim, setStoryMusicTrim] = useState(15);
+  const [storyPreviewMusicId, setStoryPreviewMusicId] = useState<string | null>(
+    null,
+  );
+  const [isStoryDrawMode, setIsStoryDrawMode] = useState(false);
+  const [storyBrush, setStoryBrush] = useState<StoryBrushId>("Pen");
+  const [storyBrushSize, setStoryBrushSize] = useState(7);
+  const [storyBrushColor, setStoryBrushColor] = useState("#ffffff");
+  const [storyDrawPaths, setStoryDrawPaths] = useState<
+    { id: string; d: string; color: string; width: number; brush: StoryBrushId }[]
+  >([]);
   const [showStoryViewerModal, setShowStoryViewerModal] = useState(false);
   const [selectedStoryIndex, setSelectedStoryIndex] = useState(0);
   const [viewerStories, setViewerStories] = useState<StoryDTO[]>([]);
@@ -466,9 +883,22 @@ export function FeedScreen({
   );
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
+  const [selectedCommunityChallenge, setSelectedCommunityChallenge] =
+    useState<CommunityChallenge | null>(null);
+  const [joinedCommunityChallengeIds, setJoinedCommunityChallengeIds] =
+    useState<Set<string>>(() => new Set());
   const storyDraftFile = storyDraftFiles[selectedStoryDraftIndex] ?? null;
   const storyDraftPreviewUrl =
     storyDraftPreviewUrls[selectedStoryDraftIndex] ?? "";
+  const filteredStoryMusicPresets = useMemo(() => {
+    const query = storyMusicSearch.trim().toLowerCase();
+    if (!query) return STORY_MUSIC_PRESETS;
+    return STORY_MUSIC_PRESETS.filter(
+      (music) =>
+        music.label.toLowerCase().includes(query) ||
+        music.description.toLowerCase().includes(query),
+    );
+  }, [storyMusicSearch]);
 
   const {
     stories,
@@ -498,8 +928,104 @@ export function FeedScreen({
   const burstIdCounter = useRef(0);
   const colorCounterRef = useRef(0);
   const storyDraftPreviewRef = useRef<HTMLDivElement | null>(null);
+  const storyMediaMainRef = useRef<HTMLDivElement | null>(null);
+  const storyTextLayerRef = useRef<HTMLDivElement | null>(null);
   const storyDraftPreviewUrlsRef = useRef<string[]>([]);
   const storyFilterTouchStartXRef = useRef<number | null>(null);
+  const storyGalleryTouchStartYRef = useRef<number | null>(null);
+  const storyMediaPointersRef = useRef<Map<number, { x: number; y: number }>>(
+    new Map(),
+  );
+  const storyMediaGestureRef = useRef<{
+    distance: number;
+    angle: number;
+    centerX: number;
+    centerY: number;
+    startX: number;
+    startY: number;
+    transform: typeof storyMediaTransform;
+  } | null>(null);
+  const storyMediaVisualRef = useRef(storyMediaTransform);
+  const storyMediaMovedRef = useRef(false);
+  const storyTextPointersRef = useRef<Map<number, { x: number; y: number }>>(
+    new Map(),
+  );
+  const storyTextGestureRef = useRef<{
+    distance: number;
+    angle: number;
+    scale: number;
+    rotation: number;
+  } | null>(null);
+  const storyTextDragOffsetRef = useRef({ x: 0, y: 0 });
+  const storyTextVisualRef = useRef({
+    x: storyDraftTextX,
+    y: storyDraftTextY,
+    scale: storyDraftTextScale,
+    rotation: storyDraftTextRotation,
+  });
+  const storyTextPositionFrameRef = useRef<number | null>(null);
+  const storyMediaPositionFrameRef = useRef<number | null>(null);
+  const storyDeleteArmedRef = useRef(false);
+  const storyTextWasEmptyBeforeEditRef = useRef(true);
+  const storyTextTapStartRef = useRef<{ x: number; y: number } | null>(null);
+  const storyTextMovedRef = useRef(false);
+  const storyActiveDrawPathIdRef = useRef<string | null>(null);
+  const storyTypeLongPressTimerRef = useRef<number | null>(null);
+  const storyTypeLongPressTriggeredRef = useRef(false);
+  const storyPreviewMusicPlayerRef = useRef<{ stop: () => void } | null>(null);
+  const storyPostedPulseTimeoutRef = useRef<number | null>(null);
+  const dareCenterLongPressTimerRef = useRef<number | null>(null);
+  const dareCenterLongPressTriggeredRef = useRef(false);
+  const storyTextVerticalSnapActiveRef = useRef(false);
+  const storyMediaVerticalSnapActiveRef = useRef(false);
+
+  const clearDareCenterLongPressTimer = useCallback(() => {
+    if (dareCenterLongPressTimerRef.current !== null) {
+      window.clearTimeout(dareCenterLongPressTimerRef.current);
+      dareCenterLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const openDareCenterPrompt = useCallback(() => {
+    clearDareCenterLongPressTimer();
+    dareCenterLongPressTriggeredRef.current = true;
+    setIsHeaderVisible(true);
+    setShowDareCenterPrompt(true);
+  }, [clearDareCenterLongPressTimer]);
+
+  const handleDareLogoPointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      clearDareCenterLongPressTimer();
+      dareCenterLongPressTriggeredRef.current = false;
+      dareCenterLongPressTimerRef.current = window.setTimeout(() => {
+        openDareCenterPrompt();
+      }, 650);
+    },
+    [clearDareCenterLongPressTimer, openDareCenterPrompt],
+  );
+
+  const handleDareLogoPointerUp = useCallback(() => {
+    clearDareCenterLongPressTimer();
+  }, [clearDareCenterLongPressTimer]);
+
+  const handleEnterDareCenter = useCallback(() => {
+    setShowDareCenterPrompt(false);
+    onNavigateToDareCenter();
+  }, [onNavigateToDareCenter]);
+
+  const handleJoinCommunityChallenge = useCallback((challengeId: string) => {
+    setJoinedCommunityChallengeIds((current) => {
+      if (current.has(challengeId)) return current;
+      const next = new Set(current);
+      next.add(challengeId);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => clearDareCenterLongPressTimer();
+  }, [clearDareCenterLongPressTimer]);
 
   // ── Header hide/show logic ──
   useEffect(() => {
@@ -556,6 +1082,31 @@ export function FeedScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, currentUser.userId]);
 
+  useEffect(() => {
+    if (!isActive || currentUser.userId === "me") return;
+
+    const shouldLoadTruths =
+      truthPostsUserId !== currentUser.userId || truthPostsScope !== "feed";
+    const shouldLoadDares =
+      darePostsUserId !== currentUser.userId || darePostsScope !== "feed";
+
+    if (shouldLoadTruths) {
+      void loadTruthPosts(false, "feed");
+    }
+    if (shouldLoadDares) {
+      void loadDarePosts(false, "feed");
+    }
+  }, [
+    currentUser.userId,
+    darePostsScope,
+    darePostsUserId,
+    isActive,
+    loadDarePosts,
+    loadTruthPosts,
+    truthPostsScope,
+    truthPostsUserId,
+  ]);
+
   const sortedPosts = useMemo(
     () =>
       [...posts].sort((a, b) => {
@@ -571,6 +1122,24 @@ export function FeedScreen({
         return b.id.localeCompare(a.id);
       }),
     [posts],
+  );
+
+  const feedSocialDares = useMemo(
+    () =>
+      [...darePosts]
+        .filter((dare) => dare.state === "ACCEPTED_REAL" && dare.proof?.url)
+        .sort((a, b) => getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt))
+        .slice(0, 8),
+    [darePosts],
+  );
+
+  const feedTruths = useMemo(
+    () =>
+      [...truthPosts]
+        .filter((truth) => truth.state === "APPROVED" && truth.answer?.trim())
+        .sort((a, b) => getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt))
+        .slice(0, 8),
+    [truthPosts],
   );
 
   // Derive selectedPost from live store data (not a stale snapshot)
@@ -627,7 +1196,7 @@ export function FeedScreen({
     ...sortedPosts.map((post) => post.author.id),
     ...friends.map((friend) => friend.user_id || friend.id),
     ...(selectedPost
-      ? Object.values(selectedPost.likesByUser).map((entry) => entry.userId)
+      ? Object.values(getLikesByUser(selectedPost)).map((entry) => entry.userId)
       : []),
   ]);
 
@@ -805,6 +1374,7 @@ export function FeedScreen({
     showLikesModal ||
       showCommentsModal ||
       showShareModal ||
+      showStoryTypeSheet ||
       showStoryUploadModal ||
       showStoryViewerModal,
   );
@@ -876,38 +1446,147 @@ export function FeedScreen({
     storyDraftPreviewUrlsRef.current = storyDraftPreviewUrls;
   }, [storyDraftPreviewUrls]);
 
+  const applyStoryMediaTransform = useCallback(() => {
+    const element = storyMediaMainRef.current;
+    if (!element) return;
+    const { x, y, scale, rotation } = storyMediaVisualRef.current;
+    element.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale}) rotate(${rotation}deg)`;
+  }, []);
+
+  const applyStoryTextTransform = useCallback(() => {
+    const element = storyTextLayerRef.current;
+    if (!element) return;
+    const { x, y, scale, rotation } = storyTextVisualRef.current;
+    element.style.left = `${x}%`;
+    element.style.top = `${y}%`;
+    element.style.transform = `translate3d(-50%, -50%, 0) scale(${scale}) rotate(${rotation}deg)`;
+  }, []);
+
+  useLayoutEffect(() => {
+    storyMediaVisualRef.current = storyMediaTransform;
+    applyStoryMediaTransform();
+  }, [applyStoryMediaTransform, storyMediaTransform]);
+
+  useLayoutEffect(() => {
+    storyTextVisualRef.current = {
+      x: storyDraftTextX,
+      y: storyDraftTextY,
+      scale: storyDraftTextScale,
+      rotation: storyDraftTextRotation,
+    };
+    applyStoryTextTransform();
+  }, [
+    applyStoryTextTransform,
+    storyDraftTextRotation,
+    storyDraftTextScale,
+    storyDraftTextX,
+    storyDraftTextY,
+  ]);
+
+  useEffect(() => {
+    onStoryComposerOpenChange?.(showStoryUploadModal || showStoryTypeSheet);
+    return () => onStoryComposerOpenChange?.(false);
+  }, [onStoryComposerOpenChange, showStoryTypeSheet, showStoryUploadModal]);
+
+  useEffect(() => {
+    if (!isStoryMusicModalOpen) {
+      stopStoryMusicPreview();
+    }
+  }, [isStoryMusicModalOpen]);
+
   useEffect(() => {
     return () => {
       storyDraftPreviewUrlsRef.current.forEach((url) =>
         URL.revokeObjectURL(url),
       );
+      storyPreviewMusicPlayerRef.current?.stop();
+      if (storyTypeLongPressTimerRef.current !== null) {
+        window.clearTimeout(storyTypeLongPressTimerRef.current);
+      }
+      if (storyPostedPulseTimeoutRef.current !== null) {
+        window.clearTimeout(storyPostedPulseTimeoutRef.current);
+      }
     };
   }, []);
 
+  const triggerStoryPostedPulse = () => {
+    if (storyPostedPulseTimeoutRef.current !== null) {
+      window.clearTimeout(storyPostedPulseTimeoutRef.current);
+    }
+
+    setStoryPostedPulse(false);
+    window.requestAnimationFrame(() => {
+      setStoryPostedPulse(true);
+      storyPostedPulseTimeoutRef.current = window.setTimeout(() => {
+        setStoryPostedPulse(false);
+        storyPostedPulseTimeoutRef.current = null;
+      }, 2400);
+    });
+  };
+
+  const openStoryTypeSheet = () => {
+    setShowStoryTypeSheet(true);
+  };
+
+  const closeStoryTypeSheet = () => {
+    setShowStoryTypeSheet(false);
+  };
+
+  const clearStoryTypeLongPressTimer = () => {
+    if (storyTypeLongPressTimerRef.current !== null) {
+      window.clearTimeout(storyTypeLongPressTimerRef.current);
+      storyTypeLongPressTimerRef.current = null;
+    }
+  };
+
+  const handleYourStoryPressStart = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    clearStoryTypeLongPressTimer();
+    storyTypeLongPressTriggeredRef.current = false;
+    storyTypeLongPressTimerRef.current = window.setTimeout(() => {
+      storyTypeLongPressTriggeredRef.current = true;
+      openStoryTypeSheet();
+    }, 420);
+  };
+
+  const handleYourStoryPressEnd = () => {
+    clearStoryTypeLongPressTimer();
+  };
+
   const handleYourStoryClick = () => {
+    if (storyTypeLongPressTriggeredRef.current) {
+      storyTypeLongPressTriggeredRef.current = false;
+      return;
+    }
     if (userStories.length > 0) {
-      // Show user's own stories; owner = true so delete button appears
+      setViewerStories(sortStoriesForPlayback(userStories));
       setSelectedStoryIndex(0);
-      setViewerStories(userStories);
       setViewerIsOwner(true);
       setViewerStoryAuthorId(currentUser.userId);
       setShowStoryViewerModal(true);
       onStoryViewerOpenChange?.(true);
-    } else {
-      openStoryComposer();
+      return;
     }
+    openStoryTypeSheet();
   };
 
-  const openStoryComposer = () => {
-    setStoryUploadMode(null);
+  const openStoryComposer = (mode?: StoryType) => {
+    setShowStoryTypeSheet(false);
+    setStoryComposerStage(mode ? "capture" : "audience");
+    setStoryUploadMode(mode ?? null);
     setDedicationRecipient(null);
     clearStoryDraft();
     setShowStoryUploadModal(true);
+    onStoryComposerOpenChange?.(true);
   };
 
   const closeStoryComposer = () => {
     if (isUploading) return;
     setShowStoryUploadModal(false);
+    onStoryComposerOpenChange?.(false);
+    setStoryComposerStage("audience");
     setStoryUploadMode(null);
     setDedicationRecipient(null);
     clearStoryDraft();
@@ -918,15 +1597,73 @@ export function FeedScreen({
     setStoryDraftFiles([]);
     setStoryDraftPreviewUrls([]);
     setSelectedStoryDraftIndex(0);
+    setStoryMediaTransform({ x: 0, y: 0, scale: 1, rotation: 0 });
+    setIsStoryMediaDragging(false);
     setStoryDraftText("");
     setStoryDraftTextColor("#ffffff");
     setStoryDraftTextX(50);
     setStoryDraftTextY(50);
     setStoryDraftTextSize(22);
+    setStoryDraftTextScale(1);
+    setStoryDraftTextRotation(0);
+    setStoryDraftTextFont("Bubble");
+    setStoryDraftTextBg(true);
+    setStoryDraftTextAlign("center");
     setIsStoryTextDragging(false);
+    setIsStoryTextEditorOpen(false);
+    setStoryTextSelected(false);
+    setStoryDeleteActive(false);
+    setStoryDeleteArmed(false);
     setStoryDraftFilter("original");
     setStoryDraftMusicId("none");
+    setStoryPublishAudience("story");
+    setStoryToolbarCollapsed(false);
+    setIsStoryMusicModalOpen(false);
+    setStoryMusicSearch("");
+    setStoryMusicTrim(15);
+    setStoryPreviewMusicId(null);
+    setIsStoryDrawMode(false);
+    setStoryBrush("Pen");
+    setStoryBrushSize(7);
+    setStoryBrushColor("#ffffff");
+    setStoryDrawPaths([]);
     storyFilterTouchStartXRef.current = null;
+    storyGalleryTouchStartYRef.current = null;
+    storyMediaPointersRef.current.clear();
+    storyMediaGestureRef.current = null;
+    storyMediaMovedRef.current = false;
+    storyMediaVisualRef.current = { x: 0, y: 0, scale: 1, rotation: 0 };
+    storyTextPointersRef.current.clear();
+    storyTextGestureRef.current = null;
+    storyTextDragOffsetRef.current = { x: 0, y: 0 };
+    storyTextVisualRef.current = { x: 50, y: 50, scale: 1, rotation: 0 };
+    storyDeleteArmedRef.current = false;
+    storyTextVerticalSnapActiveRef.current = false;
+    storyMediaVerticalSnapActiveRef.current = false;
+    storyPreviewMusicPlayerRef.current?.stop();
+    storyPreviewMusicPlayerRef.current = null;
+    if (storyTextPositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(storyTextPositionFrameRef.current);
+      storyTextPositionFrameRef.current = null;
+    }
+    if (storyMediaPositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(storyMediaPositionFrameRef.current);
+      storyMediaPositionFrameRef.current = null;
+    }
+    storyActiveDrawPathIdRef.current = null;
+  };
+
+  const beginStoryCapture = (mode: StoryType) => {
+    setStoryUploadMode(mode);
+    setStoryComposerStage("capture");
+    setStoryGallerySnap(25);
+    setStoryTextSelected(false);
+  };
+
+  const triggerStoryHaptic = (duration = 8) => {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(duration);
+    }
   };
 
   const setStoryFilterByOffset = (offset: number) => {
@@ -947,10 +1684,55 @@ export function FeedScreen({
     const rect = preview.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
 
-    const nextX = ((clientX - rect.left) / rect.width) * 100;
-    const nextY = ((clientY - rect.top) / rect.height) * 100;
-    setStoryDraftTextX(Math.min(92, Math.max(8, nextX)));
-    setStoryDraftTextY(Math.min(88, Math.max(12, nextY)));
+    const nextX =
+      ((clientX - rect.left) / rect.width) * 100 -
+      storyTextDragOffsetRef.current.x;
+    const nextY =
+      ((clientY - rect.top) / rect.height) * 100 -
+      storyTextDragOffsetRef.current.y;
+    const clampedX = Math.min(180, Math.max(-80, nextX));
+    const verticalSnap = smoothSnapToCenter(
+      nextY,
+      50,
+      STORY_TEXT_VERTICAL_SNAP_THRESHOLD,
+    );
+    const clampedY = Math.min(180, Math.max(-80, verticalSnap.value));
+    const inDeleteZone = clampedY > 106;
+    if (storyTextPositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(storyTextPositionFrameRef.current);
+    }
+    storyTextPositionFrameRef.current = window.requestAnimationFrame(() => {
+      storyTextVisualRef.current = {
+        ...storyTextVisualRef.current,
+        x: clampedX,
+        y: clampedY,
+      };
+      applyStoryTextTransform();
+      startTransition(() => {
+        setStoryDeleteArmed(inDeleteZone);
+      });
+      storyTextPositionFrameRef.current = null;
+    });
+    if (verticalSnap.snapped && !storyTextVerticalSnapActiveRef.current) {
+      triggerStoryHaptic(4);
+    }
+    if (inDeleteZone && !storyDeleteArmedRef.current) {
+      triggerStoryHaptic(6);
+    }
+    storyTextVerticalSnapActiveRef.current = verticalSnap.snapped;
+    storyDeleteArmedRef.current = inDeleteZone;
+  };
+
+  const getStoryPointerPair = () => {
+    const points = Array.from(storyTextPointersRef.current.values());
+    if (points.length < 2) return null;
+    const [first, second] = points;
+    const dx = second.x - first.x;
+    const dy = second.y - first.y;
+    return {
+      distance: Math.hypot(dx, dy),
+      angle: Math.atan2(dy, dx) * (180 / Math.PI),
+    };
   };
 
   const handleStoryTextPointerDown = (
@@ -958,9 +1740,37 @@ export function FeedScreen({
   ) => {
     event.preventDefault();
     event.stopPropagation();
+    setStoryTextSelected(true);
+    setStoryDeleteActive(true);
     setIsStoryTextDragging(true);
+    storyTextTapStartRef.current = { x: event.clientX, y: event.clientY };
+    storyTextMovedRef.current = false;
+    storyTextPointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
     event.currentTarget.setPointerCapture(event.pointerId);
-    updateStoryTextPosition(event.clientX, event.clientY);
+    const pair = getStoryPointerPair();
+    const preview = storyDraftPreviewRef.current;
+    if (preview && !pair) {
+      const rect = preview.getBoundingClientRect();
+      storyTextDragOffsetRef.current = {
+        x:
+          ((event.clientX - rect.left) / rect.width) * 100 -
+          storyTextVisualRef.current.x,
+        y:
+          ((event.clientY - rect.top) / rect.height) * 100 -
+          storyTextVisualRef.current.y,
+      };
+    }
+    storyTextGestureRef.current = pair
+      ? {
+          distance: pair.distance || 1,
+          angle: pair.angle,
+          scale: storyTextVisualRef.current.scale,
+          rotation: storyTextVisualRef.current.rotation,
+        }
+      : null;
   };
 
   const handleStoryTextPointerMove = (
@@ -969,6 +1779,34 @@ export function FeedScreen({
     if (!isStoryTextDragging) return;
     event.preventDefault();
     event.stopPropagation();
+    if (!storyTextPointersRef.current.has(event.pointerId)) return;
+    const tapStart = storyTextTapStartRef.current;
+    if (
+      tapStart &&
+      Math.hypot(event.clientX - tapStart.x, event.clientY - tapStart.y) > 7
+    ) {
+      storyTextMovedRef.current = true;
+    }
+    storyTextPointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    const pair = getStoryPointerPair();
+    if (pair && storyTextGestureRef.current) {
+      const nextScale =
+        storyTextGestureRef.current.scale *
+        (pair.distance / storyTextGestureRef.current.distance);
+      storyTextVisualRef.current = {
+        ...storyTextVisualRef.current,
+        scale: Math.min(6, Math.max(0.25, nextScale)),
+        rotation:
+          storyTextGestureRef.current.rotation +
+          pair.angle -
+          storyTextGestureRef.current.angle,
+      };
+      applyStoryTextTransform();
+      return;
+    }
     updateStoryTextPosition(event.clientX, event.clientY);
   };
 
@@ -977,7 +1815,397 @@ export function FeedScreen({
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    setIsStoryTextDragging(false);
+    storyTextPointersRef.current.delete(event.pointerId);
+    const remainingPair = getStoryPointerPair();
+    storyTextGestureRef.current = remainingPair
+      ? {
+          distance: remainingPair.distance || 1,
+          angle: remainingPair.angle,
+          scale: storyTextVisualRef.current.scale,
+          rotation: storyTextVisualRef.current.rotation,
+        }
+      : null;
+    if (!remainingPair && storyTextPointersRef.current.size === 1) {
+      const remainingPointer = Array.from(storyTextPointersRef.current.values())[0];
+      const preview = storyDraftPreviewRef.current;
+      if (preview && remainingPointer) {
+        const rect = preview.getBoundingClientRect();
+        storyTextDragOffsetRef.current = {
+          x:
+            ((remainingPointer.x - rect.left) / rect.width) * 100 -
+            storyTextVisualRef.current.x,
+          y:
+            ((remainingPointer.y - rect.top) / rect.height) * 100 -
+            storyTextVisualRef.current.y,
+        };
+      }
+    }
+    if (storyTextPointersRef.current.size === 0) {
+      const shouldOpenEditor =
+        event.type !== "pointercancel" &&
+        !storyTextMovedRef.current &&
+        !storyDeleteArmed &&
+        storyDraftText.trim();
+      if (storyDeleteArmed) {
+        setStoryDraftText("");
+        setStoryTextSelected(false);
+        triggerStoryHaptic(18);
+      }
+      setStoryDraftTextX(storyTextVisualRef.current.x);
+      setStoryDraftTextY(storyTextVisualRef.current.y);
+      setStoryDraftTextScale(storyTextVisualRef.current.scale);
+      setStoryDraftTextRotation(storyTextVisualRef.current.rotation);
+      setIsStoryTextDragging(false);
+      setStoryDeleteActive(false);
+      setStoryDeleteArmed(false);
+      storyTextVerticalSnapActiveRef.current = false;
+      storyDeleteArmedRef.current = false;
+      storyTextTapStartRef.current = null;
+      storyTextMovedRef.current = false;
+      if (shouldOpenEditor) {
+        window.setTimeout(() => openStoryTextEditor(), 0);
+      }
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const stopStoryMusicPreview = () => {
+    storyPreviewMusicPlayerRef.current?.stop();
+    storyPreviewMusicPlayerRef.current = null;
+    setStoryPreviewMusicId(null);
+  };
+
+  const previewStoryMusic = (musicId: string) => {
+    if (musicId === "none") {
+      stopStoryMusicPreview();
+      setStoryDraftMusicId("none");
+      return;
+    }
+
+    if (storyPreviewMusicId === musicId) {
+      stopStoryMusicPreview();
+      return;
+    }
+
+    storyPreviewMusicPlayerRef.current?.stop();
+    storyPreviewMusicPlayerRef.current = createGeneratedStoryMusicPlayer(
+      musicId,
+      {
+        masterGain: 0.05,
+        noteDurationMs: Math.max(160, Math.min(280, storyMusicTrim * 12)),
+      },
+    );
+    setStoryPreviewMusicId(storyPreviewMusicPlayerRef.current ? musicId : null);
+    setStoryDraftMusicId(musicId);
+    triggerStoryHaptic(10);
+  };
+
+  const getStoryCanvasPoint = (clientX: number, clientY: number) => {
+    const preview = storyDraftPreviewRef.current;
+    if (!preview) return null;
+    const rect = preview.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: ((clientX - rect.left) / rect.width) * 100,
+      y: ((clientY - rect.top) / rect.height) * 100,
+    };
+  };
+
+  const getStoryMediaPointerPair = () => {
+    const points = Array.from(storyMediaPointersRef.current.values());
+    if (points.length < 2) return null;
+    const [first, second] = points;
+    const dx = second.x - first.x;
+    const dy = second.y - first.y;
+    return {
+      distance: Math.hypot(dx, dy),
+      angle: Math.atan2(dy, dx) * (180 / Math.PI),
+      centerX: (first.x + second.x) / 2,
+      centerY: (first.y + second.y) / 2,
+    };
+  };
+
+  const undoStoryEditorStep = () => {
+    if (storyDrawPaths.length > 0) {
+      setStoryDrawPaths((paths) => paths.slice(0, -1));
+      triggerStoryHaptic(8);
+      return;
+    }
+    if (
+      storyMediaTransform.x !== 0 ||
+      storyMediaTransform.y !== 0 ||
+      storyMediaTransform.scale !== 1 ||
+      storyMediaTransform.rotation !== 0
+    ) {
+      setStoryMediaTransform({ x: 0, y: 0, scale: 1, rotation: 0 });
+      triggerStoryHaptic(8);
+      return;
+    }
+    if (storyDraftText.trim()) {
+      setStoryDraftText("");
+      setStoryTextSelected(false);
+      triggerStoryHaptic(8);
+    }
+  };
+
+  const getStoryTextFontClassName = (font: string) => {
+    switch (font) {
+      case "Bubble":
+        return "story-font-bubble";
+      case "Deco":
+        return "story-font-deco";
+      case "Squeeze":
+        return "story-font-squeeze";
+      case "Typewriter":
+        return "story-font-typewriter";
+      case "Classic":
+        return "story-font-classic";
+      default:
+        return "story-font-bubble";
+    }
+  };
+
+  const openStoryTextEditor = useCallback(() => {
+    storyTextWasEmptyBeforeEditRef.current = !storyDraftText.trim();
+    setIsStoryTextEditorOpen(true);
+  }, [storyDraftText]);
+
+  const finishStoryTextEditing = useCallback(() => {
+    if (storyDraftText.trim()) {
+      if (storyTextWasEmptyBeforeEditRef.current) {
+        setStoryDraftTextX(50);
+        setStoryDraftTextY(44);
+      }
+      setStoryTextSelected(true);
+    } else {
+      setStoryTextSelected(false);
+    }
+    setIsStoryTextEditorOpen(false);
+  }, [storyDraftText]);
+
+  const handleStoryCanvasPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (isStoryDrawMode) {
+      handleStoryDrawPointerDown(event);
+      return;
+    }
+    if (
+      event.target instanceof Element &&
+      event.target.closest(
+        ".story-text-layer,button,input,textarea,.story-panel,.story-bottom-caption,.story-share-row,.story-right-toolbar",
+      )
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    setStoryTextSelected(false);
+    setIsStoryMediaDragging(true);
+    storyMediaMovedRef.current = false;
+    storyMediaPointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const pair = getStoryMediaPointerPair();
+    storyMediaGestureRef.current = pair
+      ? {
+          distance: pair.distance || 1,
+          angle: pair.angle,
+          centerX: pair.centerX,
+          centerY: pair.centerY,
+          startX: event.clientX,
+          startY: event.clientY,
+          transform: storyMediaVisualRef.current,
+        }
+      : {
+          distance: 1,
+          angle: 0,
+          centerX: event.clientX,
+          centerY: event.clientY,
+          startX: event.clientX,
+          startY: event.clientY,
+          transform: storyMediaVisualRef.current,
+        };
+  };
+
+  const handleStoryCanvasPointerMove = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (isStoryDrawMode) {
+      handleStoryDrawPointerMove(event);
+      return;
+    }
+    if (!storyMediaPointersRef.current.has(event.pointerId)) return;
+
+    event.preventDefault();
+    storyMediaPointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    const gesture = storyMediaGestureRef.current;
+    if (!gesture) return;
+
+    const pair = getStoryMediaPointerPair();
+    if (pair) {
+      const nextScale =
+        gesture.transform.scale * (pair.distance / gesture.distance);
+      const nextRotation = gesture.transform.rotation + pair.angle - gesture.angle;
+      const nextX = gesture.transform.x + pair.centerX - gesture.centerX;
+      const nextY = gesture.transform.y + pair.centerY - gesture.centerY;
+      const verticalSnap = smoothSnapToCenter(
+        nextY,
+        0,
+        STORY_MEDIA_VERTICAL_SNAP_THRESHOLD,
+      );
+      if (Math.abs(nextX - gesture.transform.x) > 3 || Math.abs(nextY - gesture.transform.y) > 3) {
+        storyMediaMovedRef.current = true;
+      }
+      if (storyMediaPositionFrameRef.current !== null) {
+        window.cancelAnimationFrame(storyMediaPositionFrameRef.current);
+      }
+      storyMediaPositionFrameRef.current = window.requestAnimationFrame(() => {
+        storyMediaVisualRef.current = {
+          x: Math.max(-1200, Math.min(1200, nextX)),
+          y: Math.max(-1600, Math.min(1600, verticalSnap.value)),
+          scale: Math.min(6, Math.max(0.25, nextScale)),
+          rotation: nextRotation,
+        };
+        applyStoryMediaTransform();
+        storyMediaPositionFrameRef.current = null;
+      });
+      if (verticalSnap.snapped && !storyMediaVerticalSnapActiveRef.current) {
+        triggerStoryHaptic(4);
+      }
+      storyMediaVerticalSnapActiveRef.current = verticalSnap.snapped;
+      return;
+    }
+
+    const dx = event.clientX - gesture.startX;
+    const dy = event.clientY - gesture.startY;
+    const verticalSnap = smoothSnapToCenter(
+      gesture.transform.y + dy,
+      0,
+      STORY_MEDIA_VERTICAL_SNAP_THRESHOLD,
+    );
+    if (Math.hypot(dx, dy) > 3) storyMediaMovedRef.current = true;
+    if (storyMediaPositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(storyMediaPositionFrameRef.current);
+    }
+    storyMediaPositionFrameRef.current = window.requestAnimationFrame(() => {
+      storyMediaVisualRef.current = {
+        ...gesture.transform,
+        x: Math.max(-1200, Math.min(1200, gesture.transform.x + dx)),
+        y: Math.max(-1600, Math.min(1600, verticalSnap.value)),
+      };
+      applyStoryMediaTransform();
+      storyMediaPositionFrameRef.current = null;
+    });
+    if (verticalSnap.snapped && !storyMediaVerticalSnapActiveRef.current) {
+      triggerStoryHaptic(4);
+    }
+    storyMediaVerticalSnapActiveRef.current = verticalSnap.snapped;
+  };
+
+  const handleStoryCanvasPointerUp = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (isStoryDrawMode) {
+      handleStoryDrawPointerUp(event);
+      return;
+    }
+    if (!storyMediaPointersRef.current.has(event.pointerId)) return;
+
+    event.preventDefault();
+    storyMediaPointersRef.current.delete(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const pair = getStoryMediaPointerPair();
+    if (pair) {
+      storyMediaGestureRef.current = {
+        distance: pair.distance || 1,
+        angle: pair.angle,
+        centerX: pair.centerX,
+        centerY: pair.centerY,
+        startX: pair.centerX,
+        startY: pair.centerY,
+        transform: storyMediaVisualRef.current,
+      };
+    } else {
+      const remaining = Array.from(storyMediaPointersRef.current.values())[0];
+      storyMediaGestureRef.current = remaining
+        ? {
+            distance: 1,
+            angle: 0,
+            centerX: remaining.x,
+            centerY: remaining.y,
+            startX: remaining.x,
+            startY: remaining.y,
+            transform: storyMediaVisualRef.current,
+          }
+        : null;
+    }
+
+    if (storyMediaPointersRef.current.size === 0) {
+      setStoryMediaTransform(storyMediaVisualRef.current);
+      setIsStoryMediaDragging(false);
+      storyMediaVerticalSnapActiveRef.current = false;
+    }
+  };
+
+  const handleStoryDrawPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!isStoryDrawMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getStoryCanvasPoint(event.clientX, event.clientY);
+    if (!point) return;
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    storyActiveDrawPathIdRef.current = id;
+    setStoryDrawPaths((paths) => [
+      ...paths,
+      {
+        id,
+        d: `M ${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
+        color: storyBrushColor,
+        width: storyBrushSize,
+        brush: storyBrush,
+      },
+    ]);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleStoryDrawPointerMove = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!isStoryDrawMode || !storyActiveDrawPathIdRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getStoryCanvasPoint(event.clientX, event.clientY);
+    if (!point) return;
+    const segment = ` L ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+    const activeId = storyActiveDrawPathIdRef.current;
+    setStoryDrawPaths((paths) =>
+      paths.map((path) =>
+        path.id === activeId ? { ...path, d: `${path.d}${segment}` } : path,
+      ),
+    );
+  };
+
+  const handleStoryDrawPointerUp = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!isStoryDrawMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    storyActiveDrawPathIdRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -1044,7 +2272,7 @@ export function FeedScreen({
                 style: "bold",
                 xPct: Math.round(storyDraftTextX),
                 yPct: Math.round(storyDraftTextY),
-                fontSize: storyDraftTextSize,
+                fontSize: Math.round(storyDraftTextSize * storyDraftTextScale),
               }
             : null,
           storyFilter: storyDraftFilter,
@@ -1073,6 +2301,7 @@ export function FeedScreen({
       if (createdCount > 0) {
         await useStoryStore.getState().loadUserStories(currentUser.userId);
         closeStoryComposer();
+        triggerStoryPostedPulse();
       }
     } catch (error) {
       console.error("Error uploading story:", error);
@@ -1100,6 +2329,9 @@ export function FeedScreen({
         setStoryDraftFiles(files);
         setStoryDraftPreviewUrls(files.map((file) => URL.createObjectURL(file)));
         setSelectedStoryDraftIndex(0);
+        setStoryMediaTransform({ x: 0, y: 0, scale: 1, rotation: 0 });
+        setStoryComposerStage("editor");
+        setStoryTextSelected(false);
       }
     };
     input.click();
@@ -1451,6 +2683,8 @@ export function FeedScreen({
       style={{
         paddingBottom: "120px",
         boxSizing: "border-box",
+        background:
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)",
       }}
     >
       <style>{`
@@ -1528,38 +2762,71 @@ export function FeedScreen({
         .premium-card-burst .premium-card-glow {
           animation: premiumBorderSweep 1.65s cubic-bezier(0.22, 1, 0.36, 1);
         }
+        @keyframes ownStoryPostedRing {
+          0% {
+            opacity: 0;
+            transform: translateZ(0) scale(0.9);
+          }
+          18% {
+            opacity: 0.9;
+            transform: translateZ(0) scale(1.02);
+          }
+          100% {
+            opacity: 0;
+            transform: translateZ(0) scale(1.14);
+          }
+        }
+        .own-story-posted-ring {
+          animation: ownStoryPostedRing 1.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+          backface-visibility: hidden;
+          transform-origin: center;
+          will-change: transform, opacity;
+        }
       `}</style>
       {/* ── Header ── */}
       <div
-        className={`safe-area-top border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-in-out ${
+        className={`safe-area-top relative overflow-hidden shadow-[0_14px_38px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-transform duration-300 ease-in-out ${
           isHeaderVisible ? "translate-y-0" : "-translate-y-full"
         }`}
         style={{
           position: "sticky",
           top: 0,
           zIndex: 50,
+          background:
+            "radial-gradient(ellipse at 28% -42%, rgba(74,222,128,0.11), transparent 66%), radial-gradient(ellipse at 76% -34%, rgba(14,165,233,0.07), transparent 64%), linear-gradient(180deg, rgba(6,8,6,0.94) 0%, rgba(10,15,10,0.93) 54%, rgba(3,4,3,0.92) 100%)",
         }}
       >
-        <div className="p-4">
+        <div className="px-4 pb-4 pt-3">
           <div className="relative flex items-center justify-between">
-            <div className="z-10 flex items-center gap-3">
+            <div className="z-10 flex items-center gap-2">
               <button
                 onClick={onNavigateToSearch}
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
                 aria-label="Search"
               >
                 <Search size={18} />
               </button>
               <button
-                onClick={onNavigateToDaily}
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
-                aria-label="Daily challenge"
+                onClick={onNavigateToDares}
+                className="flex h-10 w-10 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
+                aria-label="Dares received"
               >
-                <Sparkles size={18} />
+                <Target size={18} />
               </button>
             </div>
-            <div className="absolute left-1/2 -translate-x-1/2">
-              <GhostModeTimer />
+            <div
+              className="absolute left-1/2 -translate-x-1/2"
+              onPointerDown={handleDareLogoPointerDown}
+              onPointerUp={handleDareLogoPointerUp}
+              onPointerCancel={handleDareLogoPointerUp}
+              onPointerLeave={handleDareLogoPointerUp}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                openDareCenterPrompt();
+              }}
+              aria-label="Long press Dare to open Dare Center"
+            >
+              <GhostModeTimer onDareLongPress={openDareCenterPrompt} />
             </div>
             {/*
             <div className="absolute left-12 top-1/2 -translate-y-1/2">
@@ -1580,7 +2847,7 @@ export function FeedScreen({
                   }
                   onNavigateToAlerts();
                 }}
-                className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#fb7185]/30 hover:bg-[#fb7185]/8 hover:text-white"
+                className="relative flex h-11 w-11 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#fb7185]/30 hover:bg-[#fb7185]/10 hover:text-white"
                 aria-label="Notifications"
               >
                 <Heart size={18} />
@@ -1592,7 +2859,7 @@ export function FeedScreen({
               </button>
               <button
                 onClick={onNavigateToChat}
-                className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
+                className="relative flex h-11 w-11 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
                 aria-label="Messages"
               >
                 <MessageSquare size={18} />
@@ -1615,21 +2882,106 @@ export function FeedScreen({
       </div>
 
       {/* ── Scrollable content ── */}
+      {showDareCenterPrompt && (
+        <div
+          className="app-modal-backdrop fixed inset-0 z-[120] flex items-end bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowDareCenterPrompt(false)}
+        >
+          <div
+            className="app-modal-sheet flex max-h-[calc(100dvh-var(--safe-area-top)-8px)] min-h-[min(460px,calc(100dvh-var(--safe-area-top)-8px))] w-full flex-col overflow-hidden rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[#3a3a3a]" />
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 scrollbar-hide">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-[#86efac]">
+                    <Sparkles size={13} />
+                    Hidden hub
+                  </div>
+                  <h3 className="text-[26px] font-black leading-tight text-white">
+                    Enter Dare Center?
+                  </h3>
+                  <p className="mt-2 text-sm font-semibold leading-relaxed text-[#94a3b8]">
+                    A guided tour of the features that make Dare different, with
+                    animated screens and quick ways to understand each flow.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDareCenterPrompt(false)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/8 bg-white/[0.04] text-[#94a3b8] transition-colors hover:text-white"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pb-4">
+                {[
+                  ["Proof", "real/fake"],
+                  ["Ghost", "15 min"],
+                  ["Signals", "live alerts"],
+                ].map(([top, bottom]) => (
+                  <div
+                    key={`${top}-${bottom}`}
+                    className="rounded-[22px] border border-white/8 bg-white/[0.035] px-3 py-4 text-center"
+                  >
+                    <p className="text-base font-black text-white">{top}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#64748b]">
+                      {bottom}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="grid shrink-0 grid-cols-2 gap-3 border-t border-white/8 bg-[linear-gradient(180deg,rgba(6,8,7,0.72),rgba(6,8,7,0.99))] px-5 pb-[calc(var(--safe-area-bottom)+18px)] pt-4">
+              <button
+                type="button"
+                onClick={() => setShowDareCenterPrompt(false)}
+                className="min-h-[54px] rounded-full border border-white/8 bg-white/[0.04] px-5 text-sm font-black text-white transition-colors hover:bg-white/[0.07]"
+              >
+                Stay here
+              </button>
+              <button
+                type="button"
+                onClick={handleEnterDareCenter}
+                className="min-h-[54px] rounded-full bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-5 text-sm font-black text-black shadow-[0_16px_36px_rgba(74,222,128,0.28)] transition-transform active:scale-[0.98]"
+              >
+                Enter center
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className="flex-1 overflow-y-auto"
         style={{
           paddingBottom: "calc(var(--bottom-nav-total-height) + 24px)",
         }}
       >
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(74,222,128,0))]" />
         {/* ── Stories row ── */}
-        <div className="px-4 py-6">
-          <div className="flex space-x-4 overflow-x-auto scrollbar-hide">
+        <div className="px-4 py-5">
+          <div className="flex space-x-4 overflow-x-auto rounded-[30px] border border-white/8 bg-white/[0.025] px-3 py-4 shadow-[0_18px_44px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.04)] scrollbar-hide">
             {/* Your Story Circle */}
             <div
               className="shrink-0 flex flex-col items-center cursor-pointer group"
+              onPointerDown={handleYourStoryPressStart}
+              onPointerUp={handleYourStoryPressEnd}
+              onPointerCancel={handleYourStoryPressEnd}
+              onPointerLeave={handleYourStoryPressEnd}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                storyTypeLongPressTriggeredRef.current = true;
+                openStoryTypeSheet();
+              }}
               onClick={handleYourStoryClick}
             >
               <div className="relative">
+                {storyPostedPulse && userStories.length > 0 && (
+                  <div className="own-story-posted-ring pointer-events-none absolute -inset-[5px] rounded-full ring-2 ring-[#79d99a]/75" />
+                )}
                 <div className="absolute inset-0 h-[84px] w-[84px] rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
                   <div className="w-full h-full rounded-full border-2 border-[#4ade80]/25" />
                 </div>
@@ -1657,7 +3009,7 @@ export function FeedScreen({
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    openStoryComposer();
+                    openStoryTypeSheet();
                   }}
                   className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-black bg-gradient-to-br from-[#4ade80] to-[#22c55e] shadow-md transition-transform duration-300 group-hover:scale-110"
                   aria-label="Create story"
@@ -1701,7 +3053,7 @@ export function FeedScreen({
                 >
                   {!hasViewed && (
                     <div className="absolute inset-0 h-[84px] w-[84px] rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="w-full h-full rounded-full border-2 border-[#4ade80]/35" />
+                      <div className="w-full h-full rounded-full border-2 border-[#f59e0b]/35" />
                     </div>
                   )}
                   <div
@@ -1709,8 +3061,8 @@ export function FeedScreen({
                       hasViewed
                         ? "bg-gradient-to-br from-[#2b2f35] via-[#353941] to-[#44474f]"
                         : story.storyType === "dedication"
-                          ? "bg-gradient-to-br from-[#facc15] via-[#4ade80] to-[#38bdf8]"
-                          : "bg-gradient-to-br from-[#facc15] via-[#fb7185] to-[#4ade80]"
+                          ? "bg-gradient-to-br from-[#bef264] via-[#f59e0b] to-[#fb7185]"
+                          : "bg-gradient-to-br from-[#84cc16] via-[#facc15] to-[#fb7185]"
                     }`}
                   >
                     <div
@@ -1731,13 +3083,6 @@ export function FeedScreen({
                       </div>
                     </div>
                   </div>
-                  {!hasViewed && (
-                    <div className="absolute -bottom-1 -right-1 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border border-[#4ade80]/70 bg-[#08110b] px-1 shadow-lg transition-transform duration-300 group-hover:scale-105">
-                      <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#86efac]">
-                        New
-                      </span>
-                    </div>
-                  )}
                 </button>
                 {story.storyType === "dedication" && story.dedicatedTo ? (
                   <div className="mt-3 flex w-[84px] items-center justify-center gap-1">
@@ -1820,82 +3165,100 @@ export function FeedScreen({
           </div>
         ) : (
           <div className="px-2 pb-6 space-y-5">
-            {sortedPosts.map((post: FeedPost) => {
+            {sortedPosts.map((post: FeedPost, index) => {
               const liked = iLiked(post, currentUser.userId);
               const likeCount = totalLikes(post);
               const postBursts = bursts[post.id] ?? [];
               const author = resolveAuthor(post.author);
+              const showCommunityRail = shouldShowRailAfterPost(
+                index,
+                sortedPosts.length,
+                COMMUNITY_RAIL_FIRST_INSERT_AFTER,
+                COMMUNITY_RAIL_REPEAT_EVERY,
+              );
+              const showSocialDaresRail = shouldShowRailAfterPost(
+                index,
+                sortedPosts.length,
+                SOCIAL_DARES_RAIL_FIRST_INSERT_AFTER,
+                SOCIAL_CONTENT_RAIL_REPEAT_EVERY,
+              );
+              const showTruthsRail = shouldShowRailAfterPost(
+                index,
+                sortedPosts.length,
+                TRUTHS_RAIL_FIRST_INSERT_AFTER,
+                SOCIAL_CONTENT_RAIL_REPEAT_EVERY,
+              );
 
               return (
-                <div
-                  key={post.id}
-                  id={`feed-post-${post.id}`}
-                  className={`relative overflow-hidden rounded-3xl bg-[#111] ${
-                    animatingPosts.has(post.id) ? "premium-card-burst" : ""
-                  }`}
-                >
-                  <div className="premium-card-glow" />
-                  <div className="premium-card-ring" />
-                  {/* Post header */}
-                  <div className="flex items-center px-3 pt-3 pb-3">
-                    <div className="flex w-full items-center space-x-3 rounded-full bg-gradient-to-r from-[#1a1f1a]/90 to-[#141714]/90 px-5 py-2.5 pr-7 backdrop-blur-md border border-white/12 shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
-                      <Avatar
-                        src={author.avatar}
-                        alt={author.name}
-                        size="md"
-                        userId={author.id}
-                        username={author.username}
-                        forceGhostMode={
-                          author.id ? ghostModesByUserId[author.id] : undefined
-                        }
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onNavigateToProfile && author.id) {
-                            onNavigateToProfile(author.id);
+                <Fragment key={post.id}>
+                  <div
+                    id={`feed-post-${post.id}`}
+                    className={`relative overflow-hidden rounded-3xl bg-[linear-gradient(180deg,rgba(17,23,18,0.98),rgba(8,10,9,0.99))] shadow-[0_18px_44px_rgba(0,0,0,0.32)] ${
+                      animatingPosts.has(post.id) ? "premium-card-burst" : ""
+                    }`}
+                  >
+                    <div className="premium-card-glow" />
+                    <div className="premium-card-ring" />
+                    {/* Post header */}
+                    <div className="flex items-center px-3 pt-3 pb-3">
+                      <div className="flex w-full items-center space-x-3 rounded-full bg-[linear-gradient(180deg,rgba(24,28,24,0.96),rgba(12,15,12,0.98))] px-5 py-2.5 pr-7 backdrop-blur-md border border-white/10 shadow-[0_12px_28px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.06)]">
+                        <Avatar
+                          src={author.avatar}
+                          alt={author.name}
+                          size="md"
+                          userId={author.id}
+                          username={author.username}
+                          forceGhostMode={
+                            author.id ? ghostModesByUserId[author.id] : undefined
                           }
-                        }}
-                        className={`min-w-0 text-left ${
-                          onNavigateToProfile && author.id
-                            ? "cursor-pointer"
-                            : "cursor-default"
-                        }`}
-                      >
-                        <h3 className="font-bold text-white text-base leading-tight">
-                          {author.name}
-                        </h3>
-                        <p className="text-[#4ade80] text-sm font-medium tracking-wide">
-                          {author.username}
-                        </p>
-                      </button>
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onNavigateToProfile && author.id) {
+                              onNavigateToProfile(author.id);
+                            }
+                          }}
+                          className={`min-w-0 text-left ${
+                            onNavigateToProfile && author.id
+                              ? "cursor-pointer"
+                              : "cursor-default"
+                          }`}
+                        >
+                          <h3 className="font-bold text-white text-base leading-tight">
+                            {author.name}
+                          </h3>
+                          <p className="text-[#8ea18e] text-sm font-medium tracking-wide">
+                            {author.username}
+                          </p>
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Media */}
-                  {post.media && post.media.url && (
-                    <div className="px-1">
-                      <div
-                        id={`media-${post.id}`}
-                        className="w-full relative cursor-pointer rounded-3xl overflow-hidden"
-                        onClick={(e) => handleMediaTap(post.id, e)}
-                      >
-                        {post.media.type === "image" ? (
-                          <img
-                            src={post.media.url}
-                            alt="Post media"
-                            className="w-full object-cover"
-                            style={{ height: "500px" }}
-                            /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - draggable might block touch */
-                            /* DISABLED: draggable={false} */
-                            loading="lazy"
-                            decoding="async"
-                            onError={(e) => {
-                              e.currentTarget.src =
-                                "https://picsum.photos/seed/fallback/800/600.jpg";
-                            }}
-                          />
-                        ) : post.media.type === "video" ? (
+                    {/* Media */}
+                    {post.media && post.media.url && (
+                      <div className="px-1">
+                        <div
+                          id={`media-${post.id}`}
+                          className="w-full relative cursor-pointer rounded-3xl overflow-hidden"
+                          onClick={(e) => handleMediaTap(post.id, e)}
+                        >
+                          {post.media.type === "image" ? (
+                            <img
+                              src={post.media.url}
+                              alt="Post media"
+                              className="w-full object-cover"
+                              style={{ height: "500px" }}
+                              /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - draggable might block touch */
+                              /* DISABLED: draggable={false} */
+                              loading="lazy"
+                              decoding="async"
+                              onError={(e) => {
+                                e.currentTarget.src =
+                                  "https://picsum.photos/seed/fallback/800/600.jpg";
+                              }}
+                            />
+                          ) : post.media.type === "video" ? (
                           <div
                             className="w-full bg-[#2a2a2a] flex items-center justify-center rounded-3xl"
                             style={{ height: "500px" }}
@@ -1931,19 +3294,19 @@ export function FeedScreen({
 
                   {/* Actions */}
                   <div className="px-2 pt-3">
-                    <div className="bg-[#1e1e1e] rounded-full flex items-center px-4 py-2.5">
+                    <div className="bg-[linear-gradient(180deg,rgba(26,30,26,0.96),rgba(14,17,14,0.98))] rounded-full flex items-center px-4 py-2.5 border border-white/10 shadow-[0_10px_26px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.055)]">
                       <button
                         onClick={(e) => handleHeartIconClick(post.id, e)}
                         className="group flex items-center space-x-2"
                       >
                         <Heart
                           size={20}
-                          fill={liked ? "#ef4444" : "white"}
+                          fill={liked ? "#fb7185" : "#f8fafc"}
                           strokeWidth={0}
                           className={`transition-all duration-200 ${
                             liked
-                              ? "text-red-500 scale-110 drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]"
-                              : "text-white group-hover:scale-110"
+                              ? "text-rose-400 scale-110 drop-shadow-[0_0_6px_rgba(251,113,133,0.45)]"
+                              : "text-white group-hover:scale-110 group-hover:text-[#8bdba7]"
                           }`}
                         />
                       </button>
@@ -1952,7 +3315,7 @@ export function FeedScreen({
                           setSelectedPostId(post.id);
                           setShowLikesModal(true);
                         }}
-                        className="text-white font-bold text-sm ml-1 hover:text-[#4ade80] transition-colors"
+                        className="text-white font-bold text-sm ml-1 hover:text-[#8bdba7] transition-colors"
                       >
                         {formatNumber(likeCount)}
                       </button>
@@ -1962,9 +3325,9 @@ export function FeedScreen({
                           setSelectedPostId(post.id);
                           setShowCommentsModal(true);
                         }}
-                        className="flex items-center space-x-2 text-white hover:text-[#4ade80] transition-colors"
+                        className="flex items-center space-x-2 text-white hover:text-[#8bdba7] transition-colors"
                       >
-                        <MessageCircle size={20} fill="white" strokeWidth={0} />
+                        <MessageCircle size={20} fill="currentColor" strokeWidth={0} />
                       </button>
                       <span className="text-white font-bold text-sm ml-1">
                         {formatNumber(post.comments_count)}
@@ -1976,10 +3339,10 @@ export function FeedScreen({
                           setSentTo(new Set());
                           setShowShareModal(true);
                         }}
-                        className="text-white hover:text-[#4ade80] transition-colors"
+                        className="text-white hover:text-[#8bdba7] transition-colors"
                         aria-label="Share to DM"
                       >
-                        <Send size={18} fill="white" strokeWidth={0} />
+                        <Send size={18} fill="currentColor" strokeWidth={0} />
                       </button>
                     </div>
                   </div>
@@ -1993,7 +3356,27 @@ export function FeedScreen({
                       {formatTimeAgo(post.timestamp)}
                     </p>
                   </div>
-                </div>
+                  </div>
+                  {showCommunityRail && (
+                    <CommunityDareFeedRail
+                      joinedChallengeIds={joinedCommunityChallengeIds}
+                      onPreview={setSelectedCommunityChallenge}
+                      onExploreAll={onNavigateToCommunityDares}
+                    />
+                  )}
+                  {showSocialDaresRail && feedSocialDares.length > 0 && (
+                    <SocialDaresFeedRail
+                      dares={feedSocialDares}
+                      onExploreAll={onNavigateToSocialDares}
+                    />
+                  )}
+                  {showTruthsRail && feedTruths.length > 0 && (
+                    <TruthsFeedRail
+                      truths={feedTruths}
+                      onExploreAll={onNavigateToTruths}
+                    />
+                  )}
+                </Fragment>
               );
             })}
           </div>
@@ -2009,7 +3392,6 @@ export function FeedScreen({
           style={{
             backgroundColor: "rgba(0, 0, 0, 0.7)",
             animation: "backdropFadeIn 0.25s ease-out forwards",
-            overscrollBehavior: "contain",
           }}
           onClick={() => setShowCommentsModal(false)}
         >
@@ -2034,9 +3416,7 @@ export function FeedScreen({
           <div
             className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col overflow-hidden"
             style={{
-              maxHeight: "98vh",
-              touchAction: "pan-y",
-              overscrollBehavior: "contain",
+              minHeight: "min(68dvh, 720px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2052,7 +3432,7 @@ export function FeedScreen({
                 </button>
               </div>
             </div>
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden pb-6">
+            <div className="app-modal-sheet-content">
               <CommentSection
                 comments={selectedPost.comments.map(
                   (c): CommentItem => ({
@@ -2119,10 +3499,7 @@ export function FeedScreen({
           <div
             className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
             style={{
-              maxHeight: "98vh",
-              minHeight: "60vh",
-              touchAction: "pan-y",
-              overscrollBehavior: "contain",
+              minHeight: "min(60dvh, 640px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2131,8 +3508,8 @@ export function FeedScreen({
               <h3 className="text-white font-bold text-lg mb-1">Likes</h3>
               <p className="text-[#64748b] text-sm mb-3">
                 {totalLikeTaps(selectedPost)} total likes ·{" "}
-                {Object.keys(selectedPost.likesByUser).length}{" "}
-                {Object.keys(selectedPost.likesByUser).length === 1
+                {Object.keys(getLikesByUser(selectedPost)).length}{" "}
+                {Object.keys(getLikesByUser(selectedPost)).length === 1
                   ? "person"
                   : "people"}
               </p>
@@ -2141,13 +3518,13 @@ export function FeedScreen({
               <div className="flex items-center justify-center py-8">
                 <div className="text-[#64748b] text-sm">Loading likes...</div>
               </div>
-            ) : Object.keys(selectedPost.likesByUser).length === 0 ? (
+            ) : Object.keys(getLikesByUser(selectedPost)).length === 0 ? (
               <p className="text-[#64748b] text-center py-8 text-sm">
                 No likes yet
               </p>
             ) : (
-              <div className="overflow-y-auto flex-1 px-6 pb-6 space-y-4">
-                {Object.values(selectedPost.likesByUser)
+              <div className="app-modal-sheet-scroll px-6 pb-[calc(var(--safe-area-bottom)+16px)] space-y-4">
+                {Object.values(getLikesByUser(selectedPost))
                   .sort((a, b) => b.tapCount - a.tapCount)
                   .map((entry, index) => (
                     <div
@@ -2261,9 +3638,6 @@ export function FeedScreen({
             className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
             style={{
               height: "min(86dvh, 760px)",
-              maxHeight: "calc(100dvh - 12px)",
-              touchAction: "pan-y",
-              overflow: "hidden",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2299,13 +3673,7 @@ export function FeedScreen({
               </div>
             )}
             <div
-              className="overflow-y-auto flex-1 min-h-0 px-4 py-3 space-y-2"
-              style={{
-                overflowY: "auto",
-                WebkitOverflowScrolling: "touch",
-                overscrollBehaviorY: "contain",
-                touchAction: "pan-y",
-              }}
+              className="app-modal-sheet-scroll px-4 py-3 pb-[calc(var(--safe-area-bottom)+12px)] space-y-2"
             >
               {loadingFriends ? (
                 <p className="text-[#64748b] text-center py-10 text-sm">
@@ -2407,7 +3775,970 @@ export function FeedScreen({
       {/* ══════════════════════════════════════════
           STORY UPLOAD MODAL
       ══════════════════════════════════════════ */}
+      {showStoryTypeSheet && (
+        <div
+          className="app-modal-backdrop fixed inset-0 z-[130] flex items-end bg-black/72 backdrop-blur-sm"
+          onClick={closeStoryTypeSheet}
+        >
+          <div
+            className="app-modal-sheet w-full overflow-hidden rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] p-5 shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-[#3a3a3a]" />
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-[#86efac]">
+                  <Sparkles size={13} />
+                  Story setup
+                </div>
+                <h3 className="text-[26px] font-black leading-tight text-white">
+                  Choose your story type
+                </h3>
+                <p className="mt-2 text-sm font-semibold leading-relaxed text-[#94a3b8]">
+                  Pick the story style first, then continue into the story
+                  picker flow.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeStoryTypeSheet}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/8 bg-white/[0.04] text-[#94a3b8] transition-colors hover:text-white"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => openStoryComposer("personal")}
+                className="group rounded-[24px] border border-white/8 bg-white/[0.04] p-4 text-left transition-all hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8"
+              >
+                <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-2xl border border-[#4ade80]/20 bg-[#4ade80]/10 text-[#4ade80] shadow-[0_12px_28px_rgba(74,222,128,0.12)]">
+                  <UserRound size={20} />
+                </div>
+                <p className="font-bold text-white">Normal story</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#94a3b8]">
+                  Continue with the regular story flow.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => openStoryComposer("dedication")}
+                className="group rounded-[24px] border border-white/8 bg-white/[0.04] p-4 text-left transition-all hover:border-[#facc15]/35 hover:bg-[#facc15]/8"
+              >
+                <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-2xl border border-[#facc15]/20 bg-[#facc15]/10 text-[#facc15] shadow-[0_12px_28px_rgba(250,204,21,0.12)]">
+                  <Gift size={20} />
+                </div>
+                <p className="font-bold text-white">Dedication story</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#94a3b8]">
+                  Choose one person, then keep building the story.
+                </p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showStoryUploadModal && (
+        <div
+          className="story-composer app-story-shell"
+          onClick={() => {
+            if (storyTextSelected && !isStoryTextDragging) {
+              setStoryTextSelected(false);
+            }
+          }}
+        >
+          {storyDraftFile && storyDraftPreviewUrl ? (
+            <div
+              ref={storyDraftPreviewRef}
+              className={`story-canvas ${
+                isStoryMediaDragging ? "is-media-dragging" : ""
+              }`}
+              onPointerDown={handleStoryCanvasPointerDown}
+              onPointerMove={handleStoryCanvasPointerMove}
+              onPointerUp={handleStoryCanvasPointerUp}
+              onPointerCancel={handleStoryCanvasPointerUp}
+              onTouchStart={(event) => {
+                storyFilterTouchStartXRef.current = event.touches[0].clientX;
+              }}
+              onTouchEnd={(event) => {
+                if (isStoryDrawMode) return;
+                if (storyMediaMovedRef.current) {
+                  storyMediaMovedRef.current = false;
+                  storyFilterTouchStartXRef.current = null;
+                  return;
+                }
+                const startX = storyFilterTouchStartXRef.current;
+                storyFilterTouchStartXRef.current = null;
+                if (startX === null) return;
+                const dx = event.changedTouches[0].clientX - startX;
+                if (Math.abs(dx) < 52) return;
+                setStoryFilterByOffset(dx < 0 ? 1 : -1);
+              }}
+            >
+              {!storyDraftFile.type.startsWith("video/") && (
+                <div
+                  className="story-media-blur"
+                  style={{ backgroundImage: `url(${storyDraftPreviewUrl})` }}
+                />
+              )}
+              <div ref={storyMediaMainRef} className="story-media-main">
+                {storyDraftFile.type.startsWith("video/") ? (
+                  <video
+                    src={storyDraftPreviewUrl}
+                    style={{
+                      filter: getStoryFilterPreset(storyDraftFilter).cssFilter,
+                    }}
+                    muted
+                    playsInline
+                    autoPlay
+                    loop
+                  />
+                ) : (
+                  <img
+                    src={storyDraftPreviewUrl}
+                    alt="Story preview"
+                    style={{
+                      filter: getStoryFilterPreset(storyDraftFilter).cssFilter,
+                    }}
+                  />
+                )}
+              </div>
+              <div
+                className="pointer-events-none absolute inset-0 z-[12]"
+                style={{
+                  background: getStoryFilterPreset(storyDraftFilter).overlay,
+                }}
+              />
+              <svg
+                className="story-draw-svg"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                {storyDrawPaths.map((path) => (
+                  <path
+                    key={path.id}
+                    d={path.d}
+                    fill="none"
+                    stroke={path.color}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={
+                      path.brush === "Marker"
+                        ? path.width * 1.35
+                        : path.brush === "Chalk"
+                          ? path.width * 0.9
+                          : path.width
+                    }
+                    opacity={path.brush === "Chalk" ? 0.72 : 1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+              </svg>
+              {isStoryDrawMode && <div className="story-draw-hotspot" />}
+              <div className="story-overlay-layer">
+                {storyDraftText.trim() && (
+                  <div
+                    ref={storyTextLayerRef}
+                    className={`story-text-layer ${
+                      storyTextSelected ? "is-selected" : ""
+                    }`}
+                    style={{
+                      left: `${storyDraftTextX}%`,
+                      top: `${storyDraftTextY}%`,
+                      transform: `translate3d(-50%, -50%, 0) scale(${storyDraftTextScale}) rotate(${storyDraftTextRotation}deg)`,
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setStoryTextSelected(true);
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                      openStoryTextEditor();
+                    }}
+                    onPointerDown={handleStoryTextPointerDown}
+                    onPointerMove={handleStoryTextPointerMove}
+                    onPointerUp={handleStoryTextPointerUp}
+                    onPointerCancel={handleStoryTextPointerUp}
+                  >
+                    <span
+                      className={`story-text-chip ${getStoryTextFontClassName(
+                        storyDraftTextFont,
+                      )} ${storyDraftTextBg ? "" : "is-plain"}`}
+                      style={{
+                        background: storyDraftTextBg
+                          ? "rgba(0, 0, 0, 0.32)"
+                          : "transparent",
+                        color: storyDraftTextColor,
+                        fontSize: `${storyDraftTextSize}px`,
+                        textAlign: storyDraftTextAlign,
+                        textShadow: "0 2px 14px rgba(0,0,0,0.72)",
+                      }}
+                    >
+                      {storyDraftText}
+                    </span>
+                  </div>
+                )}
+                {storyDraftMusicId !== "none" && (
+                  <div className="story-music-widget">
+                    <div
+                      className="flex h-[42px] w-[42px] items-center justify-center rounded-xl"
+                      style={{
+                        background: getStoryMusicPreset(storyDraftMusicId).color,
+                        color: "#07110a",
+                      }}
+                    >
+                      <Music size={20} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-white">
+                        {getStoryMusicPreset(storyDraftMusicId).label}
+                      </p>
+                      <p className="truncate text-[11px] font-semibold text-white/70">
+                        {getStoryMusicPreset(storyDraftMusicId).description}
+                      </p>
+                      <div className="story-eq mt-1">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="absolute bottom-[142px] left-1/2 z-[52] -translate-x-1/2 rounded-full bg-black/45 px-3 py-1 text-[11px] font-black uppercase tracking-[0.14em] text-white/90 backdrop-blur-md">
+                {getStoryFilterPreset(storyDraftFilter).label}
+              </div>
+              <div
+                className={`story-delete-zone ${
+                  storyDeleteActive ? "is-visible" : ""
+                } ${storyDeleteArmed ? "is-armed" : ""}`}
+              >
+                <Trash2 size={18} />
+                <span className="text-sm font-black">Drag here to remove</span>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="story-camera-surface"
+              onTouchStart={(event) => {
+                storyGalleryTouchStartYRef.current = event.touches[0].clientY;
+              }}
+              onTouchEnd={(event) => {
+                const startY = storyGalleryTouchStartYRef.current;
+                storyGalleryTouchStartYRef.current = null;
+                if (startY === null) return;
+                const dy = event.changedTouches[0].clientY - startY;
+                if (dy < -46) setStoryGallerySnap(60);
+                if (dy > 46) setStoryGallerySnap(25);
+              }}
+            >
+              <div className="absolute inset-x-6 top-[18%] rounded-[28px] border border-white/10 bg-white/[0.06] p-5 text-center shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white/12 text-white">
+                  <ImagePlus size={25} />
+                </div>
+                <p className="text-lg font-black text-white">
+                  {storyComposerStage === "audience"
+                    ? "Create story"
+                    : storyUploadMode === "dedication"
+                      ? "Dedication story"
+                      : "Your story"}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-white/62">
+                  Fullscreen preview with gallery, effects, text, music, and draw.
+                </p>
+              </div>
+              {storyComposerStage === "audience" ? (
+                <div className="story-audience-picks">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      beginStoryCapture("personal");
+                    }}
+                    className="story-audience-card app-pressable"
+                  >
+                    <UserRound size={22} className="mb-5 text-[#4ade80]" />
+                    <p className="text-base font-black">Personal</p>
+                    <p className="mt-1 text-xs font-semibold text-white/58">
+                      Your regular story.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      beginStoryCapture("dedication");
+                    }}
+                    className="story-audience-card app-pressable"
+                  >
+                    <Gift size={22} className="mb-5 text-[#facc15]" />
+                    <p className="text-base font-black">Dedication</p>
+                    <p className="mt-1 text-xs font-semibold text-white/58">
+                      Pick one person.
+                    </p>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="story-camera-bottom">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openStoryFilePicker();
+                      }}
+                      className="story-shutter app-pressable"
+                      disabled={
+                        isUploading ||
+                        (storyUploadMode === "dedication" && !dedicationRecipient)
+                      }
+                      aria-label="Select story media"
+                    />
+                  </div>
+                  <div
+                    className="story-gallery-sheet"
+                    style={{ height: `${storyGallerySnap}dvh` }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-center px-4 pt-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStoryGallerySnap((snap) =>
+                            snap === 25 ? 60 : snap === 60 ? 100 : 25,
+                          )
+                        }
+                        className="h-5 w-16 rounded-full"
+                        aria-label="Resize gallery"
+                      >
+                        <span className="mx-auto block h-1.5 w-12 rounded-full bg-white/28" />
+                      </button>
+                    </div>
+                    {storyUploadMode === "dedication" && (
+                      <div className="px-4 pb-2 pt-1">
+                        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                          {loadingFriends ? (
+                            [1, 2, 3].map((item) => (
+                              <div
+                                key={`story-friend-loading-${item}`}
+                                className="h-12 w-32 shrink-0 animate-pulse rounded-full bg-white/10"
+                              />
+                            ))
+                          ) : friends.length === 0 ? (
+                            <div className="rounded-full bg-white/10 px-4 py-3 text-xs font-bold text-white/70">
+                              No friends available
+                            </div>
+                          ) : (
+                            friends.map((friend) => {
+                              const friendId = friend.user_id || friend.id;
+                              const selected =
+                                dedicationRecipient &&
+                                (dedicationRecipient.user_id ||
+                                  dedicationRecipient.id) === friendId;
+                              return (
+                                <button
+                                  key={friendId}
+                                  type="button"
+                                  onClick={() => setDedicationRecipient(friend)}
+                                  className={`flex h-12 shrink-0 items-center gap-2 rounded-full border px-2 pr-4 ${
+                                    selected
+                                      ? "border-[#4ade80]/60 bg-[#4ade80]/18"
+                                      : "border-white/10 bg-white/8"
+                                  }`}
+                                >
+                                  <Avatar
+                                    src={friend.avatar_url || ""}
+                                    alt={friend.display_name || friend.username}
+                                    size="sm"
+                                    userId={friendId}
+                                    username={friend.username}
+                                  />
+                                  <span className="max-w-24 truncate text-xs font-black text-white">
+                                    {friend.display_name || friend.username}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className="story-gallery-grid">
+                      <button
+                        type="button"
+                        onClick={openStoryFilePicker}
+                        disabled={
+                          isUploading ||
+                          (storyUploadMode === "dedication" && !dedicationRecipient)
+                        }
+                        className="story-gallery-tile flex flex-col items-center justify-center gap-2 text-white disabled:opacity-45"
+                      >
+                        <ImagePlus size={24} />
+                        <span className="text-xs font-black">Gallery</span>
+                      </button>
+                      {storyDraftPreviewUrls.map((url, index) => (
+                        <button
+                          key={`${url}-${index}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedStoryDraftIndex(index);
+                            setStoryComposerStage("editor");
+                          }}
+                          className="story-gallery-tile"
+                          aria-label={`Select story media ${index + 1}`}
+                        >
+                          {storyDraftFiles[index]?.type.startsWith("video/") ? (
+                            <video src={url} className="h-full w-full object-cover" muted playsInline />
+                          ) : (
+                            <img src={url} alt="" className="h-full w-full object-cover" />
+                          )}
+                        </button>
+                      ))}
+                      {[0, 1, 2, 3, 4, 5, 6, 7].map((item) => (
+                        <div
+                          key={`story-gallery-empty-${item}`}
+                          className="story-gallery-tile bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))]"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="story-safe-top">
+            {isStoryDrawMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setStoryDrawPaths((paths) => paths.slice(0, -1));
+                  }}
+                  className="story-glass-button"
+                  aria-label="Undo"
+                >
+                  <Undo2 size={20} />
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled
+                    className="story-glass-button opacity-45"
+                    aria-label="Redo"
+                  >
+                    <Redo2 size={20} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setIsStoryDrawMode(false);
+                    }}
+                    className="story-glass-button px-4 text-sm font-black"
+                  >
+                    Done
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (isUploading) return;
+                    if (storyDraftFile) {
+                      clearStoryDraft();
+                      setStoryComposerStage("capture");
+                    } else if (storyComposerStage === "capture") {
+                      setShowStoryUploadModal(false);
+                      setShowStoryTypeSheet(true);
+                      setStoryComposerStage("audience");
+                      setStoryUploadMode(null);
+                      setDedicationRecipient(null);
+                    } else {
+                      closeStoryComposer();
+                    }
+                  }}
+                  className="story-glass-button"
+                  aria-label="Back"
+                >
+                  <ChevronLeft size={22} />
+                </button>
+                <div className="flex gap-2">
+                  {storyDraftFile && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        undoStoryEditorStep();
+                      }}
+                      className="story-glass-button"
+                      aria-label="Undo story edit"
+                    >
+                      <Undo2 size={20} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (storyDraftFile) openStoryFilePicker();
+                    }}
+                    className="story-glass-button"
+                    aria-label="More"
+                  >
+                    <MoreHorizontal size={22} />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {storyDraftFile && (
+            <>
+              <div
+                className={`story-right-toolbar ${
+                  storyToolbarCollapsed ||
+                  isStoryTextEditorOpen ||
+                  isStoryDrawMode ||
+                  isStoryTextDragging
+                    ? "is-collapsed"
+                    : ""
+                }`}
+              >
+                <button
+                  type="button"
+                  className="story-glass-button story-tool-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openStoryTextEditor();
+                  }}
+                  aria-label="Add text"
+                >
+                  <Type size={21} />
+                </button>
+                <button
+                  type="button"
+                  className="story-glass-button story-tool-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setIsStoryMusicModalOpen(true);
+                  }}
+                  aria-label="Add music"
+                >
+                  <Music size={21} />
+                </button>
+                <button
+                  type="button"
+                  className="story-glass-button story-tool-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setIsStoryDrawMode(true);
+                  }}
+                  aria-label="Draw"
+                >
+                  <Pencil size={21} />
+                </button>
+                <button
+                  type="button"
+                  className="story-glass-button story-tool-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setStoryFilterByOffset(1);
+                  }}
+                  aria-label="Effects"
+                >
+                  <Sparkles size={21} />
+                </button>
+                <button
+                  type="button"
+                  className="story-glass-button story-tool-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setStoryToolbarCollapsed(true);
+                    window.setTimeout(() => setStoryToolbarCollapsed(false), 1200);
+                  }}
+                  aria-label="Collapse tools"
+                >
+                  <ChevronDown size={22} />
+                </button>
+              </div>
+
+              <div className="story-share-panel">
+                <div className="story-share-row">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setStoryPublishAudience("story");
+                    }}
+                    className={`story-share-pill ${
+                      storyPublishAudience === "story" ? "is-active" : ""
+                    }`}
+                  >
+                    Your Story
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setStoryPublishAudience("close-friends");
+                    }}
+                    className={`story-share-pill ${
+                      storyPublishAudience === "close-friends" ? "is-active" : ""
+                    }`}
+                  >
+                    Close Friends
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void publishStoryDraft();
+                  }}
+                  disabled={isUploading}
+                  className="story-post-button"
+                >
+                  {isUploading ? (
+                    <span>{`Posting ${uploadProgress}%`}</span>
+                  ) : (
+                    <>
+                      <span>
+                        {storyPublishAudience === "close-friends"
+                          ? "Post to Close Friends"
+                          : "Post to Your Story"}
+                      </span>
+                      <ArrowRight size={20} strokeWidth={3} />
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+
+          {isStoryTextEditorOpen && (
+            <div className="story-panel" onClick={(event) => event.stopPropagation()}>
+              <div className="mb-3 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setIsStoryTextEditorOpen(false)}
+                  className="story-glass-button"
+                  aria-label="Close text editor"
+                >
+                  <X size={20} />
+                </button>
+                <button
+                  type="button"
+                  onClick={finishStoryTextEditing}
+                  className="story-glass-button px-5 text-sm font-black"
+                >
+                  Done
+                </button>
+              </div>
+              <div className="story-text-editor-stage">
+                <div className="story-text-size-rail">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStoryDraftTextSize((size) =>
+                        Math.max(STORY_TEXT_SIZE_MIN, size - 2),
+                      )
+                    }
+                    className="story-glass-button story-size-stepper"
+                    aria-label="Decrease story text size"
+                  >
+                    -
+                  </button>
+                  <div className="story-text-size-slider-wrap">
+                    <input
+                      type="range"
+                      min={STORY_TEXT_SIZE_MIN}
+                      max={STORY_TEXT_SIZE_MAX}
+                      value={storyDraftTextSize}
+                      onChange={(event) =>
+                        setStoryDraftTextSize(Number(event.target.value))
+                      }
+                      className="story-text-size-slider"
+                      aria-label="Story text size"
+                    />
+                  </div>
+                  <span className="story-text-size-badge">
+                    {storyDraftTextSize}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStoryDraftTextSize((size) =>
+                        Math.min(STORY_TEXT_SIZE_MAX, size + 2),
+                      )
+                    }
+                    className="story-glass-button story-size-stepper"
+                    aria-label="Increase story text size"
+                  >
+                    +
+                  </button>
+                </div>
+                <textarea
+                  value={storyDraftText}
+                  maxLength={120}
+                  onChange={(event) => setStoryDraftText(event.target.value)}
+                  autoFocus
+                  placeholder="Type"
+                  className={`story-textarea ${getStoryTextFontClassName(
+                    storyDraftTextFont,
+                  )}`}
+                  style={{
+                    color: storyDraftTextColor,
+                    textAlign: storyDraftTextAlign,
+                    fontSize: `${storyDraftTextSize}px`,
+                    lineHeight: 1.05,
+                  }}
+                />
+              </div>
+              <div className="story-tool-row">
+                <button
+                  type="button"
+                  className="story-control-pill"
+                  onClick={() =>
+                    setStoryDraftTextColor((color) => {
+                      const nextIndex =
+                        (STORY_TEXT_COLORS.indexOf(color) + 1) %
+                        STORY_TEXT_COLORS.length;
+                      return STORY_TEXT_COLORS[nextIndex];
+                    })
+                  }
+                >
+                  <Palette size={16} className="mr-2 inline" />
+                  Color
+                </button>
+                <button
+                  type="button"
+                  className={`story-control-pill ${storyDraftTextBg ? "is-active" : ""}`}
+                  onClick={() => setStoryDraftTextBg((enabled) => !enabled)}
+                >
+                  Bg
+                </button>
+                <button
+                  type="button"
+                  className="story-control-pill"
+                  onClick={() =>
+                    setStoryDraftTextAlign((align) =>
+                      align === "center" ? "left" : align === "left" ? "right" : "center",
+                    )
+                  }
+                >
+                  <AlignCenter size={16} className="mr-2 inline" />
+                  Align
+                </button>
+                <button type="button" className="story-control-pill">
+                  <Play size={16} className="mr-2 inline" />
+                  Animate
+                </button>
+              </div>
+              <div className="story-font-carousel scrollbar-hide">
+                {STORY_TEXT_FONTS.map((font) => (
+                  <button
+                    key={font}
+                    type="button"
+                    onClick={() => setStoryDraftTextFont(font)}
+                    className={`story-control-pill story-font-pill ${getStoryTextFontClassName(
+                      font,
+                    )} ${storyDraftTextFont === font ? "is-active" : ""}`}
+                  >
+                    {font}
+                  </button>
+                ))}
+              </div>
+              <div className="story-tool-row items-center">
+                {STORY_TEXT_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setStoryDraftTextColor(color)}
+                    className={`h-10 w-10 shrink-0 rounded-full border-2 ${
+                      storyDraftTextColor === color ? "border-white" : "border-white/20"
+                    }`}
+                    style={{ backgroundColor: color }}
+                    aria-label={`Use ${color}`}
+                  />
+                ))}
+                <span className="rounded-full border border-[#4ade80]/18 bg-white/8 px-3 py-2 text-xs font-black text-[#d7ffe6]">
+                  {storyDraftTextSize}px
+                </span>
+              </div>
+            </div>
+          )}
+
+          {isStoryMusicModalOpen && (
+            <div className="story-panel" onClick={(event) => event.stopPropagation()}>
+              <div className="mb-4 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopStoryMusicPreview();
+                    setIsStoryMusicModalOpen(false);
+                  }}
+                  className="story-glass-button"
+                  aria-label="Close music"
+                >
+                  <X size={20} />
+                </button>
+                <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full bg-white/12 px-4">
+                  <Search size={17} className="text-white/65" />
+                  <input
+                    value={storyMusicSearch}
+                    onChange={(event) => setStoryMusicSearch(event.target.value)}
+                    placeholder="Search music"
+                    className="min-w-0 flex-1 bg-transparent text-sm font-bold text-white outline-none placeholder:text-white/50"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide">
+                {["Trending", "For You", "Recent"].map((tab) => (
+                  <button key={tab} type="button" className="story-control-pill">
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-hide">
+                {filteredStoryMusicPresets.map((music) => (
+                  <button
+                    key={music.id}
+                    type="button"
+                    onClick={() => previewStoryMusic(music.id)}
+                    className={`grid w-full grid-cols-[54px_1fr] gap-3 rounded-[22px] border p-3 text-left ${
+                      storyDraftMusicId === music.id
+                        ? "border-[#4ade80]/60 bg-[#4ade80]/14"
+                        : "border-white/10 bg-white/[0.07]"
+                    }`}
+                  >
+                    <div
+                      className="flex h-[54px] w-[54px] items-center justify-center rounded-2xl"
+                      style={{ background: music.color, color: "#081108" }}
+                    >
+                      <Music size={24} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-black text-white">
+                            {music.label}
+                          </p>
+                          <p className="truncate text-xs font-semibold text-white/58">
+                            {music.description}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {storyDraftMusicId === music.id && (
+                            <span className="rounded-full bg-[#4ade80]/18 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#d7ffe6]">
+                              Selected
+                            </span>
+                          )}
+                          {music.id !== "none" && (
+                            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/24 text-white">
+                              {storyPreviewMusicId === music.id ? (
+                                <PauseCircle size={18} />
+                              ) : (
+                                <Volume2 size={18} />
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex h-6 items-center gap-1">
+                        {[8, 14, 9, 18, 11, 20, 12, 16, 10, 15, 7].map((height, index) => (
+                          <span
+                            key={`${music.id}-wave-${index}`}
+                            className="w-1 rounded-full bg-white/55"
+                            style={{ height }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                {filteredStoryMusicPresets.length === 0 && (
+                  <div className="rounded-[22px] border border-white/10 bg-white/[0.07] px-4 py-5 text-center text-sm font-semibold text-white/62">
+                    No free tracks match that search.
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 rounded-[22px] border border-white/10 bg-white/[0.07] p-4">
+                <div className="mb-2 flex items-center justify-between text-xs font-black uppercase tracking-[0.14em] text-white/58">
+                  <span>Timeline</span>
+                  <span>{storyMusicTrim}s</span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={30}
+                  value={storyMusicTrim}
+                  onChange={(event) => setStoryMusicTrim(Number(event.target.value))}
+                  className="w-full accent-[#4ade80]"
+                  aria-label="Music trim"
+                />
+                <p className="mt-2 text-[11px] font-semibold text-white/50">
+                  Tap a track to preview it. Close this sheet when you want to keep the selected one.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isStoryDrawMode && (
+            <div
+              className="absolute inset-x-0 bottom-0 z-[72] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+14px)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="rounded-[28px] border border-white/10 bg-black/64 p-3 shadow-[0_-16px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                <div className="story-tool-row scrollbar-hide">
+                  {STORY_BRUSHES.map((brush) => (
+                    <button
+                      key={brush}
+                      type="button"
+                      onClick={() => setStoryBrush(brush)}
+                      className={`story-control-pill ${storyBrush === brush ? "is-active" : ""}`}
+                    >
+                      {brush}
+                    </button>
+                  ))}
+                </div>
+                <div className="story-tool-row items-center">
+                  {STORY_TEXT_COLORS.map((color) => (
+                    <button
+                      key={`brush-${color}`}
+                      type="button"
+                      onClick={() => setStoryBrushColor(color)}
+                      className={`h-10 w-10 shrink-0 rounded-full border-2 ${
+                        storyBrushColor === color ? "border-white" : "border-white/20"
+                      }`}
+                      style={{ backgroundColor: color }}
+                      aria-label={`Use brush ${color}`}
+                    />
+                  ))}
+                  <SlidersHorizontal size={18} className="text-white/70" />
+                  <input
+                    type="range"
+                    min={2}
+                    max={18}
+                    value={storyBrushSize}
+                    onChange={(event) => setStoryBrushSize(Number(event.target.value))}
+                    className="min-w-28 flex-1 accent-[#4ade80]"
+                    aria-label="Brush size"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {false && showStoryUploadModal && (
         <div
           className="app-modal-backdrop fixed inset-0 bg-black/75 z-[100] flex items-end backdrop-blur-sm"
           onClick={closeStoryComposer}
@@ -2872,6 +5203,19 @@ export function FeedScreen({
       {/* ══════════════════════════════════════════
           STORY VIEWER
       ══════════════════════════════════════════ */}
+      {selectedCommunityChallenge && (
+        <CommunityChallengePreviewScreen
+          challenge={selectedCommunityChallenge}
+          isJoined={joinedCommunityChallengeIds.has(
+            selectedCommunityChallenge.id,
+          )}
+          onClose={() => setSelectedCommunityChallenge(null)}
+          onJoin={() =>
+            handleJoinCommunityChallenge(selectedCommunityChallenge.id)
+          }
+        />
+      )}
+
       {showStoryViewerModal && viewerStories.length > 0 && (
         <StoryViewer
           stories={viewerStories}

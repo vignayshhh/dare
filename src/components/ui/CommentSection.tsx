@@ -283,14 +283,7 @@ function SingleComment({
                 </div>
                 <span>{replyCount === 1 ? "Reply" : "Replies"}</span>
               </div>
-              <div
-                className="mt-2 space-y-3 overflow-y-auto pb-4"
-                style={{
-                  maxHeight: replyCount > 5 ? "300px" : "none",
-                  overscrollBehavior: "contain",
-                  WebkitOverflowScrolling: "touch",
-                }}
-              >
+              <div className="mt-2 space-y-3 pb-1">
                 {replies.map((reply, rIdx) => (
                   <SingleComment
                     key={`${reply.id}-${rIdx}`} // Fallback unique key
@@ -385,72 +378,10 @@ export function CommentSection({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* ── Input area (pinned top) ── */}
-      <div className="px-4 py-3 border-b border-[#1e1e1e] shrink-0 bg-[#111]">
-        {replyTo && (
-          <div className="flex items-center justify-between mb-2 px-1">
-            <div className="flex items-center gap-1.5 text-[#4ade80] text-xs font-medium">
-              <CornerDownRight size={12} />
-              <span>
-                Replying to{" "}
-                <span className="font-bold">@{replyTo.username}</span>
-              </span>
-            </div>
-            <button
-              onClick={cancelReply}
-              className="text-[#64748b] hover:text-white text-xs font-semibold transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-        <div className="flex items-center gap-3">
-          <Avatar
-            src={currentUser.avatar}
-            alt="You"
-            size="md"
-            className="shrink-0"
-            userId={currentUser.userId}
-          />
-          <div className="flex-1 flex items-center bg-[#1a1a1a] border border-[#2a2a2a] rounded-full px-4 py-2.5 gap-2 focus-within:border-[#4ade80]/40 transition-colors">
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSubmit();
-                if (e.key === "Escape") cancelReply();
-              }}
-              placeholder={
-                replyTo
-                  ? `Reply to @${replyTo.username}...`
-                  : "Write a comment..."
-              }
-              className="bg-transparent text-white text-sm flex-1 outline-none placeholder-[#4a5568]"
-            />
-            {inputText.trim() && (
-              <button
-                onClick={handleSubmit}
-                disabled={posting}
-                className="text-[#4ade80] font-bold text-sm shrink-0 hover:text-[#22c55e] disabled:opacity-50 transition-colors"
-              >
-                {posting ? "..." : "Post"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* ── Comments list ── */}
       <div
         ref={listRef}
-        className="overflow-y-auto flex-1 min-h-0 px-4 pt-4 pb-16"
-        style={{
-          overscrollBehavior: "contain",
-          WebkitOverflowScrolling: "touch",
-          touchAction: "pan-y",
-        }}
+        className="app-modal-sheet-scroll px-4 pt-4 pb-4"
       >
         <style>{`
           @keyframes commentFadeIn {
@@ -506,6 +437,62 @@ export function CommentSection({
             ))}
           </div>
         )}
+      </div>
+
+      {/* ── Composer area (pinned bottom) ── */}
+      <div className="shrink-0 border-t border-[#1e1e1e] bg-[#111] px-4 pt-3 pb-[calc(var(--safe-area-bottom)+12px)]">
+        {replyTo && (
+          <div className="mb-2 flex items-center justify-between px-1">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-[#4ade80]">
+              <CornerDownRight size={12} />
+              <span>
+                Replying to <span className="font-bold">@{replyTo.username}</span>
+              </span>
+            </div>
+            <button
+              onClick={cancelReply}
+              className="text-xs font-semibold text-[#64748b] transition-colors hover:text-white"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+        <div className="flex items-center gap-3">
+          <Avatar
+            src={currentUser.avatar}
+            alt="You"
+            size="md"
+            className="shrink-0"
+            userId={currentUser.userId}
+          />
+          <div className="flex flex-1 items-center gap-2 rounded-full border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2.5 transition-colors focus-within:border-[#4ade80]/40">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSubmit();
+                if (e.key === "Escape") cancelReply();
+              }}
+              placeholder={
+                replyTo
+                  ? `Reply to @${replyTo.username}...`
+                  : "Write a comment..."
+              }
+              className="flex-1 bg-transparent text-sm text-white outline-none placeholder-[#4a5568]"
+            />
+            {inputText.trim() && (
+              <button
+                onClick={handleSubmit}
+                disabled={posting}
+                className="shrink-0 text-sm font-bold text-[#4ade80] transition-colors hover:text-[#22c55e] disabled:opacity-50"
+              >
+                {posting ? "..." : "Post"}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -31,6 +31,7 @@ export interface Story {
   expiresAt: string;
   viewCount: number;
   viewers: string[]; // Array of user IDs who viewed the story
+  viewerViewCounts: Record<string, number>; // Per-viewer story opens
 }
 
 export interface CreateStoryRequest {

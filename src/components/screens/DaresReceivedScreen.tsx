@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useEffect, memo, useCallback, useRef, useMemo } from "react";
-import { Clock, Target, X, CheckCircle, AlertCircle } from "lucide-react";
+import {
+  ArrowRight,
+  Clock,
+  Inbox,
+  Sparkles,
+  Target,
+  X,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import "@/styles/design-system.css";
 import { TruthAnswerScreen } from "./TruthAnswerScreen";
 import { DareCompletionScreen } from "./DareCompletionScreen";
@@ -65,11 +74,19 @@ const stripAtSymbol = (username?: string) =>
   (username || "unknown").replace(/^@/, "");
 
 const getCompletedCapsuleClasses =
-  "border border-[#4ade80]/30 bg-[#4ade80]/10 text-[#4ade80]";
+  "border border-[#4ade80]/24 bg-[#4ade80]/10 text-[#bbf7d0] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 const sharedChallengeCardClass =
-  "card relative isolate animate-slide-up overflow-hidden rounded-[28px] border border-white/10 bg-[#141414]/95 p-4 mb-4 shadow-[0_18px_44px_rgba(0,0,0,0.62),0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur-xl transition-all duration-300 hover:border-[#4ade80]/20 hover:shadow-[0_22px_54px_rgba(0,0,0,0.68),0_0_30px_rgba(74,222,128,0.15)]";
+  "card relative isolate animate-slide-up overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,22,17,0.98)_0%,rgba(8,13,9,0.99)_52%,rgba(5,8,6,0.99)_100%)] p-4 shadow-[0_22px_58px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.055)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#4ade80]/24 hover:shadow-[0_26px_66px_rgba(0,0,0,0.5),0_0_24px_rgba(74,222,128,0.08)]";
 const highlightedChallengeRingClass =
-  "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-[#141414]";
+  "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-[#071008]";
+const curvedPromptPanelClass =
+  "rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.052),rgba(255,255,255,0.022))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.045)]";
+const curvedStatusCapsuleClass =
+  "flex min-h-[42px] flex-1 items-center justify-center rounded-full px-3 py-2.5 text-center";
+const curvedActionButtonClass =
+  "dares-received-action-button flex-1 rounded-full px-4 py-2.5 text-sm font-black shadow-[0_12px_28px_rgba(0,0,0,0.22)] transition-all duration-200 active:scale-[0.98]";
+const curvedModalButtonClass =
+  "dares-received-action-button w-full rounded-full py-3.5 text-base font-semibold";
 
 const TimerDisplay = memo(
   ({
@@ -79,7 +96,7 @@ const TimerDisplay = memo(
     time: number;
     formatTime: (s: number) => string;
   }) => (
-    <p className="text-[#4ade80] text-sm font-medium transition-all duration-100">
+    <p className="text-sm font-bold text-[#a8f0bf] transition-all duration-100">
       Time remaining: {formatTime(time)}
     </p>
   ),
@@ -123,11 +140,12 @@ const ChallengeCard = memo(
       <div
         className={`${sharedChallengeCardClass} ${isHighlighted ? highlightedChallengeRingClass : ""}`}
       >
-        <div className="pointer-events-none absolute inset-x-7 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.42),transparent)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.04),transparent_70%)] opacity-60" />
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.68),rgba(14,165,233,0.46),rgba(74,222,128,0))]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.075),transparent_72%)] opacity-80" />
+        <div className="pointer-events-none absolute -right-14 -top-14 h-32 w-32 rounded-full bg-[#22d3ee]/7 blur-3xl" />
 
-        <div className="mb-3.5 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+        <div className="relative z-10 mb-3.5 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center space-x-3">
             <div className="relative">
               <Avatar
                 src={challenge.challenger.avatar}
@@ -135,6 +153,7 @@ const ChallengeCard = memo(
                 size="md"
                 userId={challenge.challengerId}
                 username={challenge.challenger.username}
+                className="ring-1 ring-white/10 shadow-[0_14px_30px_rgba(0,0,0,0.28)]"
                 disableGhostMode
               />
               {challenge.challenger.verified && (
@@ -143,13 +162,13 @@ const ChallengeCard = memo(
                 </div>
               )}
             </div>
-            <div>
-              <div className="mb-1 inline-flex rounded-full border border-white/7 bg-white/[0.04] px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7dd3a7] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <div className="min-w-0">
+              <div className="mb-1 inline-flex rounded-full border border-[#79d99a]/16 bg-[#79d99a]/8 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#a8f0bf] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                 Challenger
               </div>
               <div className="flex items-center space-x-2">
-                <h3 className="font-bold text-white text-[15px] leading-tight tracking-tight">
-                  From: @{challenge.challenger.username || "unknown"}
+                <h3 className="truncate text-[15px] font-black leading-tight tracking-tight text-white">
+                  @{challenge.challenger.username || "unknown"}
                 </h3>
                 {challenge.challenger.verified && (
                   <CheckCircle size={14} className="text-accent-primary" />
@@ -159,37 +178,37 @@ const ChallengeCard = memo(
           </div>
 
           <div
-            className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
+            className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
               challenge.type === "truth"
-                ? "border border-[#4ade80]/30 bg-[#4ade80]/12 text-[#86efac]"
-                : "border border-[#f59e0b]/30 bg-[#f59e0b]/12 text-[#fbbf24]"
+                ? "border border-[#4ade80]/28 bg-[#4ade80]/12 text-[#bbf7d0]"
+                : "border border-[#22d3ee]/24 bg-[#22d3ee]/10 text-[#a5f3fc]"
             }`}
           >
             {challenge.type.toUpperCase()}
           </div>
         </div>
 
-        <div className="mb-3.5">
+        <div className="relative z-10 mb-3.5">
           {challenge.type === "truth" ? (
             <>
-              <p className="mb-2 text-[13px] leading-relaxed text-[#8ea18e]">
+              <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
                 Wants to know the truth about:
               </p>
-              <div className="rounded-[20px] border border-white/5 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-                <div className="mb-2.5 h-1 w-14 rounded-full bg-[#4ade80]/80" />
-                <p className="text-[15px] font-semibold leading-relaxed text-white">
+              <div className={curvedPromptPanelClass}>
+                <div className="mb-3 h-1 w-14 rounded-full bg-[#4ade80]/90 shadow-[0_0_18px_rgba(74,222,128,0.22)]" />
+                <p className="text-[15px] font-bold leading-relaxed text-white">
                   {challenge.question}
                 </p>
               </div>
             </>
           ) : (
             <>
-              <p className="mb-2 text-[13px] leading-relaxed text-[#8ea18e]">
+              <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
                 Dared you to:
               </p>
-              <div className="rounded-[20px] border border-white/5 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-                <div className="mb-2.5 h-1 w-14 rounded-full bg-[#f59e0b]/80" />
-                <p className="text-[15px] font-semibold leading-relaxed text-white">
+              <div className={curvedPromptPanelClass}>
+                <div className="mb-3 h-1 w-14 rounded-full bg-[linear-gradient(90deg,#22d3ee,#4ade80)] shadow-[0_0_18px_rgba(34,211,238,0.18)]" />
+                <p className="text-[15px] font-bold leading-relaxed text-white">
                   {challenge.action}
                 </p>
               </div>
@@ -198,12 +217,12 @@ const ChallengeCard = memo(
         </div>
 
         {challenge.type === "truth" && challenge.poll && (
-          <div className="mb-3.5">
-            <div className="mb-2 flex items-center justify-between">
-              <h4 className="text-white font-medium text-xs">
+          <div className="relative z-10 mb-3.5 rounded-[24px] border border-white/8 bg-white/[0.035] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+            <div className="mb-2.5 flex items-center justify-between gap-3">
+              <h4 className="text-xs font-bold text-white">
                 {challenge.poll.question}
               </h4>
-              <span className="text-[#7f8b7f] text-xs">
+              <span className="shrink-0 text-xs font-semibold text-[#94a3b8]">
                 {challenge.poll.totalVotes} votes
               </span>
             </div>
@@ -217,14 +236,16 @@ const ChallengeCard = memo(
                 return (
                   <div key={index} className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-white text-xs">{option}</span>
-                      <span className="text-[#7f8b7f] text-xs">
+                      <span className="text-xs font-semibold text-white">
+                        {option}
+                      </span>
+                      <span className="text-xs text-[#94a3b8]">
                         {votes} votes
                       </span>
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-white/8">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/30">
                       <div
-                        className="h-1.5 rounded-full bg-linear-to-r from-[#4ade80] to-[#22c55e]"
+                        className="h-1.5 rounded-full bg-linear-to-r from-[#79d99a] to-[#35b96f]"
                         style={{ width: `${percentage}%` }}
                       />
                     </div>
@@ -236,11 +257,11 @@ const ChallengeCard = memo(
         )}
 
         {/* Action Buttons / Status Messages */}
-        <div className="flex space-x-2.5">
+        <div className="relative z-10 flex space-x-2.5">
           {isChickenOut ? (
             // Refused — fade in shame message, no buttons
             <div
-              className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 py-2 text-center"
+              className={`${curvedStatusCapsuleClass} border border-red-400/18 bg-red-400/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}
               style={{ animation: "fadeIn 0.5s ease" }}
             >
               <p className="text-red-400 font-semibold text-xs">
@@ -250,7 +271,7 @@ const ChallengeCard = memo(
           ) : isExpired ? (
             // Dare expired
             <div
-              className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 py-2 text-center"
+              className={`${curvedStatusCapsuleClass} border border-red-400/18 bg-red-400/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}
               style={{ animation: "fadeIn 0.5s ease" }}
             >
               <p className="text-red-400 font-semibold text-xs">Dare expired</p>
@@ -258,7 +279,7 @@ const ChallengeCard = memo(
           ) : isTimedOut ? (
             // Timer ran out while accepted
             <div
-              className="flex-1 rounded-2xl border border-gray-500/20 bg-gray-500/10 py-2 text-center"
+              className={`${curvedStatusCapsuleClass} border border-white/10 bg-white/[0.045] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}
               style={{ animation: "fadeIn 0.5s ease" }}
             >
               <p className="text-gray-400 font-semibold text-xs">
@@ -267,7 +288,7 @@ const ChallengeCard = memo(
             </div>
           ) : isCompleted || isAnswered ? (
             <div
-              className={`flex-1 rounded-2xl py-2 text-center ${getCompletedCapsuleClasses}`}
+              className={`${curvedStatusCapsuleClass} ${getCompletedCapsuleClasses}`}
               style={{ animation: "fadeIn 0.5s ease" }}
             >
               <p className="text-[#4ade80] font-semibold text-xs">
@@ -278,7 +299,7 @@ const ChallengeCard = memo(
             </div>
           ) : isMarkedFake ? (
             <div
-              className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 py-2 text-center"
+              className={`${curvedStatusCapsuleClass} border border-red-400/18 bg-red-400/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}
               style={{ animation: "fadeIn 0.5s ease" }}
             >
               <p className="text-red-400 font-semibold text-xs">
@@ -291,16 +312,16 @@ const ChallengeCard = memo(
                 e.stopPropagation();
                 onComplete(challenge);
               }}
-              className="btn btn-primary flex-1 py-2 text-sm"
+              className={`btn btn-primary ${curvedActionButtonClass}`}
             >
               Complete Now
             </button>
           ) : isWaitingForApproval ? (
             <div
-              className="flex-1 rounded-2xl border border-accent-secondary/20 bg-accent-secondary/15 py-2 text-center"
+              className={`${curvedStatusCapsuleClass} border border-[#22d3ee]/20 bg-[#22d3ee]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}
               style={{ animation: "fadeIn 0.5s ease" }}
             >
-              <p className="text-accent-secondary font-semibold text-xs">
+              <p className="text-[#a5f3fc] font-semibold text-xs">
                 Waiting for approval
               </p>
             </div>
@@ -311,7 +332,7 @@ const ChallengeCard = memo(
                   e.stopPropagation();
                   onAccept(challenge);
                 }}
-                className="btn btn-primary flex-1 py-2 text-sm"
+                className={`btn btn-primary ${curvedActionButtonClass}`}
               >
                 Accept
               </button>
@@ -320,7 +341,7 @@ const ChallengeCard = memo(
                   e.stopPropagation();
                   onSurrender(challenge);
                 }}
-                className="btn btn-secondary flex-1 py-2 text-sm"
+                className={`btn btn-secondary ${curvedActionButtonClass}`}
               >
                 Refuse
               </button>
@@ -333,7 +354,7 @@ const ChallengeCard = memo(
           timeRemaining !== undefined &&
           timeRemaining > 0 &&
           !isExpired && (
-            <div className="mt-2.5 rounded-2xl border border-white/7 bg-white/[0.035] px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <div className="relative z-10 mt-2.5 rounded-full border border-[#79d99a]/16 bg-[#79d99a]/8 px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <TimerDisplay time={timeRemaining} formatTime={formatTime} />
             </div>
           )}
@@ -375,11 +396,12 @@ const SentChallengeCard = memo(
           isHighlighted ? highlightedChallengeRingClass : ""
         }`}
       >
-        <div className="pointer-events-none absolute inset-x-7 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.42),transparent)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.04),transparent_70%)] opacity-60" />
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.68),rgba(14,165,233,0.46),rgba(74,222,128,0))]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.075),transparent_72%)] opacity-80" />
+        <div className="pointer-events-none absolute -right-14 -top-14 h-32 w-32 rounded-full bg-[#22d3ee]/7 blur-3xl" />
 
-        <div className="mb-3.5 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+        <div className="relative z-10 mb-3.5 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center space-x-3">
             <div className="relative">
               <Avatar
                 src={challenge.receiver?.avatar || "/default-avatar.png"}
@@ -387,6 +409,7 @@ const SentChallengeCard = memo(
                 size="md"
                 userId={challenge.receiverId}
                 username={challenge.receiver?.username}
+                className="ring-1 ring-white/10 shadow-[0_14px_30px_rgba(0,0,0,0.28)]"
                 disableGhostMode
               />
               {challenge.receiver?.verified && (
@@ -395,13 +418,16 @@ const SentChallengeCard = memo(
                 </div>
               )}
             </div>
-            <div>
+            <div className="min-w-0">
+              <div className="mb-1 inline-flex rounded-full border border-[#79d99a]/16 bg-[#79d99a]/8 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#a8f0bf] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                Sent to
+              </div>
               <div className="flex items-center space-x-2">
-                <h3 className="font-bold text-white text-[15px] leading-tight tracking-tight">
-                  To: @{challenge.receiver?.username || "unknown"}
+                <h3 className="truncate text-[15px] font-black leading-tight tracking-tight text-white">
+                  @{challenge.receiver?.username || "unknown"}
                 </h3>
               </div>
-              <p className="mt-1 text-[11px] text-[#8ea18e]">
+              <p className="mt-1 text-[11px] font-semibold text-[#94a3b8]">
                 {challenge.type === "truth"
                   ? "Truth you sent"
                   : "Dare you sent"}
@@ -410,18 +436,18 @@ const SentChallengeCard = memo(
           </div>
           <div className="text-right">
             <span
-              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+              className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
                 challenge.state === "SENT"
-                  ? "bg-blue-500/20 text-blue-300"
+                  ? "border border-sky-400/20 bg-sky-400/10 text-sky-200"
                   : challenge.state === "ACCEPTED_REAL"
-                    ? "bg-green-500/20 text-green-300"
+                    ? "border border-[#4ade80]/24 bg-[#4ade80]/10 text-[#bbf7d0]"
                     : challenge.state === "REJECTED_FAKE"
-                      ? "bg-red-500/20 text-red-300"
+                      ? "border border-red-400/20 bg-red-400/10 text-red-300"
                       : challenge.state === "ANSWERED" ||
                           challenge.state === "PROOF_SUBMITTED" ||
                           challenge.state === "FRIENDS_VALIDATION"
-                        ? "bg-green-500/20 text-green-300"
-                        : "bg-gray-500/20 text-gray-300"
+                        ? "border border-[#22d3ee]/20 bg-[#22d3ee]/10 text-[#a5f3fc]"
+                        : "border border-white/10 bg-white/[0.045] text-[#94a3b8]"
               }`}
             >
               {challenge.state}
@@ -429,27 +455,27 @@ const SentChallengeCard = memo(
           </div>
         </div>
 
-        <div className="mb-3.5">
+        <div className="relative z-10 mb-3.5">
           {challenge.type === "truth" ? (
             <>
-              <p className="mb-2 text-[13px] leading-relaxed text-[#8ea18e]">
+              <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
                 You asked:
               </p>
-              <div className="rounded-[20px] border border-white/5 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-                <div className="mb-2.5 h-1 w-14 rounded-full bg-[#4ade80]/80" />
-                <p className="text-[15px] font-semibold leading-relaxed text-white">
+              <div className={curvedPromptPanelClass}>
+                <div className="mb-3 h-1 w-14 rounded-full bg-[#4ade80]/90 shadow-[0_0_18px_rgba(74,222,128,0.22)]" />
+                <p className="text-[15px] font-bold leading-relaxed text-white">
                   {challenge.question}
                 </p>
               </div>
             </>
           ) : (
             <>
-              <p className="mb-2 text-[13px] leading-relaxed text-[#8ea18e]">
+              <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
                 You dared them to:
               </p>
-              <div className="rounded-[20px] border border-white/5 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-                <div className="mb-2.5 h-1 w-14 rounded-full bg-[#f59e0b]/80" />
-                <p className="text-[15px] font-semibold leading-relaxed text-white">
+              <div className={curvedPromptPanelClass}>
+                <div className="mb-3 h-1 w-14 rounded-full bg-[linear-gradient(90deg,#22d3ee,#4ade80)] shadow-[0_0_18px_rgba(34,211,238,0.18)]" />
+                <p className="text-[15px] font-bold leading-relaxed text-white">
                   {challenge.action}
                 </p>
               </div>
@@ -457,14 +483,14 @@ const SentChallengeCard = memo(
           )}
         </div>
 
-        <div className="mb-3.5">
+        <div className="relative z-10 mb-3.5">
           <div
-            className={`flex-1 rounded-2xl py-2 text-center ${
+            className={`${curvedStatusCapsuleClass} ${
               isCompleted
                 ? getCompletedCapsuleClasses
                 : isSurrendered
-                  ? "border border-red-500/20 bg-red-500/10"
-                  : "border border-accent-secondary/20 bg-accent-secondary/15"
+                  ? "border border-red-400/18 bg-red-400/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                  : "border border-[#22d3ee]/20 bg-[#22d3ee]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
             }`}
             style={{ animation: "fadeIn 0.5s ease" }}
           >
@@ -474,7 +500,7 @@ const SentChallengeCard = memo(
                   ? "text-[#4ade80] font-semibold text-xs"
                   : isSurrendered
                     ? "text-red-400 font-semibold text-xs"
-                    : "text-accent-secondary font-semibold text-xs"
+                    : "text-[#a5f3fc] font-semibold text-xs"
               }
             >
               {isCompleted
@@ -500,10 +526,10 @@ const SentChallengeCard = memo(
         </div>
 
         {isAwaitingApproval && (
-          <div className="flex space-x-2.5">
+          <div className="relative z-10 flex space-x-2.5">
             <button
               onClick={() => onReview(challenge)}
-              className="btn btn-primary flex-1 py-2 text-sm"
+              className={`btn btn-primary ${curvedActionButtonClass}`}
             >
               Review
             </button>
@@ -522,6 +548,7 @@ const initialSentChallenges: Challenge[] = [];
 function mapDareProofToChallengeProof(
   proofMediaType?: string | null,
   proofMediaUrl?: string | null,
+  proofThumbnailUrl?: string | null,
 ) {
   if (!proofMediaUrl) return undefined;
 
@@ -535,7 +562,9 @@ function mapDareProofToChallengeProof(
           ? ("audio" as const)
           : ("image" as const),
     url: proofMediaUrl,
-    thumbnail: proofMediaType === "VIDEO" ? proofMediaUrl : undefined,
+    thumbnail:
+      proofThumbnailUrl ||
+      (proofMediaType === "VIDEO" ? proofMediaUrl : undefined),
   };
 }
 
@@ -608,11 +637,14 @@ type DaresNavigationRequest = {
 
 export function DaresReceivedScreen({
   navigationRequest,
+  resetKey,
 }: {
   navigationRequest?: DaresNavigationRequest | null;
+  resetKey?: number;
 }) {
   const approvalCinematicTimeoutsRef = useRef<number[]>([]);
   const submissionCinematicTimeoutsRef = useRef<number[]>([]);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<"received" | "sent">("received");
   const [showAcceptPrompt, setShowAcceptPrompt] = useState<Challenge | null>(
     null,
@@ -784,6 +816,17 @@ export function DaresReceivedScreen({
       setHighlightedTruthId(navigationRequest.highlightTruthId);
     }
   }, [navigationRequest]);
+
+  useEffect(() => {
+    if (resetKey === undefined) return;
+
+    setCurrentScreen("dares");
+    setActiveChallenge(null);
+    window.scrollTo(0, 0);
+    if (listScrollRef.current) {
+      listScrollRef.current.scrollTop = 0;
+    }
+  }, [resetKey]);
 
   useEffect(() => {
     const storedTab = sessionStorage.getItem("openDaresTab");
@@ -1036,6 +1079,7 @@ export function DaresReceivedScreen({
         proof: mapDareProofToChallengeProof(
           dare.proofMediaType,
           dare.proofMediaUrl,
+          dare.proofThumbnailUrl,
         ),
       };
     },
@@ -1070,6 +1114,7 @@ export function DaresReceivedScreen({
         proof: mapDareProofToChallengeProof(
           dare.proofMediaType,
           dare.proofMediaUrl,
+          dare.proofThumbnailUrl,
         ),
       };
     },
@@ -1761,6 +1806,7 @@ export function DaresReceivedScreen({
   const handleDareSubmit = (_proof: {
     type: "image" | "video" | "audio";
     url: string;
+    thumbnail?: string;
   }) => {
     console.log("🔥 [NUCLEAR] Most powerful fix - complete UI reset");
 
@@ -1845,6 +1891,7 @@ export function DaresReceivedScreen({
   const handleDareSubmittedCinematic = async (proof: {
     type: "image" | "video" | "audio";
     url: string;
+    thumbnail?: string;
   }) => {
     if (!activeChallenge) return;
     if (!user?.id) {
@@ -1856,6 +1903,7 @@ export function DaresReceivedScreen({
       user.id,
       proof.url,
       mapProofTypeToDareMediaType(proof.type),
+      proof.thumbnail,
     );
 
     if (!submitResponse.success || !submitResponse.dare) {
@@ -1868,6 +1916,7 @@ export function DaresReceivedScreen({
       mapDareProofToChallengeProof(
         submittedDare.proofMediaType,
         submittedDare.proofMediaUrl,
+        submittedDare.proofThumbnailUrl,
       ) || proof;
     const submittedAt = submittedDare.proofSubmittedAt || now;
 
@@ -1985,61 +2034,148 @@ export function DaresReceivedScreen({
   }
 
   return (
-    <div className="screen-container flex flex-col bg-[radial-gradient(circle_at_top,#162016_0%,#0b100b_36%,#070a07_100%)]">
+    <div
+      className="screen-container flex flex-col"
+      style={{
+        background:
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.12), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)",
+      }}
+    >
       <style>
-        {`@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }`}
+        {`@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+          @keyframes daresReceivedSweep {
+            0% { transform: translateX(-125%); }
+            42% { transform: translateX(125%); }
+            100% { transform: translateX(125%); }
+          }
+          @keyframes daresReceivedFloatIn {
+            from { opacity: 0; transform: translateY(14px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+          }
+          @keyframes daresReceivedPulse {
+            0%, 100% { opacity: 0.58; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.08); }
+          }
+          .dares-received-panel {
+            animation: daresReceivedFloatIn 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+          .dares-received-shine::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+            animation: daresReceivedSweep 6.8s ease-in-out infinite;
+            pointer-events: none;
+          }
+          .dares-received-live-dot {
+            animation: daresReceivedPulse 2.2s ease-in-out infinite;
+          }
+          .dares-received-action-button {
+            border-radius: 999px;
+            min-height: 42px;
+          }
+          .dares-received-action-button.btn-primary {
+            background: #4ade80;
+            color: #041006;
+            box-shadow: 0 14px 30px rgba(74,222,128,0.18);
+          }
+          .dares-received-action-button.btn-primary:hover {
+            background: #22c55e;
+            box-shadow: 0 16px 36px rgba(74,222,128,0.24);
+          }
+          .dares-received-action-button.btn-secondary {
+            border: 1px solid rgba(255,255,255,0.1);
+            background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.025));
+            color: #cbd5e1;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 28px rgba(0,0,0,0.18);
+          }
+          .dares-received-action-button.btn-secondary:hover {
+            border-color: rgba(248,113,113,0.22);
+            background: rgba(248,113,113,0.1);
+            color: #fca5a5;
+          }
+          .dares-received-active-tab {
+            background: #4ade80;
+            box-shadow: 0 10px 26px rgba(74,222,128,0.22);
+          }`}
       </style>
-      <div className="nav-header">
-        <div className="px-4 pt-5 pb-5">
-          <div className="mx-auto flex max-w-sm flex-col items-center gap-4">
-            <h1 className="text-2xl font-bold tracking-tight">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#4ade80] to-[#22c55e] drop-shadow-[0_0_12px_rgba(74,222,128,0.4)]">
-                Dares
-              </span>
-              <span className="text-white"> & </span>
-              <span className="text-white">Truths</span>
-            </h1>
-            <div className="flex rounded-full border border-white/12 bg-[#141414]/90 p-1.5 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
+      <div
+        className="px-4"
+        style={{ paddingTop: "calc(var(--safe-area-top) + 14px)" }}
+      >
+        <div className="mx-auto max-w-2xl pb-4">
+          <div className="dares-received-panel relative mb-3 overflow-hidden rounded-[34px] border border-white/8 bg-[radial-gradient(ellipse_at_24%_-45%,rgba(74,222,128,0.16),transparent_64%),radial-gradient(ellipse_at_82%_-40%,rgba(14,165,233,0.12),transparent_62%),linear-gradient(180deg,rgba(13,19,14,0.94),rgba(8,13,9,0.97))] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(14,165,233,0.45),rgba(74,222,128,0))]" />
+            <div className="relative z-10 mb-4 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="mb-2 inline-flex rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#86efac]">
+                  Dare inbox
+                </div>
+                <h1 className="text-[32px] font-black leading-none tracking-tight text-white">
+                  Dares & Truths
+                </h1>
+              </div>
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] border border-white/8 bg-white/[0.045] text-[#4ade80] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <Inbox size={24} strokeWidth={2.5} />
+              </div>
+            </div>
+            <div className="relative z-10 grid grid-cols-2 rounded-full border border-white/8 bg-black/25 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-md">
               <button
                 onClick={() => setActiveTab("received")}
-                className={`px-5.5 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                className={`min-h-[40px] rounded-full px-4 text-sm font-black transition-all duration-300 ${
                   activeTab === "received"
-                    ? "text-black shadow-md"
-                    : "text-[#8ea18e] hover:text-white"
+                    ? "dares-received-active-tab text-[#041006]"
+                    : "text-[#94a3b8] hover:text-white"
                 }`}
-                style={{
-                  backgroundColor:
-                    activeTab === "received" ? "#00ff88" : "transparent",
-                }}
               >
                 Received
               </button>
               <button
                 onClick={() => setActiveTab("sent")}
-                className={`px-5.5 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                className={`min-h-[40px] rounded-full px-4 text-sm font-black transition-all duration-300 ${
                   activeTab === "sent"
-                    ? "text-black shadow-md"
-                    : "text-[#8ea18e] hover:text-white"
+                    ? "dares-received-active-tab text-[#041006]"
+                    : "text-[#94a3b8] hover:text-white"
                 }`}
-                style={{
-                  backgroundColor:
-                    activeTab === "sent" ? "#00ff88" : "transparent",
-                }}
               >
                 Sent
               </button>
+            </div>
+          </div>
+          <div className="dares-received-panel dares-received-shine relative overflow-hidden rounded-[28px] border border-[#4ade80]/22 bg-[radial-gradient(circle_at_18%_-18%,rgba(74,222,128,0.16),transparent_34%),radial-gradient(circle_at_92%_16%,rgba(14,165,233,0.12),transparent_32%),linear-gradient(180deg,rgba(22,28,23,0.98),rgba(8,12,9,0.98))] px-4 py-3.5 shadow-[0_18px_44px_rgba(0,0,0,0.34),0_0_28px_rgba(74,222,128,0.08),inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <div className="relative z-10 flex items-center gap-3">
+              <div className="flex h-[54px] w-[54px] shrink-0 items-center justify-center rounded-[22px] border border-[#4ade80]/20 bg-[#4ade80]/10 text-[#86efac] shadow-[0_14px_34px_rgba(74,222,128,0.1)]">
+                <Sparkles size={22} strokeWidth={2.5} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="dares-received-live-dot h-2 w-2 shrink-0 rounded-full bg-[#4ade80] shadow-[0_0_14px_rgba(74,222,128,0.55)]" />
+                  <p className="truncate text-[11px] font-black uppercase tracking-[0.16em] text-[#86efac]">
+                    {activeTab === "received" ? "Active queue" : "Sent queue"}
+                  </p>
+                </div>
+                <p className="truncate text-[16px] font-black text-white">
+                  {activeTab === "received"
+                    ? `${receivedChallengesForDisplay.length} received challenge${receivedChallengesForDisplay.length === 1 ? "" : "s"}`
+                    : `${sentChallengesForDisplay.length} sent challenge${sentChallengesForDisplay.length === 1 ? "" : "s"}`}
+                </p>
+              </div>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[16px] border border-white/8 bg-white/[0.055] text-[#cbd5e1]">
+                <ArrowRight size={18} strokeWidth={2.6} />
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <div
-        className="custom-scrollbar flex-1 overflow-y-auto px-4 py-4"
+        ref={listScrollRef}
+        className="custom-scrollbar flex-1 overflow-y-auto px-4 pt-1"
         style={{
           paddingBottom: "calc(var(--bottom-nav-total-height) + 24px)",
         }}
       >
-        <div className="mx-auto max-w-2xl space-y-4">
+        <div className="mx-auto max-w-2xl space-y-3.5">
           {activeTab === "received"
             ? receivedChallengesForDisplay.map((challenge) => (
                 <ChallengeCard
@@ -2080,8 +2216,8 @@ export function DaresReceivedScreen({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center mb-6">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10">
-                <Target size={22} className="text-[#86efac]" />
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-[#79d99a]/18 bg-[#79d99a]/10">
+                <Target size={22} className="text-[#9ae6b4]" />
               </div>
               <h3 className="text-white font-bold text-lg mb-2 leading-tight">
                 You&apos;ve accepted this {showAcceptPrompt.type.toUpperCase()}
@@ -2126,13 +2262,13 @@ export function DaresReceivedScreen({
                     setCurrentScreen("truth");
                   }
                 }}
-                className="btn btn-primary w-full py-3.5 text-base font-semibold"
+                className={`btn btn-primary ${curvedModalButtonClass}`}
               >
                 Start Now
               </button>
               <button
                 onClick={() => setShowAcceptPrompt(null)}
-                className="btn btn-secondary w-full py-3.5 text-base font-semibold"
+                className={`btn btn-secondary ${curvedModalButtonClass}`}
               >
                 Do it Later
               </button>

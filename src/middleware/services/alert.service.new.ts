@@ -4,6 +4,8 @@
 
 import { AlertRepository } from "@/backend/repositories/AlertRepository";
 import { AlertEntity, AlertType } from "@/backend/domain/entities/Alert";
+import { FriendshipRepository } from "@/backend/repositories/FriendshipRepository";
+import { UserRepository } from "@/backend/repositories/UserRepository";
 
 function createAlertId(): string {
   const maybeRandomUuid = globalThis.crypto?.randomUUID;
@@ -30,6 +32,15 @@ export interface CreateAlertRequest {
   actorAvatar?: string; // Add actor avatar field
   message?: string;
   metadata?: Record<string, any>;
+}
+
+export interface CreateFriendChallengeActivityAlertsRequest {
+  challengeKind: "dare" | "truth";
+  challengeId: string;
+  challengerId: string;
+  receiverId: string;
+  prompt: string;
+  activityType?: "sent" | "completed";
 }
 
 export interface GetAlertsRequest {
@@ -62,6 +73,14 @@ export interface MarkReadResponse {
 }
 
 export class AlertService {
+  private friendshipRepository = new FriendshipRepository();
+  private userRepository = new UserRepository();
+  private acceptedFriendIdsCache = new Map<
+    string,
+    { ids: string[]; expiresAt: number }
+  >();
+  private readonly friendCacheTtlMs = 60_000;
+
   constructor(private alertRepository: AlertRepository) {}
 
   private isPermissionDenied(error: unknown): boolean {
@@ -84,6 +103,26 @@ export class AlertService {
       );
       console.log("🔔 Alert data:", request);
 
+      let actorProfile: Awaited<ReturnType<UserRepository["getProfileById"]>> =
+        null;
+      if (request.actorId) {
+        try {
+          actorProfile = await this.userRepository.getProfileById(
+            request.actorId,
+          );
+        } catch {
+          actorProfile = null;
+        }
+      }
+      const actorName =
+        request.actorName ||
+        actorProfile?.displayName ||
+        actorProfile?.username ||
+        "User";
+      const actorUsername =
+        request.actorUsername || actorProfile?.username || "user";
+      const actorAvatar = request.actorAvatar || actorProfile?.avatarUrl || "";
+
       const alertData = {
         id: createAlertId(),
         userId: request.userId,
@@ -93,9 +132,9 @@ export class AlertService {
         message: request.message || this.generateDefaultMessage(request.type),
         metadata: {
           ...request.metadata,
-          actorName: request.actorName || "Someone",
-          actorUsername: request.actorUsername || "someone",
-          actorAvatar: request.actorAvatar || "", // Add actor avatar to metadata
+          actorName,
+          actorUsername,
+          actorAvatar,
         },
         isRead: false,
         createdAt: new Date().toISOString(),
@@ -241,10 +280,12 @@ export class AlertService {
       DARE_REFUSED: "refused your dare",
       DARE_APPROVED: "approved your dare submission",
       DARE_REJECTED: "rejected your dare submission",
+      DARE_FRIEND_ACTIVITY: "sent your friend a dare",
       TRUTH_RECEIVED: "asked you a truth",
       TRUTH_ANSWERED: "answered your truth",
       TRUTH_REFUSED: "refused your truth",
       TRUTH_COMPLETED: "completed your truth",
+      TRUTH_FRIEND_ACTIVITY: "asked your friend a truth",
       FRIEND_REQUEST: "sent you a friend request",
       FRIEND_ACCEPTED: "accepted your friend request",
       MESSAGE_RECEIVED: "sent you a message",
@@ -263,6 +304,121 @@ export class AlertService {
     };
 
     return messageMap[type] || "System notification";
+  }
+
+  private async getAcceptedFriendIds(userId: string): Promise<string[]> {
+    const cached = this.acceptedFriendIdsCache.get(userId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.ids;
+    }
+
+    const friendships =
+      await this.friendshipRepository.getAcceptedFriends(userId);
+    const ids = friendships
+      .map((friendship) =>
+        friendship.requesterId === userId
+          ? friendship.addresseeId
+          : friendship.requesterId,
+      )
+      .filter(Boolean);
+
+    this.acceptedFriendIdsCache.set(userId, {
+      ids,
+      expiresAt: Date.now() + this.friendCacheTtlMs,
+    });
+
+    return ids;
+  }
+
+  private async getCompactProfile(userId: string) {
+    const profile = await this.userRepository.getProfileById(userId);
+    const username = profile?.username || "someone";
+    const name = profile?.displayName || profile?.username || "Someone";
+
+    return {
+      id: userId,
+      name,
+      username,
+      avatar: profile?.avatarUrl || "",
+    };
+  }
+
+  async createFriendChallengeActivityAlerts(
+    request: CreateFriendChallengeActivityAlertsRequest,
+  ): Promise<void> {
+    try {
+      if (request.challengerId === request.receiverId) return;
+
+      const [challengerFriendIds, receiverFriendIds] = await Promise.all([
+        this.getAcceptedFriendIds(request.challengerId),
+        this.getAcceptedFriendIds(request.receiverId),
+      ]);
+
+      const receiverFriendSet = new Set(receiverFriendIds);
+      const observerIds = challengerFriendIds.filter(
+        (friendId, index, source) =>
+          receiverFriendSet.has(friendId) &&
+          friendId !== request.challengerId &&
+          friendId !== request.receiverId &&
+          source.indexOf(friendId) === index,
+      );
+
+      if (observerIds.length === 0) return;
+
+      const [challenger, receiver] = await Promise.all([
+        this.getCompactProfile(request.challengerId),
+        this.getCompactProfile(request.receiverId),
+      ]);
+
+      const isDare = request.challengeKind === "dare";
+      const type: AlertType = isDare
+        ? "DARE_FRIEND_ACTIVITY"
+        : "TRUTH_FRIEND_ACTIVITY";
+      const label = isDare ? "dare" : "truth";
+      const activityType = request.activityType || "sent";
+      const message =
+        activityType === "completed" && isDare
+          ? `${receiver.name} completed ${challenger.name}'s dare`
+          : `${challenger.name} sent ${receiver.name} a ${label}`;
+      const createdAt = new Date().toISOString();
+
+      await Promise.all(
+        observerIds.map((observerId) =>
+          this.createAlert({
+            userId: observerId,
+            type,
+            entityId: request.challengeId,
+            actorId: request.challengerId,
+            actorName: challenger.name,
+            actorUsername: challenger.username,
+            actorAvatar: challenger.avatar,
+            message,
+            metadata: {
+              challengeKind: request.challengeKind,
+              challengerId: request.challengerId,
+              challengerName: challenger.name,
+              challengerUsername: challenger.username,
+              challengerAvatar: challenger.avatar,
+              receiverId: request.receiverId,
+              receiverName: receiver.name,
+              receiverUsername: receiver.username,
+              receiverAvatar: receiver.avatar,
+              prompt: this.truncateChallengePrompt(request.prompt),
+              activityType,
+              observerAlert: true,
+              createdAt,
+            },
+          }),
+        ),
+      );
+    } catch (error) {
+      console.error("Error creating friend challenge activity alerts:", error);
+    }
+  }
+
+  private truncateChallengePrompt(prompt: string): string {
+    if (!prompt) return "";
+    return prompt.length <= 220 ? prompt : `${prompt.slice(0, 220)}...`;
   }
 
   // Create or update aggregated alert for story reactions

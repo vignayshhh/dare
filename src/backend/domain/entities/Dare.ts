@@ -18,6 +18,7 @@ export class DareEntity {
     public readonly state: DareState,
     public readonly proofMediaUrl: string | null,
     public readonly proofMediaType: "TEXT" | "PHOTO" | "VIDEO" | null,
+    public readonly proofThumbnailUrl: string | null,
     public readonly challengerVote: VoteType | null,
     public readonly validationThresholdMet: boolean,
     public readonly createdAt: string,
@@ -37,6 +38,7 @@ export class DareEntity {
     state: DareState;
     proofMediaUrl: string | null;
     proofMediaType: "TEXT" | "PHOTO" | "VIDEO" | null;
+    proofThumbnailUrl: string | null;
     challengerVote: VoteType | null;
     validationThresholdMet: boolean;
     createdAt: string;
@@ -54,6 +56,7 @@ export class DareEntity {
       data.state,
       data.proofMediaUrl,
       data.proofMediaType,
+      data.proofThumbnailUrl,
       data.challengerVote,
       data.validationThresholdMet,
       data.createdAt,
@@ -121,6 +124,7 @@ export class DareEntity {
       "ACCEPTED",
       this.proofMediaUrl,
       this.proofMediaType,
+      this.proofThumbnailUrl,
       this.challengerVote,
       this.validationThresholdMet,
       this.createdAt,
@@ -135,6 +139,7 @@ export class DareEntity {
   submitProof(
     mediaUrl: string,
     mediaType: "TEXT" | "PHOTO" | "VIDEO",
+    thumbnailUrl?: string,
   ): DareEntity {
     if (!this.canSubmitProof()) {
       throw new Error("Proof cannot be submitted in current state");
@@ -148,6 +153,7 @@ export class DareEntity {
       "PROOF_SUBMITTED",
       mediaUrl,
       mediaType,
+      thumbnailUrl || this.proofThumbnailUrl,
       this.challengerVote,
       this.validationThresholdMet,
       this.createdAt,
@@ -174,6 +180,7 @@ export class DareEntity {
       "FRIENDS_VALIDATION",
       this.proofMediaUrl,
       this.proofMediaType,
+      this.proofThumbnailUrl,
       this.challengerVote,
       this.validationThresholdMet,
       this.createdAt,
@@ -194,6 +201,7 @@ export class DareEntity {
       "ACCEPTED_REAL",
       this.proofMediaUrl,
       this.proofMediaType,
+      this.proofThumbnailUrl,
       this.challengerVote,
       this.validationThresholdMet,
       this.createdAt,
@@ -214,6 +222,7 @@ export class DareEntity {
       "REJECTED_FAKE",
       this.proofMediaUrl,
       this.proofMediaType,
+      this.proofThumbnailUrl,
       this.challengerVote,
       this.validationThresholdMet,
       this.createdAt,
@@ -234,6 +243,7 @@ export class DareEntity {
       "CHICKEN_OUT",
       this.proofMediaUrl,
       this.proofMediaType,
+      this.proofThumbnailUrl,
       this.challengerVote,
       this.validationThresholdMet,
       this.createdAt,

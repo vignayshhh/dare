@@ -243,7 +243,7 @@ class AuthService {
           return cachedUser;
         }
       }
-      return null;
+      throw error;
     }
   }
 
@@ -487,54 +487,24 @@ class AuthService {
       const uid = firebaseUser.uid;
 
       // Load the user's profile doc
-      let profile = await this.loadProfile(firebaseUser);
-
-      // If no profile exists (edge case: auth user created without profile doc),
-      // create a minimal one so downstream code works.
+      const profile = await this.loadProfile(firebaseUser);
       if (!profile) {
-        const fallback: AuthUser = {
-          id: uid,
-          email: firebaseUser.email || normalizedEmail,
-          username: (firebaseUser.email || normalizedEmail)
-            .split("@")[0]
-            .toLowerCase(),
-          displayName: firebaseUser.displayName || "",
-          bio: "",
-          followersCount: 0,
-          followingCount: 0,
-          postsCount: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          lastActiveAt: new Date().toISOString(),
-          isOnline: true,
-          hasCompletedProfileCreation: false,
-          is_18_plus: false,
-          consent_accepted: false,
-          notificationPreferences: {
-            challenges: true,
-            messages: true,
-            friendRequests: true,
-          },
+        await firebaseSignOut(auth);
+        this.setCurrentUser(null);
+        return {
+          success: false,
+          error:
+            "Your login exists, but its profile record could not be found. Please contact support instead of creating a new account.",
         };
-        await setDoc(doc(db, "users", uid), {
-          ...fallback,
-          user_id: uid,
-          visibility: "PUBLIC",
-          updatedAt: serverTimestamp(),
-          updated_at: serverTimestamp(),
-          createdAt: serverTimestamp(),
+      }
+
+      // Touch lastActiveAt on successful sign-in
+      try {
+        await updateDoc(doc(db, "users", uid), {
           lastActiveAt: serverTimestamp(),
         });
-        profile = fallback;
-      } else {
-        // Touch lastActiveAt on successful sign-in
-        try {
-          await updateDoc(doc(db, "users", uid), {
-            lastActiveAt: serverTimestamp(),
-          });
-        } catch {
-          // non-fatal
-        }
+      } catch {
+        // non-fatal
       }
 
       this.setCurrentUser(profile);
@@ -552,6 +522,9 @@ class AuthService {
       else if (code === "auth/too-many-requests")
         msg = "Too many attempts. Please try again later.";
       else if (code === "auth/invalid-email") msg = "Email address is invalid.";
+      else if (code === "permission-denied")
+        msg =
+          "Signed in, but your profile could not be loaded. Please try again after refreshing.";
       return { success: false, error: msg };
     }
   }

@@ -1,0 +1,264 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1640" viewBox="0 0 1320 1640">
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020403"/>
+      <stop offset="0.48" stop-color="#07100b"/>
+      <stop offset="1" stop-color="#030506"/>
+    </linearGradient>
+    <linearGradient id="screenBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1510"/>
+      <stop offset="0.44" stop-color="#050806"/>
+      <stop offset="1" stop-color="#020302"/>
+    </linearGradient>
+    <linearGradient id="passportCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17241c"/>
+      <stop offset="0.46" stop-color="#0d1712"/>
+      <stop offset="1" stop-color="#07100b"/>
+    </linearGradient>
+    <linearGradient id="passportAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="greenButton" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="darkGlass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#18231c"/>
+      <stop offset="1" stop-color="#090d0a"/>
+    </linearGradient>
+    <filter id="softShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="28" stdDeviation="26" flood-color="#000000" flood-opacity="0.48"/>
+    </filter>
+    <filter id="phoneShadow" x="-35%" y="-15%" width="170%" height="130%">
+      <feDropShadow dx="0" dy="34" stdDeviation="34" flood-color="#000000" flood-opacity="0.56"/>
+    </filter>
+    <pattern id="passportLines" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(16)">
+      <path d="M 0 0 L 0 18" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <style>
+      .h1 { fill:#f8fff9; font:900 44px Inter, Arial, sans-serif; letter-spacing:-0.8px; }
+      .h2 { fill:#ffffff; font:900 25px Inter, Arial, sans-serif; letter-spacing:-0.4px; }
+      .h3 { fill:#ffffff; font:900 17px Inter, Arial, sans-serif; }
+      .body { fill:#d7ffe6; font:750 14px Inter, Arial, sans-serif; }
+      .muted { fill:#94a3b8; font:700 13px Inter, Arial, sans-serif; }
+      .tiny { fill:#64748b; font:850 10px Inter, Arial, sans-serif; letter-spacing:1.5px; }
+      .chip { fill:#86efac; font:900 10px Inter, Arial, sans-serif; letter-spacing:1.6px; }
+      .darkText { fill:#061006; font:900 12px Inter, Arial, sans-serif; }
+      .noteTitle { fill:#ffffff; font:900 18px Inter, Arial, sans-serif; }
+      .note { fill:#94a3b8; font:650 14px Inter, Arial, sans-serif; }
+      .strokeSoft { stroke:rgba(255,255,255,0.08); stroke-width:1; }
+    </style>
+  </defs>
+
+  <rect width="1320" height="1640" fill="url(#pageBg)"/>
+  <circle cx="180" cy="90" r="300" fill="#4ade80" opacity="0.09"/>
+  <circle cx="1110" cy="190" r="360" fill="#38bdf8" opacity="0.08"/>
+  <circle cx="680" cy="1500" r="460" fill="#4ade80" opacity="0.07"/>
+
+  <text x="86" y="92" class="h1">Logged-In Profile Prototype</text>
+  <text x="86" y="130" class="note">Direction: Dare Passport identity, Instagram-like profile rhythm, two-column scrollable post grid, same content and app theme.</text>
+
+  <!-- Phone shell -->
+  <g transform="translate(448 178)" filter="url(#phoneShadow)">
+    <rect width="424" height="912" rx="50" fill="#020403"/>
+    <rect x="14" y="14" width="396" height="884" rx="38" fill="url(#screenBg)" stroke="rgba(255,255,255,0.09)"/>
+    <rect x="160" y="28" width="104" height="6" rx="3" fill="#1f2a24"/>
+
+    <!-- ambient screen details -->
+    <circle cx="212" cy="0" r="180" fill="#4ade80" opacity="0.11"/>
+    <circle cx="352" cy="164" r="160" fill="#38bdf8" opacity="0.07"/>
+    <rect x="14" y="14" width="396" height="884" rx="38" fill="url(#passportLines)" opacity="0.65"/>
+
+    <!-- Header -->
+    <g transform="translate(30 48)">
+      <text x="0" y="20" class="h3">Profile</text>
+      <g transform="translate(260 0)">
+        <rect width="34" height="34" rx="15" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.08)"/>
+        <circle cx="17" cy="17" r="6" fill="none" stroke="#94a3b8" stroke-width="2"/>
+        <path d="M17 7 L17 3 M17 31 L17 27 M7 17 L3 17 M31 17 L27 17" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+      </g>
+      <g transform="translate(304 0)">
+        <rect width="34" height="34" rx="15" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.08)"/>
+        <path d="M10 12 H24 M10 17 H24 M10 22 H24" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+      </g>
+    </g>
+
+    <!-- Passport card -->
+    <g transform="translate(30 100)">
+      <rect width="364" height="260" rx="30" fill="url(#passportCard)" stroke="rgba(255,255,255,0.09)" filter="url(#softShadow)"/>
+      <rect width="364" height="260" rx="30" fill="url(#passportLines)" opacity="0.8"/>
+      <path d="M0 92 C78 68 150 78 226 48 C282 26 330 27 364 18 L364 0 L0 0 Z" fill="#4ade80" opacity="0.075"/>
+      <path d="M0 260 C92 216 161 236 237 204 C296 179 330 178 364 166 L364 260 Z" fill="#38bdf8" opacity="0.05"/>
+
+      <g transform="translate(18 18)">
+        <rect width="122" height="26" rx="13" fill="#4ade80" opacity="0.13" stroke="#4ade80" stroke-opacity="0.22"/>
+        <text x="61" y="18" text-anchor="middle" class="chip">DARE PASSPORT</text>
+      </g>
+
+      <!-- avatar block -->
+      <g transform="translate(26 66)">
+        <rect width="98" height="122" rx="24" fill="#07100b" stroke="rgba(255,255,255,0.11)"/>
+        <circle cx="49" cy="50" r="38" fill="url(#passportAccent)"/>
+        <circle cx="49" cy="50" r="31" fill="#09120d"/>
+        <circle cx="49" cy="42" r="15" fill="#d7ffe6"/>
+        <path d="M24 82 C30 65 68 65 74 82" fill="#d7ffe6"/>
+        <rect x="16" y="96" width="66" height="12" rx="6" fill="rgba(255,255,255,0.07)"/>
+      </g>
+
+      <!-- identity text -->
+      <g transform="translate(146 72)">
+        <text x="0" y="22" class="h2">Aarav</text>
+        <text x="0" y="48" class="muted">@username</text>
+        <text x="0" y="76" class="body">Bio line stays exactly as user wrote it.</text>
+        <rect x="0" y="96" width="104" height="34" rx="17" fill="url(#greenButton)"/>
+        <text x="52" y="118" text-anchor="middle" class="darkText">EDIT PROFILE</text>
+        <rect x="114" y="96" width="78" height="34" rx="17" fill="rgba(255,255,255,0.055)" stroke="rgba(255,255,255,0.09)"/>
+        <text x="153" y="118" text-anchor="middle" class="body" font-size="11">Share</text>
+      </g>
+
+      <!-- passport stamps -->
+      <g transform="translate(24 206)">
+        <rect width="94" height="34" rx="17" fill="rgba(74,222,128,0.10)" stroke="rgba(74,222,128,0.20)"/>
+        <text x="47" y="15" text-anchor="middle" class="tiny">PROOF</text>
+        <text x="47" y="27" text-anchor="middle" class="chip" font-size="8">VERIFIED</text>
+        <rect x="104" width="102" height="34" rx="17" fill="rgba(56,189,248,0.09)" stroke="rgba(56,189,248,0.17)"/>
+        <text x="155" y="15" text-anchor="middle" class="tiny">TRUTH</text>
+        <text x="155" y="27" text-anchor="middle" class="chip" font-size="8">ANSWERED</text>
+        <rect x="216" width="100" height="34" rx="17" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.08)"/>
+        <text x="266" y="15" text-anchor="middle" class="tiny">FRIENDS</text>
+        <text x="266" y="27" text-anchor="middle" class="chip" font-size="8">CIRCLE</text>
+      </g>
+    </g>
+
+    <!-- Instagram-style stat row -->
+    <g transform="translate(30 384)">
+      <rect width="364" height="74" rx="26" fill="rgba(255,255,255,0.042)" stroke="rgba(255,255,255,0.08)"/>
+      <g transform="translate(32 17)">
+        <text x="0" y="20" class="h3">12</text>
+        <text x="-4" y="42" class="tiny">POSTS</text>
+      </g>
+      <g transform="translate(134 17)">
+        <text x="0" y="20" class="h3">24</text>
+        <text x="-4" y="42" class="tiny">DARES</text>
+      </g>
+      <g transform="translate(236 17)">
+        <text x="0" y="20" class="h3">7</text>
+        <text x="-4" y="42" class="tiny">TRUTHS</text>
+      </g>
+      <g transform="translate(310 17)">
+        <text x="0" y="20" class="h3">118</text>
+        <text x="-2" y="42" class="tiny">FRIENDS</text>
+      </g>
+    </g>
+
+    <!-- Horizontal highlights / passport stamps -->
+    <g transform="translate(30 478)">
+      <text x="0" y="0" class="tiny">PASSPORT STAMPS</text>
+      <g transform="translate(0 16)">
+        <rect width="72" height="72" rx="24" fill="#102017" stroke="rgba(74,222,128,0.22)"/>
+        <circle cx="36" cy="30" r="15" fill="#4ade80"/>
+        <text x="36" y="60" text-anchor="middle" class="tiny">Proof</text>
+        <rect x="86" width="72" height="72" rx="24" fill="#0d1920" stroke="rgba(56,189,248,0.18)"/>
+        <circle cx="122" cy="30" r="15" fill="#38bdf8"/>
+        <text x="122" y="60" text-anchor="middle" class="tiny">Truth</text>
+        <rect x="172" width="72" height="72" rx="24" fill="#111813" stroke="rgba(255,255,255,0.08)"/>
+        <circle cx="208" cy="30" r="15" fill="#94a3b8"/>
+        <text x="208" y="60" text-anchor="middle" class="tiny">Dares</text>
+        <rect x="258" width="72" height="72" rx="24" fill="#102017" stroke="rgba(74,222,128,0.18)"/>
+        <circle cx="294" cy="30" r="15" fill="#4ade80"/>
+        <text x="294" y="60" text-anchor="middle" class="tiny">Friends</text>
+      </g>
+    </g>
+
+    <!-- Tab row -->
+    <g transform="translate(30 592)">
+      <rect width="364" height="48" rx="24" fill="#07100b" stroke="rgba(255,255,255,0.08)"/>
+      <rect x="5" y="5" width="114" height="38" rx="19" fill="url(#greenButton)"/>
+      <text x="62" y="30" text-anchor="middle" class="darkText">Posts</text>
+      <text x="182" y="30" text-anchor="middle" class="muted">Truths</text>
+      <text x="304" y="30" text-anchor="middle" class="muted">Dares</text>
+    </g>
+
+    <!-- Scrollable two-column grid prototype -->
+    <g transform="translate(30 662)">
+      <text x="0" y="0" class="tiny">TWO-COLUMN SCROLL GRID</text>
+      <g transform="translate(0 16)">
+        <!-- card 1 -->
+        <rect width="176" height="176" rx="24" fill="#132119" stroke="rgba(255,255,255,0.08)"/>
+        <rect x="10" y="10" width="156" height="156" rx="18" fill="#1a2a20"/>
+        <rect x="102" y="16" width="54" height="72" rx="13" fill="#07100b" stroke="rgba(255,255,255,0.14)"/>
+        <circle cx="34" cy="134" r="12" fill="#4ade80"/>
+        <text x="54" y="139" class="tiny">312</text>
+
+        <!-- card 2 -->
+        <rect x="188" width="176" height="176" rx="24" fill="#0e2024" stroke="rgba(255,255,255,0.08)"/>
+        <rect x="198" y="10" width="156" height="156" rx="18" fill="#122830"/>
+        <rect x="290" y="16" width="54" height="72" rx="13" fill="#07100b" stroke="rgba(255,255,255,0.14)"/>
+        <circle cx="222" cy="134" r="12" fill="#38bdf8"/>
+        <text x="242" y="139" class="tiny">1.2K</text>
+
+        <!-- card 3 -->
+        <rect y="188" width="176" height="176" rx="24" fill="#121813" stroke="rgba(255,255,255,0.08)"/>
+        <rect x="10" y="198" width="156" height="156" rx="18" fill="#18211b"/>
+        <rect x="102" y="204" width="54" height="72" rx="13" fill="#07100b" stroke="rgba(255,255,255,0.14)"/>
+        <circle cx="34" cy="322" r="12" fill="#4ade80"/>
+        <text x="54" y="327" class="tiny">47</text>
+
+        <!-- card 4 -->
+        <rect x="188" y="188" width="176" height="176" rx="24" fill="#111b16" stroke="rgba(255,255,255,0.08)"/>
+        <rect x="198" y="198" width="156" height="156" rx="18" fill="#17241b"/>
+        <rect x="290" y="204" width="54" height="72" rx="13" fill="#07100b" stroke="rgba(255,255,255,0.14)"/>
+        <circle cx="222" cy="322" r="12" fill="#4ade80"/>
+        <text x="242" y="327" class="tiny">Real</text>
+      </g>
+    </g>
+
+    <!-- Bottom nav ghost -->
+    <g transform="translate(70 844)" opacity="0.88">
+      <rect width="284" height="42" rx="21" fill="rgba(2,4,3,0.72)" stroke="rgba(255,255,255,0.08)"/>
+      <circle cx="38" cy="21" r="8" fill="#64748b"/>
+      <circle cx="108" cy="21" r="8" fill="#64748b"/>
+      <circle cx="178" cy="21" r="10" fill="#4ade80"/>
+      <circle cx="248" cy="21" r="8" fill="#64748b"/>
+    </g>
+  </g>
+
+  <!-- Side annotations -->
+  <g transform="translate(86 260)">
+    <rect width="300" height="420" rx="30" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.08)"/>
+    <text x="28" y="42" class="noteTitle">What Changes</text>
+    <text x="28" y="82" class="note">1. Header becomes compact like Instagram.</text>
+    <text x="28" y="122" class="note">2. Profile identity becomes a passport card.</text>
+    <text x="28" y="162" class="note">3. Stats stay the same, shown in one row.</text>
+    <text x="28" y="202" class="note">4. Existing tabs remain: Posts, Truths, Dares.</text>
+    <text x="28" y="242" class="note">5. Posts use a two-column scrollable grid.</text>
+    <text x="28" y="282" class="note">6. BeReal-style inset thumbnails can preview</text>
+    <text x="48" y="306" class="note">front/back or proof context visually.</text>
+    <text x="28" y="360" class="chip">PURE UI ONLY</text>
+    <text x="28" y="386" class="note">No backend, sorting, or content changes implied.</text>
+  </g>
+
+  <g transform="translate(934 260)">
+    <rect width="300" height="420" rx="30" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.08)"/>
+    <text x="28" y="42" class="noteTitle">Interaction Idea</text>
+    <text x="28" y="82" class="note">Passport stamps are horizontal chips.</text>
+    <text x="28" y="122" class="note">They can open existing filtered surfaces later,</text>
+    <text x="28" y="146" class="note">but this prototype does not require it.</text>
+    <text x="28" y="196" class="note">The grid stays vertically scrollable like IG,</text>
+    <text x="28" y="220" class="note">with two columns for denser mobile browsing.</text>
+    <text x="28" y="270" class="note">Cards can reuse existing post data and existing</text>
+    <text x="28" y="294" class="note">click-through behavior.</text>
+    <text x="28" y="360" class="chip">NO LEVEL LABEL</text>
+    <text x="28" y="386" class="note">Passport feel without game-rank wording.</text>
+  </g>
+
+  <g transform="translate(86 1160)">
+    <rect width="1148" height="250" rx="34" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)"/>
+    <text x="34" y="52" class="noteTitle">Implementation Notes For Later</text>
+    <text x="34" y="92" class="note">Keep the existing data: avatar, display name, username, bio, friends count, posts, truths, dares, and existing navigation actions.</text>
+    <text x="34" y="132" class="note">Only rearrange presentation: top passport card, stat row, stamp carousel, tabs, then the current posts/truths/dares surfaces.</text>
+    <text x="34" y="172" class="note">For the post tab, the visual target is a two-column scrollable grid. Each item can show existing media/post content, with a small inset preview when suitable.</text>
+    <text x="34" y="212" class="note">Do not change sorting, loading, filtering, service calls, backend schemas, card click handlers, or post/truth/dare data shape.</text>
+  </g>
+</svg>

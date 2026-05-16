@@ -113,7 +113,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "calc(16px + env(safe-area-inset-top, 0px)) 20px 16px",
+          padding: "calc(16px + var(--safe-area-top)) 20px 16px",
           position: "sticky",
           top: 0,
           zIndex: 10,
@@ -162,7 +162,7 @@ export function FriendsScreen({ onBack, onNavigateToProfile }: FriendsScreenProp
           backdropFilter: "blur(10px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
           position: "sticky",
-          top: "calc(69px + env(safe-area-inset-top, 0px))",
+          top: "calc(69px + var(--safe-area-top))",
           zIndex: 9,
         }}
       >

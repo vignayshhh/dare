@@ -1,5 +1,5 @@
 /**
- * GET /api/_debug/whoami
+ * GET /api/debug/whoami
  *
  * Production-safe diagnostic for "why am I getting 401?" investigations.
  *

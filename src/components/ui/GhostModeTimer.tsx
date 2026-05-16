@@ -2,11 +2,22 @@
 
 import { useGhostModeStore } from "@/stores/useGhostModeStore";
 
-export function GhostModeTimer() {
+export function GhostModeTimer({
+  onDareLongPress,
+}: {
+  onDareLongPress?: () => void;
+}) {
   const { isActive, formattedTime } = useGhostModeStore();
 
   return (
-    <div className="relative flex min-w-[148px] items-center justify-center">
+    <div
+      className="relative flex min-w-[88px] items-center justify-center sm:min-w-[148px]"
+      onContextMenu={(event) => {
+        if (!onDareLongPress) return;
+        event.preventDefault();
+        onDareLongPress();
+      }}
+    >
       <style>{`
         @keyframes dareHeaderDotBlink {
           0%, 100% {
@@ -29,6 +40,8 @@ export function GhostModeTimer() {
           textShadow: "0 0 10px rgba(74, 222, 128, 0.22)",
           transition: "opacity 0.25s ease-in-out",
           opacity: isActive ? 0 : 1,
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       >
         <span>DARE</span>

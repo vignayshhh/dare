@@ -24,6 +24,24 @@ import {
 import { IFriendshipRepository } from "../domain/interfaces/IFriendshipRepository";
 import { FriendshipRepository } from "./FriendshipRepository";
 
+const normalizeViewerViewCounts = (value: unknown): Record<string, number> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const counts: Record<string, number> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([userId, count]) => {
+    if (typeof count !== "number" || !Number.isFinite(count)) return;
+
+    const normalizedCount = Math.max(0, Math.floor(count));
+    if (normalizedCount > 0) {
+      counts[userId] = normalizedCount;
+    }
+  });
+
+  return counts;
+};
+
 export class StoryRepository implements IStoryRepository {
   private friendshipRepository: IFriendshipRepository;
 
@@ -110,6 +128,7 @@ export class StoryRepository implements IStoryRepository {
         expiresAt: Timestamp.fromDate(expiresAt),
         viewCount: 0,
         viewers: [],
+        viewerViewCounts: {},
       };
 
       const docRef = await addDoc(collection(db, "stories"), storyData);
@@ -152,6 +171,7 @@ export class StoryRepository implements IStoryRepository {
           data.expiresAt?.toDate()?.toISOString() || new Date().toISOString(),
         viewCount: data.viewCount || 0,
         viewers: data.viewers || [],
+        viewerViewCounts: normalizeViewerViewCounts(data.viewerViewCounts),
       } as Story;
     } catch (error) {
       console.error("Error fetching story:", error);
@@ -189,6 +209,7 @@ export class StoryRepository implements IStoryRepository {
             data.expiresAt?.toDate()?.toISOString() || new Date().toISOString(),
           viewCount: data.viewCount || 0,
           viewers: data.viewers || [],
+          viewerViewCounts: normalizeViewerViewCounts(data.viewerViewCounts),
         } as Story;
 
         // Only include non-expired stories
@@ -235,6 +256,7 @@ export class StoryRepository implements IStoryRepository {
             data.expiresAt?.toDate()?.toISOString() || new Date().toISOString(),
           viewCount: data.viewCount || 0,
           viewers: data.viewers || [],
+          viewerViewCounts: normalizeViewerViewCounts(data.viewerViewCounts),
         } as Story);
       }
 
@@ -298,6 +320,7 @@ export class StoryRepository implements IStoryRepository {
             data.expiresAt?.toDate()?.toISOString() || new Date().toISOString(),
           viewCount: data.viewCount || 0,
           viewers: data.viewers || [],
+          viewerViewCounts: normalizeViewerViewCounts(data.viewerViewCounts),
         } as Story;
 
         // Get author info - fetch actual user data
@@ -369,14 +392,26 @@ export class StoryRepository implements IStoryRepository {
 
       const data = storyDoc.data();
       const viewers = data.viewers || [];
+      const viewerViewCounts = normalizeViewerViewCounts(data.viewerViewCounts);
+      const currentViewerCount =
+        viewerViewCounts[viewerId] ?? (viewers.includes(viewerId) ? 1 : 0);
+      const nextViewerViewCounts = {
+        ...viewerViewCounts,
+        [viewerId]: currentViewerCount + 1,
+      };
 
-      // Only add viewer if they haven't viewed it yet
       if (!viewers.includes(viewerId)) {
         await updateDoc(storyRef, {
           viewers: arrayUnion(viewerId),
           viewCount: (data.viewCount || 0) + 1,
+          viewerViewCounts: nextViewerViewCounts,
         });
+        return;
       }
+
+      await updateDoc(storyRef, {
+        viewerViewCounts: nextViewerViewCounts,
+      });
     } catch (error) {
       console.error("Error marking story as viewed:", error);
       throw error;

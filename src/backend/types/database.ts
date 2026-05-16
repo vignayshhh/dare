@@ -110,6 +110,7 @@ export interface Database {
             | "REJECTED_FAKE";
           proof_media_url: string | null;
           proof_media_type: "TEXT" | "PHOTO" | "VIDEO" | null;
+          proof_thumbnail_url: string | null;
           challenger_vote: "REAL" | "FAKE" | null;
           validation_threshold_met: boolean;
           created_at: string;

@@ -24,24 +24,36 @@ import { ActionPickerScreen } from "../screens/ActionPickerScreen";
 import { CreateInteractionScreen } from "../screens/CreateInteractionScreen";
 import { ProfileCreationScreen } from "../screens/ProfileCreationScreen";
 import { AlertsScreen } from "../screens/AlertsScreen";
+import { ChallengeFriendTimelineScreen } from "../screens/ChallengeFriendTimelineScreen";
+import { FriendsInviteAlertsScreen } from "../screens/FriendsInviteAlertsScreen";
 import { UserSearchScreen } from "../screens/UserSearchScreen";
 import { UserProfileScreen } from "../screens/UserProfileScreen";
 import { ProfileEditScreen } from "../screens/ProfileEditScreen";
 import { ActivityScreen } from "../screens/ActivityScreen";
-import { DailyChallengeScreen } from "../screens/DailyChallengeScreen";
-import { DailyChallengeMatchScreen } from "../screens/DailyChallengeMatchScreen";
+import {
+  DailyChallengeScreen,
+  type DailyChallengeDraft,
+} from "../screens/DailyChallengeScreen";
+import { DailyChallengeRevealScreen } from "../screens/DailyChallengeRevealScreen";
+import { DareCenterScreen } from "../screens/DareCenterScreen";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
 import { useGhostModeStore } from "../../stores/useGhostModeStore";
 import { useMessagingStore } from "../../stores/useMessagingStore";
 import { useAlertStore } from "../../stores/useAlertStore";
 import { messagingService } from "../../middleware/services/messaging.service";
+import { auth as firebaseAuth } from "../../backend/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 import { startAvatarSync } from "../../utils/avatarSync";
 import { avatarSyncService } from "../../services/avatarSyncService";
 import { profileSyncService } from "../../services/profileSyncService";
 import { useProfileDataStore } from "../../stores/profileDataStore";
 import { surveillanceService } from "../../middleware/services/surveillance.service";
 import { backgroundPreCache } from "../../utils/backgroundPreCache";
-import { isFirestoreOfflineError, logFirestoreError } from "@/utils/firestoreErrors";
+import { resolveUserProfile } from "../../utils/profileResolver";
+import {
+  isFirestoreOfflineError,
+  logFirestoreError,
+} from "@/utils/firestoreErrors";
 import { usePwaScreenHistory } from "../../hooks/usePwaScreenHistory";
 import { dareService } from "../../middleware/services/service-factory";
 import type {
@@ -49,8 +61,10 @@ import type {
   DarePost,
 } from "../../middleware/adapters/data-adapters";
 import type { DareEntity } from "../../backend/domain/entities/Dare";
+import type { AlertEntity } from "../../backend/domain/entities/Alert";
 
 type Screen =
+  | "truth"
   | "main"
   | "dares"
   | "profile"
@@ -65,12 +79,15 @@ type Screen =
   | "create-truth"
   | "create-dare-interaction"
   | "alerts"
+  | "chat-invites"
   | "profile-creation"
   | "user-search"
   | "user-profile"
   | "activity"
   | "daily"
-  | "daily-match";
+  | "daily-reveal"
+  | "dare-center"
+  | "challenge-timeline";
 
 type DaresNavigationRequest = {
   tab?: "received" | "sent";
@@ -91,6 +108,7 @@ type AppHistorySnapshot = {
   selectedUserId: string;
   selectedUserPostId: string;
   selectedUserTruthId: string;
+  selectedChallengeFriendAlert: AlertEntity | null;
 };
 
 function getScreenLayerClassName(
@@ -132,6 +150,48 @@ function normalizeTimestampInput(value: unknown): string | null {
   return date.toISOString();
 }
 
+async function buildDareFocusPost(dare: DareEntity): Promise<DarePost> {
+  const [challengerProfile, receiverProfile] = await Promise.all([
+    resolveUserProfile(dare.challengerId).catch(() => null),
+    resolveUserProfile(dare.receiverId).catch(() => null),
+  ]);
+
+  const getName = (profile: any, fallback: string) =>
+    profile?.displayName ||
+    profile?.display_name ||
+    profile?.nickname ||
+    profile?.username ||
+    fallback;
+  const getAvatar = (profile: any) =>
+    profile?.avatarUrl || profile?.avatar_url || profile?.avatar || "";
+
+  return {
+    id: dare.id,
+    challengerId: dare.challengerId,
+    receiverId: dare.receiverId,
+    challenger: {
+      nickname: getName(challengerProfile, dare.challengerId),
+      avatar: getAvatar(challengerProfile),
+      verified: false,
+    },
+    receiver: {
+      nickname: getName(receiverProfile, dare.receiverId),
+      avatar: getAvatar(receiverProfile),
+      verified: false,
+    },
+    description: dare.description,
+    proof: dare.proofMediaUrl
+      ? {
+          type: dare.proofMediaType === "VIDEO" ? "video" : "image",
+          url: dare.proofMediaUrl,
+          thumbnail: dare.proofThumbnailUrl || dare.proofMediaUrl,
+        }
+      : undefined,
+    state: dare.state as DarePost["state"],
+    createdAt: dare.createdAt,
+  };
+}
+
 export default function AuthenticatedApp() {
   const { user, isAuthenticated, signIn, signUp, initializeAuth } =
     useAuthStore();
@@ -147,6 +207,11 @@ export default function AuthenticatedApp() {
   const subscribeToAlerts = useAlertStore((s) => s.subscribeToAlerts);
   const [currentScreen, setCurrentScreen] = useState<Screen>("feed");
   const [dailyChallengeSkipWait, setDailyChallengeSkipWait] = useState(false);
+  const [dailyChallengeDraft, setDailyChallengeDraft] =
+    useState<DailyChallengeDraft | null>(null);
+  const [mainDareAudience, setMainDareAudience] = useState<
+    "friends" | "community"
+  >("friends");
   const handledGhostApprovalAlertIdsRef = useRef<Set<string>>(new Set());
   const handledGhostCompletionKeysRef = useRef<Set<string>>(new Set());
 
@@ -194,14 +259,20 @@ export default function AuthenticatedApp() {
     setIsGuestMode(false);
 
     if (action.type === "signin") {
-      await signIn(action.email, action.password);
+      const response = await signIn(action.email, action.password);
+      if (!response.success) {
+        throw new Error(response.error || "Unable to sign in.");
+      }
     } else {
-      await signUp({
+      const response = await signUp({
         email: action.email,
         password: action.password,
         username: action.username,
         displayName: action.displayName,
       });
+      if (!response.success) {
+        throw new Error(response.error || "Unable to create your account.");
+      }
     }
   };
 
@@ -224,9 +295,14 @@ export default function AuthenticatedApp() {
     post: TruthPost | DarePost;
     nonce: number;
   } | null>(null);
+  const [mainScreenResetKey, setMainScreenResetKey] = useState(0);
+  const [daresScreenResetKey, setDaresScreenResetKey] = useState(0);
   const [daresNavigationRequest, setDaresNavigationRequest] =
     useState<DaresNavigationRequest | null>(null);
   const [isStoryViewerOpen, setIsStoryViewerOpen] = useState(false);
+  const [isStoryComposerOpen, setIsStoryComposerOpen] = useState(false);
+  const [selectedChallengeFriendAlert, setSelectedChallengeFriendAlert] =
+    useState<AlertEntity | null>(null);
   const goBackInApp = usePwaScreenHistory<Screen, AppHistorySnapshot>(
     currentScreen,
     setCurrentScreen,
@@ -244,6 +320,7 @@ export default function AuthenticatedApp() {
         selectedUserId,
         selectedUserPostId,
         selectedUserTruthId,
+        selectedChallengeFriendAlert,
       },
       restoreSnapshot: (snapshot) => {
         setChatConversationId(snapshot.chatConversationId);
@@ -257,6 +334,9 @@ export default function AuthenticatedApp() {
         setSelectedUserId(snapshot.selectedUserId);
         setSelectedUserPostId(snapshot.selectedUserPostId);
         setSelectedUserTruthId(snapshot.selectedUserTruthId);
+        setSelectedChallengeFriendAlert(
+          snapshot.selectedChallengeFriendAlert,
+        );
       },
     },
   );
@@ -354,14 +434,71 @@ export default function AuthenticatedApp() {
     if (!isAuthenticated || !user?.id) return;
 
     const messagingStore = useMessagingStore.getState();
-    messagingStore.subscribeToRealTimeConversations(user.id);
-    messagingStore.subscribeToOnlineStatus(user.id);
-    messagingStore.setOnlineStatus(true);
+    const targetUserId = user.id;
+    let cancelled = false;
+    let started = false;
+    let unsubAuth: (() => void) | null = null;
+
+    const start = () => {
+      if (cancelled || started) return;
+      started = true;
+      console.log(
+        "🔍 [AuthenticatedApp DEBUG] Starting RTDB subscriptions for user:",
+        targetUserId,
+      );
+      messagingStore.subscribeToRealTimeConversations(targetUserId);
+      messagingStore.setOnlineStatus(true);
+    };
+
+    // Wait until Firebase Auth has actually restored the session for THIS
+    // user before subscribing to RTDB-backed presence/typing. On a page
+    // reload the auth store hydrates synchronously from localStorage but
+    // Firebase Auth's currentUser is still null for a brief moment — if we
+    // attach RTDB onValue listeners during that window the rules deny the
+    // read and the listeners are stuck reporting "offline" forever, which
+    // is why the chat list and messaging header never showed active /
+    // typing status.
+    if (firebaseAuth?.currentUser?.uid === targetUserId) {
+      start();
+    } else if (firebaseAuth) {
+      unsubAuth = onAuthStateChanged(firebaseAuth, (firebaseUser) => {
+        if (firebaseUser?.uid === targetUserId) start();
+      });
+    }
+
+    const onVisibility = () => {
+      if (!started) return;
+      messagingStore.setOnlineStatus(document.visibilityState !== "hidden");
+    };
+    const onFocus = () => {
+      if (!started) return;
+      messagingStore.setOnlineStatus(true);
+    };
+    const onBeforeUnload = () => {
+      if (!started) return;
+      messagingStore.setOnlineStatus(false);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onFocus);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    const onlineHeartbeat = window.setInterval(() => {
+      if (!started || document.visibilityState === "hidden") return;
+      messagingStore.setOnlineStatus(true);
+    }, 30000);
 
     return () => {
-      messagingStore.unsubscribeFromRealTimeConversations();
-      messagingStore.unsubscribeFromOnlineStatus();
-      messagingStore.setOnlineStatus(false);
+      cancelled = true;
+      if (unsubAuth) unsubAuth();
+      window.clearInterval(onlineHeartbeat);
+      if (started) {
+        messagingStore.unsubscribeFromRealTimeConversations();
+        messagingStore.setOnlineStatus(false);
+      }
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onFocus);
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, [isAuthenticated, user?.id]);
 
@@ -534,7 +671,9 @@ export default function AuthenticatedApp() {
       {
         current_chat_user_id: nextUserId,
         current_chat_user_name: nextUsername || "someone",
+        is_online: true,
         last_seen: serverTimestamp(),
+        updated_at: serverTimestamp(),
       },
       { merge: true },
     ).catch((error) => {
@@ -697,7 +836,7 @@ export default function AuthenticatedApp() {
       post: truth,
       nonce: Date.now(),
     });
-    setCurrentScreen("main");
+    setCurrentScreen("truth");
   };
 
   const handleOpenDarePost = (dare: DarePost) => {
@@ -707,6 +846,27 @@ export default function AuthenticatedApp() {
       nonce: Date.now(),
     });
     setCurrentScreen("main");
+  };
+
+  const handleOpenFriendCompletedDareAlert = async (alert: AlertEntity) => {
+    try {
+      const response = await dareService.getDareById(alert.entityId);
+      if (!response.success || !response.dare) {
+        throw new Error(response.error || "Dare not found");
+      }
+
+      const darePost = await buildDareFocusPost(response.dare);
+      setMainFocusRequest({
+        view: "dares",
+        post: darePost,
+        nonce: Date.now(),
+      });
+      setCurrentScreen("main");
+    } catch (error) {
+      console.error("Error opening completed friend dare alert:", error);
+      setSelectedChallengeFriendAlert(alert);
+      setCurrentScreen("challenge-timeline");
+    }
   };
 
   const handleCreateClick = () => {
@@ -727,10 +887,28 @@ export default function AuthenticatedApp() {
     }
   };
 
+  const handleTabScreenChange = (screen: "truth" | "main" | "dares" | "profile" | "feed") => {
+    if (screen === "truth" || screen === "main") {
+      setMainFocusRequest(null);
+      if (screen === "main") {
+        setMainDareAudience("friends");
+      }
+      setMainScreenResetKey((key) => key + 1);
+    }
+
+    if (screen === "dares") {
+      setDaresNavigationRequest(null);
+      setDaresScreenResetKey((key) => key + 1);
+    }
+
+    setCurrentScreen(screen);
+  };
+
   const TAB_SCREENS = [
     "feed",
     "dares",
     "profile",
+    "truth",
     "main",
     "chat-list",
     "daily",
@@ -815,6 +993,34 @@ export default function AuthenticatedApp() {
                 setCurrentScreen("dares");
               }}
               onNavigateToFeed={() => setCurrentScreen("feed")}
+              onNavigateToChallengeTimeline={(alert) => {
+                setSelectedChallengeFriendAlert(alert);
+                setCurrentScreen("challenge-timeline");
+              }}
+              onNavigateToFriendCompletedDare={
+                handleOpenFriendCompletedDareAlert
+              }
+            />
+          </div>
+        );
+      case "challenge-timeline":
+        return (
+          <div className="app-overlay-screen full-height-scroll">
+            <ChallengeFriendTimelineScreen
+              alert={selectedChallengeFriendAlert}
+              onBack={() => goBackInApp("alerts")}
+            />
+          </div>
+        );
+      case "chat-invites":
+        return (
+          <div className="app-overlay-screen full-height-scroll">
+            <FriendsInviteAlertsScreen
+              onBack={() => goBackInApp("chat-list")}
+              onOpenConversation={(conversationId) => {
+                setChatConversationId(conversationId);
+                setCurrentScreen("chat");
+              }}
             />
           </div>
         );
@@ -899,15 +1105,29 @@ export default function AuthenticatedApp() {
             />
           </div>
         );
-      case "daily-match":
+      case "daily-reveal":
         return (
           <div className="app-overlay-screen h-full overflow-hidden">
-            <DailyChallengeMatchScreen
-              isActive={effectiveScreen === "daily-match"}
-              skipWaitEnabled={dailyChallengeSkipWait}
-              onSkipWait={() => setDailyChallengeSkipWait(true)}
+            <DailyChallengeRevealScreen
+              isActive={effectiveScreen === "daily-reveal"}
+              initialChallenge={dailyChallengeDraft}
               onBack={() => goBackInApp("daily")}
               onOpenConversation={handleChatSelect}
+            />
+          </div>
+        );
+      case "dare-center":
+        return (
+          <div className="app-overlay-screen h-full overflow-hidden">
+            <DareCenterScreen
+              onBack={() => goBackInApp("feed")}
+              onOpenCreate={() => setCurrentScreen("action-picker")}
+              onOpenDares={() => setCurrentScreen("dares")}
+              onOpenDaily={() => setCurrentScreen("daily")}
+              onOpenFeed={() => setCurrentScreen("feed")}
+              onOpenMain={() => setCurrentScreen("main")}
+              onOpenAlerts={() => setCurrentScreen("alerts")}
+              onOpenChat={() => setCurrentScreen("chat-list")}
             />
           </div>
         );
@@ -916,7 +1136,8 @@ export default function AuthenticatedApp() {
     }
   };
 
-  const showBottomNav = isTabScreen && !isStoryViewerOpen;
+  const showBottomNav =
+    isTabScreen && !isStoryViewerOpen && !isStoryComposerOpen;
 
   // Render a neutral shell during SSR and first client paint to avoid hydration mismatch.
   // Auth state from the persisted Zustand store is only safe to consume after mount.
@@ -941,86 +1162,119 @@ export default function AuthenticatedApp() {
   return (
     <LaunchGate>
       <div className="app-fixed-viewport relative overflow-hidden bg-[#0a0f0a]">
-      <div
-        className={getScreenLayerClassName(effectiveScreen === "feed")}
-      >
-        <FeedScreen
-          isActive={effectiveScreen === "feed"}
-          onBack={handleBackToMain}
-          onCreatePost={() => setCurrentScreen("create-feed")}
-          onNavigateToChat={() => setCurrentScreen("chat-list")}
-          onNavigateToAlerts={() => setCurrentScreen("alerts")}
-          onNavigateToSearch={handleNavigateToSearch}
-          onNavigateToDaily={() => setCurrentScreen("daily")}
-          onNavigateToProfile={handleUserSelect}
-          onStoryViewerOpenChange={setIsStoryViewerOpen}
-        />
-      </div>
-      <div
-        className={getScreenLayerClassName(effectiveScreen === "dares")}
-      >
-        <DaresReceivedScreen navigationRequest={daresNavigationRequest} />
-      </div>
-      <div
-        className={getScreenLayerClassName(effectiveScreen === "profile")}
-      >
-        <ProfileScreen
-          isActive={effectiveScreen === "profile"}
-          onNavigateToProfile={handleUserSelect}
-          onNavigateToActivity={handleNavigateToActivity}
-          onNavigateToTruthPost={handleOpenTruthPost}
-          onNavigateToDarePost={handleOpenDarePost}
-        />
-      </div>
-      <div
-        className={getScreenLayerClassName(effectiveScreen === "main")}
-      >
-        <MainScreen
-          isActive={effectiveScreen === "main"}
-          onDaresClick={() => setCurrentScreen("dares")}
-          onNavigateToChat={() => setCurrentScreen("chat-list")}
-          onNavigateToProfile={handleUserSelect}
-          focusRequest={mainFocusRequest}
-        />
-      </div>
-      <div
-        className={getScreenLayerClassName(
-          effectiveScreen === "daily",
-          "h-full overflow-hidden",
+        <div className={getScreenLayerClassName(effectiveScreen === "truth")}>
+          <MainScreen
+            isActive={effectiveScreen === "truth"}
+            onDaresClick={() => setCurrentScreen("dares")}
+            onNavigateToChat={() => setCurrentScreen("chat-list")}
+            onNavigateToProfile={handleUserSelect}
+            focusRequest={mainFocusRequest}
+            activeView="truth"
+            showViewToggle={false}
+            resetKey={mainScreenResetKey}
+          />
+        </div>
+        <div className={getScreenLayerClassName(effectiveScreen === "main")}>
+          <MainScreen
+            isActive={effectiveScreen === "main"}
+            onDaresClick={() => setCurrentScreen("dares")}
+            onNavigateToChat={() => setCurrentScreen("chat-list")}
+            onNavigateToProfile={handleUserSelect}
+            focusRequest={mainFocusRequest}
+            activeView="dares"
+            initialDareAudience={mainDareAudience}
+            showViewToggle={false}
+            resetKey={mainScreenResetKey}
+          />
+        </div>
+        <div className={getScreenLayerClassName(effectiveScreen === "dares")}>
+          <DaresReceivedScreen
+            navigationRequest={daresNavigationRequest}
+            resetKey={daresScreenResetKey}
+          />
+        </div>
+        <div className={getScreenLayerClassName(effectiveScreen === "profile")}>
+          <ProfileScreen
+            isActive={effectiveScreen === "profile"}
+            onNavigateToProfile={handleUserSelect}
+            onNavigateToActivity={handleNavigateToActivity}
+            onNavigateToTruthPost={handleOpenTruthPost}
+            onNavigateToDarePost={handleOpenDarePost}
+          />
+        </div>
+        <div className={getScreenLayerClassName(effectiveScreen === "feed")}>
+          <FeedScreen
+            isActive={effectiveScreen === "feed"}
+            onBack={handleBackToMain}
+            onCreatePost={() => setCurrentScreen("create-feed")}
+            onNavigateToChat={() => setCurrentScreen("chat-list")}
+            onNavigateToAlerts={() => setCurrentScreen("alerts")}
+            onNavigateToSearch={handleNavigateToSearch}
+            onNavigateToDares={() => handleTabScreenChange("dares")}
+            onNavigateToSocialDares={() => {
+              setMainFocusRequest(null);
+              setMainDareAudience("friends");
+              setMainScreenResetKey((key) => key + 1);
+              setCurrentScreen("main");
+            }}
+            onNavigateToTruths={() => handleTabScreenChange("truth")}
+            onNavigateToCommunityDares={() => {
+              setMainFocusRequest(null);
+              setMainDareAudience("community");
+              setMainScreenResetKey((key) => key + 1);
+              setCurrentScreen("main");
+            }}
+            onNavigateToDareCenter={() => setCurrentScreen("dare-center")}
+            onNavigateToProfile={handleUserSelect}
+            onStoryComposerOpenChange={setIsStoryComposerOpen}
+            onStoryViewerOpenChange={setIsStoryViewerOpen}
+          />
+        </div>
+        <div
+          className={getScreenLayerClassName(
+            effectiveScreen === "daily",
+            "h-full overflow-hidden",
+          )}
+        >
+          <DailyChallengeScreen
+            isActive={effectiveScreen === "daily"}
+            skipWaitEnabled={dailyChallengeSkipWait}
+            onBack={() => goBackInApp("feed")}
+            onSkipWait={() => setDailyChallengeSkipWait(true)}
+            onStartMatch={(challenge) => {
+              setDailyChallengeDraft(challenge);
+              setCurrentScreen("daily-reveal");
+            }}
+          />
+        </div>
+        <div
+          className={getScreenLayerClassName(effectiveScreen === "chat-list")}
+        >
+          <ChatListScreen
+            isActive={effectiveScreen === "chat-list"}
+            onBack={handleBackToMain}
+            onChatSelect={handleChatSelect}
+            onInviteAlertsClick={() => setCurrentScreen("chat-invites")}
+            onDailyChallengeClick={() => setCurrentScreen("daily")}
+          />
+        </div>
+
+        {!isTabScreen && renderOverlayScreen()}
+
+        {showBottomNav && (
+          <BottomNavigation
+            currentScreen={
+              effectiveScreen as
+                | "truth"
+                | "main"
+                | "dares"
+                | "profile"
+                | "feed"
+            }
+            onScreenChange={handleTabScreenChange}
+            onCreateClick={handleCreateClick}
+          />
         )}
-      >
-        <DailyChallengeScreen
-          isActive={effectiveScreen === "daily"}
-          skipWaitEnabled={dailyChallengeSkipWait}
-          onBack={() => goBackInApp("feed")}
-          onSkipWait={() => setDailyChallengeSkipWait(true)}
-          onStartMatch={() => setCurrentScreen("daily-match")}
-        />
-      </div>
-      <div
-        className={getScreenLayerClassName(effectiveScreen === "chat-list")}
-      >
-        <ChatListScreen
-          isActive={effectiveScreen === "chat-list"}
-          onBack={handleBackToMain}
-          onChatSelect={handleChatSelect}
-          currentScreen="main"
-          onScreenChange={(screen) => setCurrentScreen(screen as Screen)}
-          onCreateClick={handleCreateClick}
-        />
-      </div>
-
-      {!isTabScreen && renderOverlayScreen()}
-
-      {showBottomNav && (
-        <BottomNavigation
-          currentScreen={
-            effectiveScreen as "main" | "dares" | "profile" | "feed"
-          }
-          onScreenChange={(screen) => setCurrentScreen(screen as Screen)}
-          onCreateClick={handleCreateClick}
-        />
-      )}
       </div>
     </LaunchGate>
   );

@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const TOTAL_DURATION = 7500;
-const PHASE_ARRIVAL_END = 2000;
-const PHASE_FOCUS_END = 5500;
+const TOTAL_DURATION = 3750;
+const PHASE_ARRIVAL_END = 1000;
+const PHASE_FOCUS_END = 2750;
+const DISMISS_DELAY = 250;
 const PARTICLE_COUNT = 100;
 const STORAGE_KEY = "dare_intro_played";
+const LAUNCH_BACKGROUND =
+  "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.24), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.18), transparent 30%), radial-gradient(circle at 82% 72%, rgba(20,184,166,0.16), transparent 34%), linear-gradient(180deg, #06140f 0%, #0a1f18 48%, #03110d 100%)";
 
 interface Particle {
   x: number;
@@ -43,7 +46,7 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
     try {
       sessionStorage.setItem(STORAGE_KEY, "1");
     } catch {}
-    setTimeout(() => onCompleteRef.current(), 500);
+    setTimeout(() => onCompleteRef.current(), DISMISS_DELAY);
   }, []);
 
   // Initialize particles + run animation loop (once)
@@ -201,7 +204,7 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
         right: 0,
         bottom: 0,
         zIndex: 9999,
-        background: "#000",
+        background: LAUNCH_BACKGROUND,
         overflow: "hidden",
         width: "100vw",
         height: "100vh",
@@ -235,7 +238,7 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
                 : phase === "release"
                   ? "translate(-50%, -50%) scale(1.1)"
                   : "translate(-50%, -50%) scale(0.8)",
-          transition: "transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)",
+          transition: "transform 600ms cubic-bezier(0.4, 0, 0.2, 1)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -260,7 +263,7 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
                     ? 0
                     : 0,
             transition:
-              "opacity 2s cubic-bezier(0.4, 0, 0.2, 1), transform 2s cubic-bezier(0.4, 0, 0.2, 1)",
+              "opacity 1s cubic-bezier(0.4, 0, 0.2, 1), transform 1s cubic-bezier(0.4, 0, 0.2, 1)",
             textAlign: "center",
             position: "relative",
           }}
@@ -278,7 +281,7 @@ export function LaunchScreen({ onComplete }: { onComplete: () => void }) {
                 background:
                   "linear-gradient(to bottom right, #4ade80, #22c55e)",
                 borderRadius: "50%",
-                border: "2px solid #000",
+                border: "2px solid #06140f",
                 boxShadow: "0 0 10px rgba(74, 222, 128, 0.5)",
               }}
             />
@@ -324,7 +327,12 @@ export function LaunchGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (gateState === "checking") {
-    return <div className="app-fixed-viewport bg-black" />;
+    return (
+      <div
+        className="app-fixed-viewport"
+        style={{ background: LAUNCH_BACKGROUND }}
+      />
+    );
   }
 
   if (gateState === "intro") {

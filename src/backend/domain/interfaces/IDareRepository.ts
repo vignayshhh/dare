@@ -17,6 +17,7 @@ export interface Dare {
   state: DareState;
   proofMediaUrl: string | null;
   proofMediaType: "TEXT" | "PHOTO" | "VIDEO" | null;
+  proofThumbnailUrl: string | null;
   challengerVote: VoteType | null;
   validationThresholdMet: boolean;
   createdAt: string;
@@ -45,6 +46,7 @@ export interface UpdateDareRequest {
   state?: DareState;
   proofMediaUrl?: string;
   proofMediaType?: "TEXT" | "PHOTO" | "VIDEO";
+  proofThumbnailUrl?: string;
   challengerVote?: VoteType;
 }
 
@@ -59,6 +61,7 @@ export interface IDareRepository {
     dareId: string,
     mediaUrl: string,
     mediaType: "TEXT" | "PHOTO" | "VIDEO",
+    thumbnailUrl?: string,
   ): Promise<Dare>;
   voteOnDare(
     dareId: string,

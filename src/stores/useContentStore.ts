@@ -211,7 +211,7 @@ async function buildDarePost(dare: any): Promise<DarePost | null> {
               | "video"
               | "image",
             url: dare.proofMediaUrl,
-            thumbnail: dare.proofMediaUrl,
+            thumbnail: dare.proofThumbnailUrl || dare.proofMediaUrl,
           }
         : undefined,
       state: dare.state as DarePost["state"],
@@ -527,3 +527,5 @@ export const useContentStore = create<ContentState>((set, get) => ({
     set({ truthError: null, dareError: null });
   },
 }));
+
+

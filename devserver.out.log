@@ -1,4 +1,4 @@
 
 > dare-app@0.1.0 dev
-> next dev --hostname 127.0.0.1 --port 3000
+> next dev --port 3000
 

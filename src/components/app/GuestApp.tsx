@@ -647,6 +647,7 @@ function HeartBurstLayer({ bursts }: { bursts: HeartBurst[] }) {
 
 type Screen =
   | "feed"
+  | "truth"
   | "main"
   | "dares"
   | "truths"
@@ -1925,13 +1926,24 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
           >
             <div className="p-4">
               <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white z-10"
-                  aria-label="Search"
-                >
-                  <Search size={18} />
-                </button>
+                <div className="z-10 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentScreen("user-search")}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
+                    aria-label="Search"
+                  >
+                    <Search size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentScreen("dares")}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-[#f59e0b]/24 bg-[#f59e0b]/10 text-[#fbbf24] transition-all duration-200 hover:border-[#f59e0b]/42 hover:bg-[#f59e0b]/14 hover:text-white"
+                    aria-label="Dares"
+                  >
+                    <Target size={18} />
+                  </button>
+                </div>
                 <div className="pointer-events-none absolute left-1/2 -translate-x-1/2">
                   <span className="text-lg font-bold tracking-[0.2em] text-white">
                     DARE
@@ -4723,6 +4735,26 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
 
   const renderBody = () => {
     switch (currentScreen) {
+      case "main":
+        return (
+          <>
+            <GuestMainScreen
+              activeView="dares"
+              showViewToggle={false}
+              onNavigateToProfile={openProfile}
+            />
+          </>
+        );
+      case "truth":
+        return (
+          <>
+            <GuestMainScreen
+              activeView="truth"
+              showViewToggle={false}
+              onNavigateToProfile={openProfile}
+            />
+          </>
+        );
       case "feed":
         return (
           <>
@@ -4731,12 +4763,6 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
             {storyModalOpen && (
               <StoryModal onClose={() => setStoryModalOpen(false)} />
             )}
-          </>
-        );
-      case "main":
-        return (
-          <>
-            <GuestMainScreen onNavigateToProfile={openProfile} />
           </>
         );
       case "dares":
@@ -4948,15 +4974,19 @@ export function GuestApp({ onExitGuestMode }: { onExitGuestMode: () => void }) {
               </div>
             );
           })()}
-        {["feed", "main", "dares", "profile"].includes(currentScreen) &&
+        {["feed", "truth", "main", "dares", "profile"].includes(currentScreen) &&
         !isDesktop ? (
           <BottomNavigation
-            currentScreen={tabScreen as "feed" | "main" | "dares" | "profile"}
+            currentScreen={
+              tabScreen as "feed" | "truth" | "main" | "dares" | "profile"
+            }
             onScreenChange={(screen) => setCurrentScreen(screen)}
             onCreateClick={() => setShowActionPicker(true)}
           />
         ) : null}
-        {!["feed", "main", "dares", "profile"].includes(currentScreen) ? (
+        {!["feed", "truth", "main", "dares", "profile"].includes(
+          currentScreen,
+        ) ? (
           <button
             type="button"
             onClick={() => goBackInGuestApp("feed")}

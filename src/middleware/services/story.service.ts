@@ -67,6 +67,7 @@ export interface StoryAudienceEntry {
   username: string;
   displayName: string;
   avatar: string;
+  viewCount: number;
 }
 
 export interface StoryAudienceDTO {
@@ -75,16 +76,31 @@ export interface StoryAudienceDTO {
   hates: StoryAudienceEntry[];
 }
 
+export type StoryAudienceScope = "views" | "likes" | "hates" | "all";
+
 class StoryService {
   private storyRepository: StoryRepository;
   private audienceCache = new Map<
     string,
     { data: StoryAudienceDTO; expiresAt: number }
   >();
+  private profileCache = new Map<
+    string,
+    { data: UserProfile | null; expiresAt: number }
+  >();
   private readonly audienceCacheTtlMs = 60 * 1000;
+  private readonly profileCacheTtlMs = 5 * 60 * 1000;
 
   constructor() {
     this.storyRepository = new StoryRepository();
+  }
+
+  private clearAudienceCacheForStory(storyId: string) {
+    for (const cacheKey of this.audienceCache.keys()) {
+      if (cacheKey === storyId || cacheKey.startsWith(`${storyId}:`)) {
+        this.audienceCache.delete(cacheKey);
+      }
+    }
   }
 
   async createStory(
@@ -305,7 +321,7 @@ class StoryService {
   async deleteStory(storyId: string): Promise<void> {
     try {
       await this.storyRepository.deleteStory(storyId);
-      this.audienceCache.delete(storyId);
+      this.clearAudienceCacheForStory(storyId);
     } catch (error) {
       console.error("Error deleting story:", error);
       throw error;
@@ -320,30 +336,48 @@ class StoryService {
     }
   }
 
-  async getStoryAudience(storyId: string): Promise<StoryAudienceDTO> {
-    const cached = this.audienceCache.get(storyId);
+  async getStoryAudience(
+    storyId: string,
+    scope: StoryAudienceScope = "all",
+  ): Promise<StoryAudienceDTO> {
+    const cacheKey = `${storyId}:${scope}`;
+    const cached = this.audienceCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.data;
     }
 
     try {
-      const [story, reactions] = await Promise.all([
-        this.storyRepository.getStoryById(storyId),
-        storyReactionService.getStoryReactions(storyId),
-      ]);
+      const needsViewers = scope === "views" || scope === "all";
+      const story = needsViewers
+        ? await this.storyRepository.getStoryById(storyId)
+        : null;
 
-      if (!story) {
+      if (needsViewers && !story) {
         return { viewers: [], likes: [], hates: [] };
       }
 
-      const likeUserIds = reactions
-        .filter((reaction) => reaction.type === "like")
-        .map((reaction) => reaction.userId);
-      const hateUserIds = reactions
-        .filter((reaction) => reaction.type === "hate")
-        .map((reaction) => reaction.userId);
+      const needsLikes = scope === "likes" || scope === "all";
+      const needsHates = scope === "hates" || scope === "all";
+      const reactions =
+        needsLikes || needsHates
+          ? await storyReactionService.getStoryReactions(storyId)
+          : [];
+      const likeUserIds = needsLikes
+        ? reactions
+            .filter((reaction) => reaction.type === "like")
+            .map((reaction) => reaction.userId)
+        : [];
+      const hateUserIds = needsHates
+        ? reactions
+            .filter((reaction) => reaction.type === "hate")
+            .map((reaction) => reaction.userId)
+        : [];
       const allUserIds = [
-        ...new Set([...story.viewers, ...likeUserIds, ...hateUserIds]),
+        ...new Set([
+          ...(story ? story.viewers : []),
+          ...likeUserIds,
+          ...hateUserIds,
+        ]),
       ];
 
       const profilesById = await this.getProfilesByIdsBatch(allUserIds);
@@ -351,6 +385,9 @@ class StoryService {
       const toEntry = (userId: string): StoryAudienceEntry | null => {
         const profile = profilesById.get(userId);
         if (!profile) return null;
+        const viewCount =
+          story?.viewerViewCounts[userId] ??
+          (story?.viewers.includes(userId) ? 1 : 0);
 
         return {
           userId,
@@ -359,13 +396,16 @@ class StoryService {
             : `@${profile.username}`,
           displayName: profile.display_name || profile.username,
           avatar: profile.avatar_url || getDefaultAvatarUrl(userId),
+          viewCount,
         };
       };
 
       const audience: StoryAudienceDTO = {
-        viewers: story.viewers
-          .map((userId) => toEntry(userId))
-          .filter((entry): entry is StoryAudienceEntry => Boolean(entry)),
+        viewers: story
+          ? story.viewers
+              .map((userId) => toEntry(userId))
+              .filter((entry): entry is StoryAudienceEntry => Boolean(entry))
+          : [],
         likes: [...new Set(likeUserIds)]
           .map((userId) => toEntry(userId))
           .filter((entry): entry is StoryAudienceEntry => Boolean(entry)),
@@ -374,7 +414,7 @@ class StoryService {
           .filter((entry): entry is StoryAudienceEntry => Boolean(entry)),
       };
 
-      this.audienceCache.set(storyId, {
+      this.audienceCache.set(cacheKey, {
         data: audience,
         expiresAt: Date.now() + this.audienceCacheTtlMs,
       });
@@ -468,14 +508,31 @@ class StoryService {
   ): Promise<Map<string, UserProfile | null>> {
     const uniqueUserIds = [...new Set(userIds)].filter(Boolean);
     const profiles = new Map<string, UserProfile | null>();
+    const now = Date.now();
+    const uncachedUserIds: string[] = [];
 
     if (uniqueUserIds.length === 0) {
       return profiles;
     }
 
+    uniqueUserIds.forEach((userId) => {
+      const cached = this.profileCache.get(userId);
+      if (cached && cached.expiresAt > now) {
+        profiles.set(userId, cached.data);
+        return;
+      }
+
+      this.profileCache.delete(userId);
+      uncachedUserIds.push(userId);
+    });
+
+    if (uncachedUserIds.length === 0) {
+      return profiles;
+    }
+
     const chunks: string[][] = [];
-    for (let index = 0; index < uniqueUserIds.length; index += 10) {
-      chunks.push(uniqueUserIds.slice(index, index + 10));
+    for (let index = 0; index < uncachedUserIds.length; index += 10) {
+      chunks.push(uncachedUserIds.slice(index, index + 10));
     }
 
     await Promise.all(
@@ -485,15 +542,24 @@ class StoryService {
         const snapshot = await getDocs(usersQuery);
 
         snapshot.forEach((userDoc) => {
-          profiles.set(userDoc.id, {
+          const profile = {
             id: userDoc.id,
             ...userDoc.data(),
-          } as UserProfile);
+          } as UserProfile;
+          profiles.set(userDoc.id, profile);
+          this.profileCache.set(userDoc.id, {
+            data: profile,
+            expiresAt: Date.now() + this.profileCacheTtlMs,
+          });
         });
 
         chunk.forEach((userId) => {
           if (!profiles.has(userId)) {
             profiles.set(userId, null);
+            this.profileCache.set(userId, {
+              data: null,
+              expiresAt: Date.now() + this.profileCacheTtlMs,
+            });
           }
         });
       }),

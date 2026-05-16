@@ -4,7 +4,15 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { formatTimeAgo } from "../../utils/timeFormat";
-import { Heart, MessageCircle, Play, Eye, Share2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Heart,
+  MessageCircle,
+  Play,
+  Eye,
+  Share2,
+  Sparkles,
+} from "lucide-react";
 import { useAuthStore } from "../../stores/useAuthStore-v2";
 import { useContentStore } from "../../stores/useContentStore";
 import { Avatar } from "../ui/Avatar";
@@ -20,6 +28,10 @@ import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import { commentLikePersistence } from "../../utils/commentLikePersistence";
 import { useAlertStore } from "../../stores/useAlertStore";
 import { votePersistence } from "../../utils/votePersistence";
+import { CommunityChallengeFeed } from "./CommunityChallengeFeed";
+import { CommunityChallengePreviewScreen } from "./CommunityChallengePreviewScreen";
+import { ChallengeHubScreen } from "./ChallengeHubScreen";
+import type { CommunityChallenge } from "./communityChallengeData";
 
 import "@/styles/design-system.css";
 
@@ -1138,6 +1150,7 @@ const AnimatedDareCapsule = React.memo(
     revealDescription = true,
     persist = false,
     animate = true,
+    animationKey,
   }: {
     cardId: string;
     challenger: DarePost["challenger"];
@@ -1150,6 +1163,7 @@ const AnimatedDareCapsule = React.memo(
     revealDescription?: boolean;
     persist?: boolean;
     animate?: boolean;
+    animationKey?: string | number;
   }) {
     const [expanded, setExpanded] = useState(false);
     const [showChallengerName, setShowChallengerName] = useState(false);
@@ -1215,7 +1229,7 @@ const AnimatedDareCapsule = React.memo(
         timers.current.forEach(clearTimeout);
         timers.current = [];
       };
-    }, [animate, cardId, isActive, persist, revealDescription]);
+    }, [animate, animationKey, cardId, isActive, persist, revealDescription]);
 
     const COLLAPSED_WIDTH = 64;
 
@@ -1240,19 +1254,24 @@ const AnimatedDareCapsule = React.memo(
       >
         {/* Pill */}
         <div
+          className="dare-liquid-capsule"
           style={{
+            position: "relative",
+            isolation: "isolate",
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
             gap: "10px",
             background:
-              "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.10))",
+              "linear-gradient(135deg, rgba(8,14,11,0.88), rgba(17,26,21,0.78) 46%, rgba(5,9,8,0.84))",
             borderRadius: "999px",
+            border: "1px solid rgba(255,255,255,0.22)",
             height: "64px",
             padding: capsuleExpanded ? "0 18px 0 8px" : "0 8px",
-            backdropFilter: "blur(24px)",
+            backdropFilter: "blur(30px) saturate(1.36)",
+            WebkitBackdropFilter: "blur(30px) saturate(1.36)",
             boxShadow:
-              "0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.20), 0 0 0 1px rgba(255,255,255,0.08)",
+              "0 18px 42px rgba(0,0,0,0.42), 0 4px 14px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.34), inset 0 -1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(74,222,128,0.12)",
             overflow: "hidden",
             whiteSpace: "nowrap",
             maxWidth: capsuleExpanded ? "420px" : `${COLLAPSED_WIDTH}px`,
@@ -1267,6 +1286,35 @@ const AnimatedDareCapsule = React.memo(
             WebkitBackfaceVisibility: "hidden",
           }}
         >
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: "1px",
+              borderRadius: 999,
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.045) 42%, rgba(74,222,128,0.09))",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          />
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: 16,
+              right: 16,
+              top: 7,
+              height: 18,
+              borderRadius: 999,
+              background:
+                "linear-gradient(90deg, transparent, rgba(255,255,255,0.32), transparent)",
+              opacity: 0.42,
+              filter: "blur(8px)",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          />
           {/* Challenger avatar */}
           <PostAvatar
             src={challenger.avatar}
@@ -1274,7 +1322,8 @@ const AnimatedDareCapsule = React.memo(
             size={48}
             style={{
               minWidth: 48,
-              border: "2px solid rgba(255,255,255,0.3)",
+              border: "2px solid rgba(255,255,255,0.62)",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.34)",
               opacity: capsuleShowChallenger ? 1 : 0,
               transition: animate ? "opacity 1.2s ease" : "none",
               willChange: "opacity",
@@ -1322,7 +1371,7 @@ const AnimatedDareCapsule = React.memo(
               textTransform: "uppercase" as const,
               lineHeight: 1,
               textShadow:
-                "0 2px 8px rgba(0,0,0,0.8), 0 0 12px rgba(74,222,128,0.5)",
+                "0 2px 8px rgba(0,0,0,0.86), 0 0 12px rgba(74,222,128,0.58), 0 0 24px rgba(74,222,128,0.22)",
             }}
           >
             DARED
@@ -1334,7 +1383,8 @@ const AnimatedDareCapsule = React.memo(
             size={48}
             style={{
               minWidth: 48,
-              border: "2px solid rgba(255,255,255,0.3)",
+              border: "2px solid rgba(255,255,255,0.62)",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.34)",
               opacity: capsuleShowReceiver ? 1 : 0,
               transition: animate ? "opacity 1.2s ease 0.3s" : "none",
             }}
@@ -1402,7 +1452,8 @@ const AnimatedDareCapsule = React.memo(
       prev.description !== next.description ||
       prev.revealDescription !== next.revealDescription ||
       prev.persist !== next.persist ||
-      prev.animate !== next.animate
+      prev.animate !== next.animate ||
+      prev.animationKey !== next.animationKey
     )
       return false;
     return true;
@@ -2195,6 +2246,8 @@ interface DareCardProps {
   onOpenShare?: (dare: DarePost) => void;
   onVote?: (dareId: string, vote: "real" | "fake") => void;
   onNavigateToProfile?: (userId: string) => void;
+  picModeEnabled?: boolean;
+  picModeAnimationKey?: number;
 }
 
 export function DareCard({
@@ -2209,6 +2262,8 @@ export function DareCard({
   onOpenShare,
   onVote,
   onNavigateToProfile,
+  picModeEnabled = true,
+  picModeAnimationKey = 0,
 }: DareCardProps) {
   if (!dare || !dare.id) return null;
 
@@ -2216,9 +2271,14 @@ export function DareCard({
   const {
     viewCounts,
     commentCounts,
+    mediaLikeCounts,
+    mediaLikedByUser,
     recordView,
     subscribeToViewCount,
     subscribeToCommentCount,
+    subscribeToMediaLikeCount,
+    subscribeToUserMediaLike,
+    likeMedia,
     recordVote: recordVoteAction,
     getUserVote,
     setUserVote,
@@ -2245,6 +2305,7 @@ export function DareCard({
   const skipVoteUntilRef = useRef<number>(0);
   const carouselRef = useRef<HTMLDivElement>(null);
   const carouselScrollFrame = useRef<number | null>(null);
+  const carouselTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const [carouselSlide, setCarouselSlide] = useState(0);
   const [carouselSeamProgress, setCarouselSeamProgress] = useState(0);
 
@@ -2252,6 +2313,8 @@ export function DareCard({
     if (dare.id) {
       subscribeToViewCount(dare.id);
       subscribeToCommentCount(dare.id);
+      subscribeToMediaLikeCount(dare.id);
+      if (user?.id) subscribeToUserMediaLike(dare.id, user.id);
       if (user?.id) recordView(dare.id, user.id);
     }
   }, [
@@ -2259,11 +2322,17 @@ export function DareCard({
     user?.id,
     subscribeToViewCount,
     subscribeToCommentCount,
+    subscribeToMediaLikeCount,
+    subscribeToUserMediaLike,
     recordView,
   ]);
 
+  const hasVoted = phase === "voted" && vote !== null;
   const realViewCount = viewCounts[dare.id] ?? 0;
   const realCommentCount = commentCounts[dare.id] ?? 0;
+  const realLikeCount = mediaLikeCounts[dare.id] ?? 0;
+  const hasLikedMedia = Boolean(mediaLikedByUser[dare.id]);
+  const voteControlsVisible = buttonsVisible || hasVoted || phase === "confirming";
   const shouldRunVoteTimer = Boolean(
     isActive && (!reelMode || carouselSlide === 1),
   );
@@ -2352,16 +2421,76 @@ export function DareCard({
     lastTapRef.current = now;
   };
 
+  const handleMediaLike = async () => {
+    if (!user?.id || hasLikedMedia) return;
+    setLikeTrigger((t) => t + 1);
+    await likeMedia(dare.id, user.id);
+  };
+
+  const fastForwardVoteProgress = (clientX: number, target: HTMLElement) => {
+    skipVoteUntilRef.current = Date.now() + 650;
+    const rect = target.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const remaining = Math.max(0, Math.round((1 - pct) * 10));
+
+    if (btnTimerRef.current) clearTimeout(btnTimerRef.current);
+
+    if (remaining <= 0) {
+      setButtonsVisible(true);
+      setTimerRunning(false);
+      return;
+    }
+
+    setTimerRunning(false);
+    requestAnimationFrame(() => {
+      const bar = target.querySelector(
+        "[data-progress-bar]",
+      ) as HTMLElement | null;
+      if (bar) {
+        bar.style.transition = "none";
+        bar.style.width = `${pct * 100}%`;
+        bar.getBoundingClientRect();
+        bar.style.transition = `width ${remaining}s linear`;
+        bar.style.width = "100%";
+      }
+      setTimerRunning(true);
+      btnTimerRef.current = setTimeout(() => {
+        setButtonsVisible(true);
+        setTimerRunning(false);
+      }, remaining * 1000);
+    });
+  };
+
   const handleCarouselTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    e.stopPropagation();
+    const touch = e.touches[0];
+    carouselTouchStartRef.current = touch
+      ? { x: touch.clientX, y: touch.clientY }
+      : null;
   };
 
   const handleCarouselTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    e.stopPropagation();
+    const start = carouselTouchStartRef.current;
+    const touch = e.touches[0];
+    if (!start || !touch) return;
+
+    const deltaX = Math.abs(touch.clientX - start.x);
+    const deltaY = Math.abs(touch.clientY - start.y);
+    if (deltaX > deltaY * 1.15) {
+      e.stopPropagation();
+    }
   };
 
   const handleCarouselTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    e.stopPropagation();
+    const start = carouselTouchStartRef.current;
+    carouselTouchStartRef.current = null;
+    const touch = e.changedTouches[0];
+    if (!start || !touch) return;
+
+    const deltaX = Math.abs(touch.clientX - start.x);
+    const deltaY = Math.abs(touch.clientY - start.y);
+    if (deltaX > deltaY * 1.15) {
+      e.stopPropagation();
+    }
   };
 
   const handleCarouselScroll = () => {
@@ -2388,21 +2517,19 @@ export function DareCard({
     });
   };
 
-  const hasVoted = phase === "voted" && vote !== null;
   const carouselSeamOpacity =
     carouselSeamProgress > 0.015 && carouselSeamProgress < 0.985
       ? Math.min(0.72, Math.sin(carouselSeamProgress * Math.PI) * 0.78)
       : 0;
   const coverSlideClassName = [
     "dare-cover-slide",
+    picModeEnabled ? "dare-cover-slide-pic-mode" : "",
     isActive && playEntryAnimation ? "dare-cover-slide-active" : "",
-    hasPlayedEntryAnimation && !playEntryAnimation
-      ? "dare-cover-slide-entered"
-      : "",
+    isActive && !playEntryAnimation ? "dare-cover-slide-entered" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  const shouldAnimateCapsule = playEntryAnimation || !hasPlayedEntryAnimation;
+  const coverThumbnailUrl = dare.proof?.thumbnail || dare.proof?.url;
 
   if (reelMode) {
     return (
@@ -2415,6 +2542,9 @@ export function DareCard({
           background: "#0a0a0a",
           WebkitTapHighlightColor: "transparent",
           outline: "none",
+          contain: "layout paint style",
+          transform: "translateZ(0)",
+          backfaceVisibility: "hidden",
         }}
       >
         <DoubleTapLike trigger={likeTrigger} />
@@ -2432,11 +2562,12 @@ export function DareCard({
             overflowX: "auto",
             overflowY: "hidden",
             scrollSnapType: "x mandatory",
-            scrollBehavior: "smooth",
+            scrollBehavior: "auto",
             overscrollBehaviorX: "contain",
             WebkitOverflowScrolling: "touch",
             touchAction: "pan-x pan-y",
             willChange: "scroll-position",
+            contain: "layout paint style",
           }}
         >
           <section
@@ -2451,6 +2582,9 @@ export function DareCard({
               overflow: "hidden",
               background:
                 "radial-gradient(circle at 50% 18%, rgba(250,204,21,0.16), transparent 18%), radial-gradient(circle at 16% 76%, rgba(74,222,128,0.18), transparent 24%), radial-gradient(circle at 86% 72%, rgba(96,165,250,0.14), transparent 28%), linear-gradient(180deg, #020403 0%, #07100b 38%, #030303 100%)",
+              contain: "layout paint style",
+              transform: "translateZ(0)",
+              backfaceVisibility: "hidden",
             }}
           >
             <div
@@ -2462,6 +2596,7 @@ export function DareCard({
                   "linear-gradient(115deg, rgba(74,222,128,0.18) 0 1px, transparent 1px 22px), linear-gradient(245deg, rgba(255,255,255,0.075) 0 1px, transparent 1px 28px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.12), transparent 42%)",
                 backgroundSize: "100% 100%, 100% 100%, 100% 100%",
                 opacity: 0.9,
+                mixBlendMode: picModeEnabled ? "soft-light" : "normal",
               }}
             />
             <div
@@ -2471,7 +2606,7 @@ export function DareCard({
                 inset: 0,
                 background:
                   "conic-gradient(from 210deg at 50% 52%, rgba(74,222,128,0.18), rgba(255,255,255,0.06), rgba(96,165,250,0.14), rgba(250,204,21,0.1), rgba(74,222,128,0.18)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.72), transparent 50%)",
-                opacity: 0.72,
+                opacity: picModeEnabled ? 0.28 : 0.72,
                 mixBlendMode: "screen",
               }}
             />
@@ -2486,7 +2621,7 @@ export function DareCard({
                 transform: "translateY(-50%) rotate(12deg)",
                 background:
                   "linear-gradient(90deg, transparent 0%, rgba(74,222,128,0.02) 18%, rgba(74,222,128,0.2) 46%, rgba(255,255,255,0.16) 51%, rgba(96,165,250,0.12) 59%, transparent 100%)",
-                opacity: 0.68,
+                opacity: picModeEnabled ? 0.2 : 0.68,
                 filter: "blur(0.2px)",
               }}
             />
@@ -2505,6 +2640,7 @@ export function DareCard({
                 background:
                   "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01))",
                 transform: "translateY(-38px) perspective(900px) rotateX(2deg)",
+                opacity: picModeEnabled ? 0 : 1,
               }}
             />
             <div
@@ -2516,6 +2652,46 @@ export function DareCard({
                   "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -120px 160px rgba(0,0,0,0.58), inset 0 120px 160px rgba(74,222,128,0.035)",
               }}
             />
+            {picModeEnabled && coverThumbnailUrl && (
+              <div
+                className="dare-cover-full-thumbnail"
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 0,
+                  overflow: "hidden",
+                }}
+              >
+                <img
+                  src={coverThumbnailUrl}
+                  alt=""
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    display: "block",
+                    transform: "scale(1.01)",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background:
+                      "linear-gradient(180deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.10) 34%, rgba(0,0,0,0.84) 100%)",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    boxShadow:
+                      "inset 0 0 0 1px rgba(255,255,255,0.08), inset 0 -160px 180px rgba(0,0,0,0.52)",
+                  }}
+                />
+              </div>
+            )}
             <div
               style={{
                 position: "relative",
@@ -2524,80 +2700,84 @@ export function DareCard({
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                justifyContent: "center",
-                gap: "24px",
-                padding: "40px 22px calc(120px + var(--safe-area-bottom))",
-                transform: "translateY(-38px)",
+                justifyContent: picModeEnabled ? "flex-end" : "center",
+                gap: picModeEnabled ? "12px" : "24px",
+                padding: picModeEnabled
+                  ? "calc(var(--safe-area-top) + 82px) 20px calc(150px + var(--safe-area-bottom))"
+                  : "40px 22px calc(120px + var(--safe-area-bottom))",
+                transform: picModeEnabled ? "none" : "translateY(-38px)",
               }}
             >
-              <div
-                className="dare-cover-avatar-stack"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: 98,
-                  filter: "drop-shadow(0 18px 34px rgba(0,0,0,0.5))",
-                }}
-              >
-                <button
-                  className="dare-cover-avatar dare-cover-avatar-left"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onNavigateToProfile && dare.challengerId) {
-                      onNavigateToProfile(dare.challengerId);
-                    }
-                  }}
+              {!picModeEnabled && (
+                <div
+                  className="dare-cover-avatar-stack"
                   style={{
-                    border: "none",
-                    background: "transparent",
-                    padding: 0,
-                    cursor: onNavigateToProfile ? "pointer" : "default",
-                    position: "relative",
-                    zIndex: 2,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minHeight: 98,
+                    filter: "drop-shadow(0 18px 34px rgba(0,0,0,0.5))",
                   }}
                 >
-                  <PostAvatar
-                    src={dare.challenger.avatar}
-                    name={dare.challenger.nickname}
-                    size={88}
-                    style={{
-                      border: "3px solid rgba(255,255,255,0.36)",
-                      boxShadow:
-                        "0 0 0 1px rgba(74,222,128,0.3), 0 18px 46px rgba(0,0,0,0.5)",
+                  <button
+                    className="dare-cover-avatar dare-cover-avatar-left"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onNavigateToProfile && dare.challengerId) {
+                        onNavigateToProfile(dare.challengerId);
+                      }
                     }}
-                  />
-                </button>
-                <button
-                  className="dare-cover-avatar dare-cover-avatar-right"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onNavigateToProfile && dare.receiverId) {
-                      onNavigateToProfile(dare.receiverId);
-                    }
-                  }}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    padding: 0,
-                    cursor: onNavigateToProfile ? "pointer" : "default",
-                    marginLeft: "-18px",
-                    position: "relative",
-                    zIndex: 1,
-                  }}
-                >
-                  <PostAvatar
-                    src={dare.receiver.avatar}
-                    name={dare.receiver.nickname}
-                    size={88}
                     style={{
-                      border: "3px solid rgba(74,222,128,0.48)",
-                      boxShadow:
-                        "0 0 0 1px rgba(255,255,255,0.18), 0 18px 46px rgba(0,0,0,0.5)",
+                      border: "none",
+                      background: "transparent",
+                      padding: 0,
+                      cursor: onNavigateToProfile ? "pointer" : "default",
+                      position: "relative",
+                      zIndex: 2,
                     }}
-                  />
-                </button>
-              </div>
+                  >
+                    <PostAvatar
+                      src={dare.challenger.avatar}
+                      name={dare.challenger.nickname}
+                      size={88}
+                      style={{
+                        border: "3px solid rgba(255,255,255,0.36)",
+                        boxShadow:
+                          "0 0 0 1px rgba(74,222,128,0.3), 0 18px 46px rgba(0,0,0,0.5)",
+                      }}
+                    />
+                  </button>
+                  <button
+                    className="dare-cover-avatar dare-cover-avatar-right"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onNavigateToProfile && dare.receiverId) {
+                        onNavigateToProfile(dare.receiverId);
+                      }
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      padding: 0,
+                      cursor: onNavigateToProfile ? "pointer" : "default",
+                      marginLeft: "-18px",
+                      position: "relative",
+                      zIndex: 1,
+                    }}
+                  >
+                    <PostAvatar
+                      src={dare.receiver.avatar}
+                      name={dare.receiver.nickname}
+                      size={88}
+                      style={{
+                        border: "3px solid rgba(74,222,128,0.48)",
+                        boxShadow:
+                          "0 0 0 1px rgba(255,255,255,0.18), 0 18px 46px rgba(0,0,0,0.5)",
+                      }}
+                    />
+                  </button>
+                </div>
+              )}
 
               <div className="dare-cover-capsule">
                 <AnimatedDareCapsule
@@ -2611,7 +2791,8 @@ export function DareCard({
                   receiverId={dare.receiverId}
                   revealDescription={false}
                   persist
-                  animate={shouldAnimateCapsule}
+                  animate={false}
+                  animationKey={`settled-${picModeAnimationKey}`}
                 />
               </div>
 
@@ -2619,21 +2800,40 @@ export function DareCard({
                 className="dare-cover-challenge"
                 style={{
                   width: "100%",
-                  maxWidth: 430,
-                  padding: "24px 20px 23px",
+                  maxWidth: picModeEnabled ? 400 : 430,
+                  padding: picModeEnabled ? "18px 18px 17px" : "24px 20px 23px",
                   borderRadius: 24,
                   background:
-                    "linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.052))",
-                  border: "1px solid rgba(255,255,255,0.14)",
+                    picModeEnabled
+                      ? "linear-gradient(180deg, rgba(7,13,10,0.88), rgba(7,11,9,0.74))"
+                      : "linear-gradient(180deg, rgba(12,20,16,0.9), rgba(8,12,10,0.76))",
+                  border: picModeEnabled
+                    ? "1px solid rgba(255,255,255,0.24)"
+                    : "1px solid rgba(255,255,255,0.2)",
                   boxShadow:
-                    "0 26px 70px rgba(0,0,0,0.48), 0 0 42px rgba(74,222,128,0.08), inset 0 1px 0 rgba(255,255,255,0.14)",
-                  backdropFilter: "blur(18px)",
+                    picModeEnabled
+                      ? "0 26px 70px rgba(0,0,0,0.62), 0 0 42px rgba(74,222,128,0.1), inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(74,222,128,0.1)"
+                      : "0 26px 70px rgba(0,0,0,0.54), 0 0 42px rgba(74,222,128,0.08), inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(74,222,128,0.08)",
+                  backdropFilter: "blur(28px) saturate(1.34)",
+                  WebkitBackdropFilter: "blur(28px) saturate(1.34)",
                 }}
               >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 rounded-[24px] bg-[linear-gradient(180deg,rgba(255,255,255,0.11),transparent_42%,rgba(255,255,255,0.045))]"
+                />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 rounded-[24px] bg-[radial-gradient(circle_at_50%_0%,rgba(74,222,128,0.16),transparent_48%)]"
+                />
                 <div
                   className="dare-cover-kicker"
                   style={{
+                    position: "relative",
+                    zIndex: 1,
                     color: "#4ade80",
+                    textShadow:
+                      "0 2px 8px rgba(0,0,0,0.86), 0 0 12px rgba(74,222,128,0.58), 0 0 24px rgba(74,222,128,0.22)",
                     fontSize: 12,
                     fontWeight: 900,
                     letterSpacing: "0.16em",
@@ -2647,15 +2847,19 @@ export function DareCard({
                 <p
                   className="dare-cover-copy"
                   style={{
+                    position: "relative",
+                    zIndex: 1,
                     color: "#fff",
-                    fontSize: "clamp(24px, 6vw, 36px)",
+                    fontSize: picModeEnabled
+                      ? "clamp(20px, 5.3vw, 30px)"
+                      : "clamp(24px, 6vw, 36px)",
                     lineHeight: 1.08,
                     fontWeight: 900,
                     textAlign: "center",
                     margin: 0,
                     letterSpacing: 0,
                     textShadow:
-                      "0 10px 30px rgba(0,0,0,0.5), 0 0 18px rgba(74,222,128,0.12)",
+                      "0 10px 30px rgba(0,0,0,0.6), 0 0 18px rgba(74,222,128,0.28), 0 0 34px rgba(74,222,128,0.12)",
                     overflowWrap: "break-word",
                   }}
                 >
@@ -2721,6 +2925,9 @@ export function DareCard({
               scrollSnapStop: "always",
               overflow: "hidden",
               background: "#0a0a0a",
+              contain: "layout paint style",
+              transform: "translateZ(0)",
+              backfaceVisibility: "hidden",
             }}
           >
         {dare.proof && (
@@ -2805,148 +3012,163 @@ export function DareCard({
           style={{ opacity: carouselSeamOpacity }}
         />
 
-        {/* Sidebar icons */}
-        <div
-          style={{
-            position: "absolute",
-            right: 14,
-            bottom: "calc(200px + var(--safe-area-bottom))",
-            zIndex: 10,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "16px",
-          }}
-        >
+        {/* Sidebar icons appear with the Real/Fake controls after the progress line finishes. */}
+        {voteControlsVisible && (
           <div
             style={{
+              position: "absolute",
+              right: 14,
+              bottom: "calc(200px + var(--safe-area-bottom))",
+              zIndex: 10,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "5px",
+              gap: "16px",
+              opacity: voteControlsVisible ? 1 : 0,
+              transform: voteControlsVisible ? "translateY(0)" : "translateY(10px)",
+              transition: "opacity 0.35s ease, transform 0.35s ease",
             }}
           >
-            <Eye
-              size={28}
-              color="rgba(255,255,255,0.55)"
-              style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-            />
-            <span
+            <button
+              type="button"
               style={{
-                color: "rgba(255,255,255,0.55)",
-                fontSize: "12px",
-                fontWeight: 700,
-                textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "5px",
+                border: "none",
+                background: "transparent",
+                padding: 0,
+                cursor: hasLikedMedia ? "default" : "pointer",
+                WebkitTapHighlightColor: "transparent",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleMediaLike();
               }}
             >
-              {realViewCount}
-            </span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "5px",
-              cursor: "pointer",
-              WebkitTapHighlightColor: "transparent",
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenComments?.(dare);
-            }}
-          >
-            <MessageCircle
-              size={28}
-              color="rgba(255,255,255,0.55)"
-              style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-            />
-            <span
+              <Heart
+                size={29}
+                color={hasLikedMedia ? "#fb7185" : "rgba(255,255,255,0.68)"}
+                fill={hasLikedMedia ? "#fb7185" : "transparent"}
+                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+              />
+              <span
+                style={{
+                  color: hasLikedMedia ? "#fecdd3" : "rgba(255,255,255,0.6)",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                }}
+              >
+                {realLikeCount}
+              </span>
+            </button>
+            <div
               style={{
-                color: "rgba(255,255,255,0.55)",
-                fontSize: "12px",
-                fontWeight: 700,
-                textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "5px",
               }}
             >
-              {realCommentCount}
-            </span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "5px",
-              cursor: "pointer",
-              WebkitTapHighlightColor: "transparent",
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenShare?.(dare);
-            }}
-          >
-            <Share2
-              size={28}
-              color="rgba(255,255,255,0.55)"
-              style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-            />
-            <span
+              <Eye
+                size={28}
+                color="rgba(255,255,255,0.55)"
+                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+              />
+              <span
+                style={{
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                }}
+              >
+                {realViewCount}
+              </span>
+            </div>
+            <div
               style={{
-                color: "rgba(255,255,255,0.55)",
-                fontSize: "12px",
-                fontWeight: 700,
-                textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "5px",
+                cursor: "pointer",
+                WebkitTapHighlightColor: "transparent",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenComments?.(dare);
               }}
             >
-              Share
-            </span>
+              <MessageCircle
+                size={28}
+                color="rgba(255,255,255,0.55)"
+                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+              />
+              <span
+                style={{
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                }}
+              >
+                {realCommentCount}
+              </span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "5px",
+                cursor: "pointer",
+                WebkitTapHighlightColor: "transparent",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenShare?.(dare);
+              }}
+            >
+              <Share2
+                size={28}
+                color="rgba(255,255,255,0.55)"
+                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+              />
+              <span
+                style={{
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                }}
+              >
+                Share
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Progress bar — only shown when not yet voted and buttons not yet visible */}
         {!hasVoted && !buttonsVisible && phase === "idle" && (
           <div
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              fastForwardVoteProgress(e.clientX, e.currentTarget);
+            }}
             onClick={(e) => {
-              skipVoteUntilRef.current = Date.now() + 400;
-              const container = e.currentTarget as HTMLElement; // capture immediately
-              const rect = container.getBoundingClientRect();
-              const pct = (e.clientX - rect.left) / rect.width;
-              const remaining = Math.round((1 - pct) * 10);
-
-              if (btnTimerRef.current) clearTimeout(btnTimerRef.current);
-
-              if (remaining <= 0) {
-                setButtonsVisible(true);
-                setTimerRunning(false);
-                return;
-              }
-
-              setTimerRunning(false);
-              requestAnimationFrame(() => {
-                const bar = container.querySelector(
-                  "[data-progress-bar]",
-                ) as HTMLElement | null;
-                if (bar) {
-                  bar.style.transition = "none";
-                  bar.style.width = `${pct * 100}%`;
-                  bar.getBoundingClientRect(); // force reflow
-                  bar.style.transition = `width ${remaining}s linear`;
-                  bar.style.width = "100%";
-                }
-                setTimerRunning(true);
-                btnTimerRef.current = setTimeout(() => {
-                  setButtonsVisible(true);
-                  setTimerRunning(false);
-                }, remaining * 1000);
-              });
+              e.preventDefault();
+              e.stopPropagation();
             }}
             style={{
               position: "absolute",
               top: "calc(100% - 100px - var(--safe-area-bottom))", // decreased further to move down more
               left: "14px",
               right: "14px",
-              zIndex: 2,
+              zIndex: 30,
               height: "5px", // thinner than 8px, slightly thicker than original 2px
               borderRadius: "99px",
               background: "rgba(255,255,255,0.10)",
@@ -2965,8 +3187,7 @@ export function DareCard({
                   "linear-gradient(90deg, rgba(74,222,128,0.5), #4ade80)",
                 width: timerRunning ? "100%" : "0%",
                 transition: timerRunning ? `width 10s linear` : "none",
-                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
-                /* DISABLED: pointerEvents: "none", */
+                pointerEvents: "none",
               }}
             />
           </div>
@@ -3229,6 +3450,17 @@ export function DareCard({
           .dare-cover-capsule {
             opacity: 0;
           }
+          .dare-cover-full-thumbnail {
+            opacity: 0;
+            transform: scale(1.015);
+          }
+          .dare-cover-pic-frame {
+            opacity: 0;
+            transform: translateY(18px) scale(0.98);
+          }
+          .dare-cover-slide-pic-mode .dare-cover-capsule {
+            margin-top: 4px;
+          }
           .dare-cover-challenge {
             position: relative;
             overflow: hidden;
@@ -3279,17 +3511,23 @@ export function DareCard({
           .dare-cover-slide-active .dare-cover-capsule {
             animation: dareCoverCapsuleSettle 0.75s cubic-bezier(0.22,1,0.36,1) 0.58s both;
           }
+          .dare-cover-slide-active .dare-cover-full-thumbnail {
+            animation: dareCoverFullThumbnailIn 0.8s ease-out both;
+          }
+          .dare-cover-slide-active .dare-cover-pic-frame {
+            animation: dareCoverPicFrameIn 0.72s cubic-bezier(0.22,1,0.36,1) 0.12s both;
+          }
           .dare-cover-slide-active .dare-cover-challenge {
             animation: none;
           }
           .dare-cover-slide-active .dare-cover-challenge::before {
-            animation: dareCoverChallengeSweep 2.5s cubic-bezier(0.22,1,0.36,1) 3.12s both;
+            animation: dareCoverChallengeSweep 2.5s cubic-bezier(0.22,1,0.36,1) 2.36s both;
           }
           .dare-cover-slide-active .dare-cover-kicker {
-            animation: dareCoverKickerIn 0.5s ease-out 2.84s both;
+            animation: dareCoverKickerIn 0.5s ease-out 2.08s both;
           }
           .dare-cover-slide-active .dare-cover-copy {
-            animation: dareCoverCopyIn 0.72s cubic-bezier(0.22,1,0.36,1) 2.96s both;
+            animation: dareCoverCopyIn 0.72s cubic-bezier(0.22,1,0.36,1) 2.18s both;
           }
           .dare-cover-slide-active .dare-capsule-dared-label,
           .dare-cover-slide-entered .dare-capsule-dared-label {
@@ -3334,8 +3572,16 @@ export function DareCard({
             transform: translateY(0) scale(1);
             filter: blur(0);
           }
+          .dare-cover-slide-entered .dare-cover-full-thumbnail {
+            opacity: 1;
+            transform: scale(1);
+          }
+          .dare-cover-slide-entered .dare-cover-pic-frame {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
           .dare-cover-slide-entered .dare-cover-challenge::before {
-            animation: dareCoverChallengeSweepLoop 7.2s cubic-bezier(0.22,1,0.36,1) 1.4s infinite;
+            animation: dareCoverChallengeSweepLoop 9s cubic-bezier(0.22,1,0.36,1) 1.4s infinite;
             transform: translateX(-120%);
           }
           .dare-cover-slide-entered .dare-cover-kicker,
@@ -3387,6 +3633,14 @@ export function DareCard({
             from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(5px); }
             to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
           }
+          @keyframes dareCoverFullThumbnailIn {
+            from { opacity: 0; transform: scale(1.035); filter: blur(8px); }
+            to { opacity: 1; transform: scale(1); filter: blur(0); }
+          }
+          @keyframes dareCoverPicFrameIn {
+            from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(8px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+          }
           @keyframes dareCoverChallengeIn {
             from { opacity: 0; transform: translateY(26px) scale(0.965); filter: blur(8px); }
             to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
@@ -3397,17 +3651,17 @@ export function DareCard({
           }
           @keyframes dareCoverChallengeSweepLoop {
             0% { transform: translateX(-120%); }
-            34% { transform: translateX(120%); }
+            28% { transform: translateX(120%); }
             100% { transform: translateX(120%); }
           }
           @keyframes dareCapsuleDaredGlow {
             0%, 100% {
-              text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 10px rgba(74,222,128,0.42);
+              text-shadow: 0 2px 8px rgba(0,0,0,0.86), 0 0 12px rgba(74,222,128,0.58), 0 0 24px rgba(74,222,128,0.22);
               filter: brightness(1);
             }
             45% {
-              text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 20px rgba(74,222,128,0.78), 0 0 34px rgba(74,222,128,0.28);
-              filter: brightness(1.14);
+              text-shadow: 0 2px 8px rgba(0,0,0,0.86), 0 0 22px rgba(74,222,128,0.82), 0 0 38px rgba(74,222,128,0.32);
+              filter: brightness(1.16);
             }
           }
           @keyframes dareCoverKickerIn {
@@ -3735,23 +3989,418 @@ export function DareCard({
 }
 
 // ─── SwipeableTruthCard ───────────────────────────────────────────────────────
+type TruthCardBackgroundTheme = {
+  activeShadow: string;
+  answerBubble: string;
+  legacyAnswer: string;
+  legacyQuestion: string;
+  legacyShell: string;
+  questionBubble: string;
+  shell: string;
+  texture: string;
+  topGlow: string;
+  wash: string;
+};
+
+const TRUTH_CARD_BACKGROUND_THEMES: TruthCardBackgroundTheme[] = [
+  {
+    shell:
+      "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 74%, rgba(74,222,128,0.09), transparent 28%), radial-gradient(circle at 88% 70%, rgba(56,189,248,0.12), transparent 32%), linear-gradient(180deg, #08110c 0%, #050b08 48%, #020403 100%)",
+    texture:
+      "linear-gradient(115deg, rgba(74,222,128,0.11) 0 1px, transparent 1px 22px), linear-gradient(245deg, rgba(56,189,248,0.055) 0 1px, transparent 1px 28px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.08), transparent 42%)",
+    wash:
+      "conic-gradient(from 210deg at 50% 52%, rgba(74,222,128,0.11), rgba(255,255,255,0.04), rgba(56,189,248,0.095), rgba(20,83,45,0.09), rgba(74,222,128,0.11)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.76), transparent 50%)",
+    topGlow:
+      "linear-gradient(90deg, transparent, rgba(74,222,128,0.88), rgba(56,189,248,0.55), transparent)",
+    questionBubble:
+      "linear-gradient(180deg, rgba(22,32,25,0.92), rgba(8,13,10,0.86)), radial-gradient(circle at 0% 0%, rgba(74,222,128,0.11), transparent 54%)",
+    answerBubble:
+      "linear-gradient(180deg, rgba(74,222,128,0.13), rgba(8,16,11,0.78)), radial-gradient(circle at 100% 0%, rgba(56,189,248,0.13), transparent 46%)",
+    legacyShell:
+      "linear-gradient(180deg, rgba(9,19,13,0.98) 0%, rgba(6,14,10,0.99) 52%, rgba(3,6,4,0.99) 100%)",
+    legacyQuestion:
+      "linear-gradient(180deg, rgba(23,34,27,0.78), rgba(10,17,12,0.78))",
+    legacyAnswer:
+      "linear-gradient(180deg, rgba(74,222,128,0.09), rgba(8,16,11,0.72))",
+    activeShadow:
+      "0 0 0 1.5px rgba(74,222,128,0.3), 0 26px 70px rgba(0,0,0,0.88), 0 0 92px rgba(56,189,248,0.055) inset, 0 0 84px rgba(74,222,128,0.06) inset",
+  },
+  {
+    shell:
+      "radial-gradient(circle at 50% -12%, rgba(56,189,248,0.15), transparent 32%), radial-gradient(circle at 18% 76%, rgba(74,222,128,0.075), transparent 30%), radial-gradient(circle at 88% 66%, rgba(20,184,166,0.12), transparent 32%), linear-gradient(180deg, #071117 0%, #041014 50%, #020506 100%)",
+    texture:
+      "linear-gradient(115deg, rgba(56,189,248,0.09) 0 1px, transparent 1px 24px), linear-gradient(245deg, rgba(74,222,128,0.055) 0 1px, transparent 1px 30px), radial-gradient(ellipse at 50% 28%, rgba(255,255,255,0.075), transparent 42%)",
+    wash:
+      "conic-gradient(from 220deg at 52% 50%, rgba(56,189,248,0.105), rgba(255,255,255,0.035), rgba(74,222,128,0.08), rgba(14,116,144,0.095), rgba(56,189,248,0.105)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    topGlow:
+      "linear-gradient(90deg, transparent, rgba(56,189,248,0.76), rgba(74,222,128,0.5), transparent)",
+    questionBubble:
+      "linear-gradient(180deg, rgba(18,31,36,0.92), rgba(6,13,15,0.86)), radial-gradient(circle at 0% 0%, rgba(56,189,248,0.105), transparent 54%)",
+    answerBubble:
+      "linear-gradient(180deg, rgba(56,189,248,0.105), rgba(6,15,16,0.78)), radial-gradient(circle at 100% 0%, rgba(74,222,128,0.115), transparent 46%)",
+    legacyShell:
+      "linear-gradient(180deg, rgba(8,18,23,0.98) 0%, rgba(5,14,17,0.99) 52%, rgba(2,5,6,0.99) 100%)",
+    legacyQuestion:
+      "linear-gradient(180deg, rgba(20,33,38,0.78), rgba(8,16,18,0.78))",
+    legacyAnswer:
+      "linear-gradient(180deg, rgba(56,189,248,0.075), rgba(7,16,17,0.72))",
+    activeShadow:
+      "0 0 0 1.5px rgba(56,189,248,0.26), 0 26px 70px rgba(0,0,0,0.88), 0 0 92px rgba(74,222,128,0.05) inset, 0 0 84px rgba(56,189,248,0.055) inset",
+  },
+  {
+    shell:
+      "radial-gradient(ellipse at 50% 16%, rgba(255,255,255,0.075), transparent 30%), radial-gradient(circle at 50% -8%, rgba(74,222,128,0.13), transparent 36%), radial-gradient(circle at 86% 74%, rgba(56,189,248,0.095), transparent 30%), linear-gradient(180deg, #09100c 0%, #050705 54%, #020302 100%)",
+    texture:
+      "linear-gradient(115deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 26px), linear-gradient(245deg, rgba(74,222,128,0.06) 0 1px, transparent 1px 32px), radial-gradient(ellipse at 50% 24%, rgba(74,222,128,0.08), transparent 38%)",
+    wash:
+      "conic-gradient(from 190deg at 50% 44%, rgba(255,255,255,0.055), rgba(74,222,128,0.105), rgba(56,189,248,0.06), rgba(255,255,255,0.04), rgba(74,222,128,0.105)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    topGlow:
+      "linear-gradient(90deg, transparent, rgba(255,255,255,0.58), rgba(74,222,128,0.72), transparent)",
+    questionBubble:
+      "linear-gradient(180deg, rgba(25,32,27,0.92), rgba(9,12,10,0.86)), radial-gradient(circle at 50% -10%, rgba(255,255,255,0.09), transparent 52%)",
+    answerBubble:
+      "linear-gradient(180deg, rgba(74,222,128,0.12), rgba(9,15,11,0.78)), radial-gradient(circle at 100% 0%, rgba(255,255,255,0.085), transparent 46%)",
+    legacyShell:
+      "linear-gradient(180deg, rgba(10,17,13,0.98) 0%, rgba(7,10,8,0.99) 56%, rgba(2,3,2,0.99) 100%)",
+    legacyQuestion:
+      "linear-gradient(180deg, rgba(27,33,28,0.78), rgba(11,14,11,0.78))",
+    legacyAnswer:
+      "linear-gradient(180deg, rgba(74,222,128,0.085), rgba(9,15,11,0.72))",
+    activeShadow:
+      "0 0 0 1.5px rgba(255,255,255,0.14), 0 26px 70px rgba(0,0,0,0.88), 0 0 92px rgba(74,222,128,0.055) inset, 0 0 84px rgba(255,255,255,0.035) inset",
+  },
+  {
+    shell:
+      "radial-gradient(circle at 48% -12%, rgba(74,222,128,0.13), transparent 34%), radial-gradient(circle at 14% 70%, rgba(244,114,182,0.075), transparent 28%), radial-gradient(circle at 88% 68%, rgba(56,189,248,0.09), transparent 32%), linear-gradient(180deg, #11090f 0%, #08070b 50%, #030204 100%)",
+    texture:
+      "linear-gradient(115deg, rgba(244,114,182,0.055) 0 1px, transparent 1px 24px), linear-gradient(245deg, rgba(74,222,128,0.065) 0 1px, transparent 1px 30px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.07), transparent 42%)",
+    wash:
+      "conic-gradient(from 215deg at 50% 52%, rgba(244,114,182,0.07), rgba(255,255,255,0.035), rgba(74,222,128,0.095), rgba(56,189,248,0.07), rgba(244,114,182,0.07)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    topGlow:
+      "linear-gradient(90deg, transparent, rgba(244,114,182,0.44), rgba(74,222,128,0.78), transparent)",
+    questionBubble:
+      "linear-gradient(180deg, rgba(31,22,29,0.92), rgba(12,8,11,0.86)), radial-gradient(circle at 0% 0%, rgba(244,114,182,0.075), transparent 54%)",
+    answerBubble:
+      "linear-gradient(180deg, rgba(74,222,128,0.115), rgba(13,9,11,0.78)), radial-gradient(circle at 100% 0%, rgba(244,114,182,0.075), transparent 46%)",
+    legacyShell:
+      "linear-gradient(180deg, rgba(18,10,15,0.98) 0%, rgba(9,8,11,0.99) 52%, rgba(3,2,4,0.99) 100%)",
+    legacyQuestion:
+      "linear-gradient(180deg, rgba(32,24,31,0.78), rgba(13,10,13,0.78))",
+    legacyAnswer:
+      "linear-gradient(180deg, rgba(74,222,128,0.08), rgba(13,9,11,0.72))",
+    activeShadow:
+      "0 0 0 1.5px rgba(74,222,128,0.24), 0 26px 70px rgba(0,0,0,0.88), 0 0 92px rgba(244,114,182,0.045) inset, 0 0 84px rgba(74,222,128,0.055) inset",
+  },
+  {
+    shell:
+      "radial-gradient(circle at 24% 16%, rgba(74,222,128,0.105), transparent 30%), radial-gradient(circle at 76% 20%, rgba(56,189,248,0.105), transparent 31%), radial-gradient(circle at 50% 84%, rgba(255,255,255,0.055), transparent 28%), linear-gradient(180deg, #07100d 0%, #050809 50%, #020303 100%)",
+    texture:
+      "linear-gradient(115deg, rgba(74,222,128,0.075) 0 1px, transparent 1px 26px), linear-gradient(245deg, rgba(56,189,248,0.065) 0 1px, transparent 1px 32px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.07), transparent 42%)",
+    wash:
+      "conic-gradient(from 230deg at 50% 52%, rgba(74,222,128,0.075), rgba(56,189,248,0.085), rgba(255,255,255,0.035), rgba(20,83,45,0.075), rgba(74,222,128,0.075)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    topGlow:
+      "linear-gradient(90deg, transparent, rgba(74,222,128,0.66), rgba(56,189,248,0.6), transparent)",
+    questionBubble:
+      "linear-gradient(180deg, rgba(20,31,28,0.92), rgba(7,11,11,0.86)), radial-gradient(circle at 0% 0%, rgba(74,222,128,0.09), transparent 54%)",
+    answerBubble:
+      "linear-gradient(180deg, rgba(56,189,248,0.085), rgba(7,14,13,0.78)), radial-gradient(circle at 100% 0%, rgba(74,222,128,0.105), transparent 46%)",
+    legacyShell:
+      "linear-gradient(180deg, rgba(7,17,14,0.98) 0%, rgba(5,10,11,0.99) 52%, rgba(2,3,3,0.99) 100%)",
+    legacyQuestion:
+      "linear-gradient(180deg, rgba(20,32,29,0.78), rgba(8,14,14,0.78))",
+    legacyAnswer:
+      "linear-gradient(180deg, rgba(56,189,248,0.065), rgba(7,14,13,0.72))",
+    activeShadow:
+      "0 0 0 1.5px rgba(74,222,128,0.24), 0 26px 70px rgba(0,0,0,0.88), 0 0 92px rgba(56,189,248,0.055) inset, 0 0 84px rgba(74,222,128,0.05) inset",
+  },
+];
+
+function getTruthCardBackgroundTheme(postId: string): TruthCardBackgroundTheme {
+  let hash = 0;
+  for (let i = 0; i < postId.length; i += 1) {
+    hash = (hash * 31 + postId.charCodeAt(i)) | 0;
+  }
+  return TRUTH_CARD_BACKGROUND_THEMES[
+    Math.abs(hash) % TRUTH_CARD_BACKGROUND_THEMES.length
+  ];
+}
+
+function TruthConversationScreen({
+  post,
+  onClose,
+  onNavigateToProfile,
+}: {
+  post: TruthPost;
+  onClose: () => void;
+  onNavigateToProfile?: (userId: string) => void;
+}) {
+  useBodyScrollLock(true);
+  const theme = getTruthCardBackgroundTheme(post.id);
+  const answerText = post.answer?.trim() || "No reply has been posted yet.";
+  const isLongQuestion = post.question.length > 120;
+  const isLongAnswer = answerText.length > 220;
+
+  return (
+    <div className="fixed inset-0 z-[12000] bg-[#030403] text-white">
+      <style>{`
+        @keyframes truthConversationIn {
+          from { opacity: 0; transform: translateY(18px) scale(0.985); filter: blur(8px); }
+          to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        @keyframes truthConversationBubbleIn {
+          from { opacity: 0; transform: translateY(18px) scale(0.975); filter: blur(8px); }
+          to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        @keyframes truthConversationGlow {
+          0%, 100% { opacity: 0.34; transform: translate3d(-4%, -3%, 0) scale(1); }
+          50% { opacity: 0.62; transform: translate3d(4%, 3%, 0) scale(1.06); }
+        }
+        .truth-conversation-screen {
+          animation: truthConversationIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        .truth-conversation-bubble {
+          animation: truthConversationBubbleIn 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+      `}</style>
+
+      <div
+        className="truth-conversation-screen flex h-full flex-col overflow-hidden"
+        style={{
+          background:
+            "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 12% 22%, rgba(56,189,248,0.12), transparent 28%), linear-gradient(180deg,#07100d,#030403 62%,#010201)",
+        }}
+      >
+        <div className="relative shrink-0 px-4 pb-4 pt-[calc(var(--safe-area-top)+12px)]">
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.75),transparent)]" />
+          <div className="relative flex min-h-[82px] items-center gap-3 overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(22,26,22,0.96),rgba(13,16,13,0.96))] px-4 py-3.5 shadow-[0_18px_48px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl">
+            <div className="pointer-events-none absolute inset-[1px] rounded-[27px] bg-[linear-gradient(180deg,rgba(255,255,255,0.09),transparent_46%,rgba(74,222,128,0.04))]" />
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Back"
+              className="app-pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 text-white shadow-[0_12px_30px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-3">
+                <div className="flex -space-x-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      post.challengerId &&
+                      onNavigateToProfile?.(post.challengerId)
+                    }
+                    className="rounded-full"
+                    aria-label={`Open ${post.challenger.nickname}'s profile`}
+                  >
+                    <Avatar
+                      src={post.challenger.avatar}
+                      alt={post.challenger.nickname}
+                      size={38}
+                      fallbackText={post.challenger.nickname.charAt(0)}
+                      style={{
+                        border: "2px solid rgba(3,4,3,0.96)",
+                        boxShadow:
+                          "0 0 0 1px rgba(74,222,128,0.28), 0 10px 24px rgba(0,0,0,0.34)",
+                      }}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      post.receiverId && onNavigateToProfile?.(post.receiverId)
+                    }
+                    className="rounded-full"
+                    aria-label={`Open ${post.receiver.nickname}'s profile`}
+                  >
+                    <Avatar
+                      src={post.receiver.avatar}
+                      alt={post.receiver.nickname}
+                      size={38}
+                      fallbackText={post.receiver.nickname.charAt(0)}
+                      style={{
+                        border: "2px solid rgba(3,4,3,0.96)",
+                        boxShadow:
+                          "0 0 0 1px rgba(74,222,128,0.28), 0 10px 24px rgba(0,0,0,0.34)",
+                      }}
+                    />
+                  </button>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[16px] font-black leading-tight text-white">
+                    Truth conversation
+                  </h2>
+                  <p className="mt-0.5 truncate text-[12px] font-bold text-white/52">
+                    {post.challenger.nickname} asked {post.receiver.nickname}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 text-[#4ade80] shadow-[0_12px_30px_rgba(0,0,0,0.24)]">
+              <Sparkles size={17} />
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(var(--safe-area-bottom)+22px)] pt-5"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
+          }}
+        >
+          <div className="mx-auto flex max-w-[520px] flex-col gap-5">
+            <div className="truth-conversation-bubble flex flex-col items-start gap-1.5">
+              <div className="flex max-w-[86%] items-center gap-2.5 pl-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    post.challengerId && onNavigateToProfile?.(post.challengerId)
+                  }
+                  className="shrink-0 rounded-full"
+                >
+                  <Avatar
+                    src={post.challenger.avatar}
+                    alt={post.challenger.nickname}
+                    size={38}
+                    fallbackText={post.challenger.nickname.charAt(0)}
+                    style={{
+                      border: "2px solid rgba(74,222,128,0.42)",
+                      boxShadow: "0 10px 26px rgba(0,0,0,0.34)",
+                    }}
+                  />
+                </button>
+                <span className="min-w-0 truncate text-sm font-black text-white/86">
+                  {post.challenger.nickname}
+                </span>
+              </div>
+              <div
+                className="relative max-w-[92%] overflow-hidden rounded-[28px] rounded-tl-[10px] border border-white/10 p-4 shadow-[0_20px_54px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)]"
+                style={{ background: theme.questionBubble }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-[-35%] blur-xl"
+                  style={{
+                    background:
+                      "radial-gradient(circle at 22% 12%, rgba(255,255,255,0.16), transparent 34%), radial-gradient(circle at 80% 76%, rgba(74,222,128,0.14), transparent 36%)",
+                    animation: "truthConversationGlow 7s ease-in-out infinite",
+                  }}
+                />
+                <div className="relative z-[1]">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="rounded-full border border-white/10 bg-black/24 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white/54">
+                      Question
+                    </span>
+                  </div>
+                  <p
+                    className={`m-0 font-black text-white ${
+                      isLongQuestion ? "text-[18px]" : "text-[20px]"
+                    }`}
+                    style={{
+                      lineHeight: isLongQuestion ? 1.42 : 1.28,
+                      overflowWrap: "anywhere",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {post.question}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="truth-conversation-bubble flex flex-col items-end gap-1.5"
+              style={{ animationDelay: "0.12s" }}
+            >
+              <div className="flex max-w-[86%] items-center justify-end gap-2.5 pr-1">
+                <span className="min-w-0 truncate text-right text-sm font-black text-white/86">
+                  {post.receiver.nickname}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    post.receiverId && onNavigateToProfile?.(post.receiverId)
+                  }
+                  className="shrink-0 rounded-full"
+                >
+                  <Avatar
+                    src={post.receiver.avatar}
+                    alt={post.receiver.nickname}
+                    size={34}
+                    fallbackText={post.receiver.nickname.charAt(0)}
+                    style={{
+                      border: "2px solid rgba(74,222,128,0.44)",
+                      boxShadow: "0 10px 26px rgba(0,0,0,0.34)",
+                    }}
+                  />
+                </button>
+              </div>
+              <div
+                className="relative max-w-[92%] overflow-hidden rounded-[28px] rounded-tr-[10px] border border-[#4ade80]/24 p-4 shadow-[0_20px_54px_rgba(0,0,0,0.34),0_0_42px_rgba(74,222,128,0.08),inset_0_1px_0_rgba(255,255,255,0.09)]"
+                style={{ background: theme.answerBubble }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-[-35%] blur-xl"
+                  style={{
+                    background:
+                      "radial-gradient(circle at 78% 16%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 14% 80%, rgba(56,189,248,0.12), transparent 34%)",
+                    animation: "truthConversationGlow 7.4s ease-in-out 0.3s infinite",
+                  }}
+                />
+                <div className="relative z-[1]">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="shrink-0 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
+                      Answer
+                    </span>
+                  </div>
+                  <p
+                    className={`m-0 font-bold text-white/92 ${
+                      isLongAnswer ? "text-[16px]" : "text-[17px]"
+                    }`}
+                    style={{
+                      lineHeight: isLongAnswer ? 1.7 : 1.55,
+                      overflowWrap: "anywhere",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {answerText}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface SwipeableTruthCardProps {
   post: TruthPost;
   onVoteClick: (post: TruthPost, choice: "truth" | "lie") => void;
   onOpenVoteModal: (post: TruthPost, tab: "truth" | "lie" | "comments") => void;
+  onOpenConversation?: (post: TruthPost) => void;
   cardIndex: number;
   currentIndex: number;
   isDragging?: boolean;
+  isCurrentCard?: boolean;
+  lockInternalScroll?: boolean;
   onNavigateToProfile?: (userId: string) => void;
 }
 
-export function SwipeableTruthCard({
+export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
   post,
   onVoteClick,
   onOpenVoteModal,
+  onOpenConversation,
   cardIndex,
   currentIndex,
   isDragging = false,
+  isCurrentCard,
+  lockInternalScroll = false,
   onNavigateToProfile,
 }: SwipeableTruthCardProps) {
   const { getUserVote, setUserVote } = useTruthInteractionStore();
@@ -3763,7 +4412,11 @@ export function SwipeableTruthCard({
     priorVote ? "voted" : "idle",
   );
   const [exiting, setExiting] = useState(false);
-  const isActive = cardIndex === currentIndex;
+  const lastConversationTapRef = useRef(0);
+  const conversationTapStartRef = useRef<{ x: number; y: number } | null>(null);
+  const isActive = isCurrentCard ?? cardIndex === currentIndex;
+  const reduceMotionDuringDrag = isDragging && isActive;
+  const truthBackground = getTruthCardBackgroundTheme(post.id);
 
   const handleVote = (choice: "truth" | "lie") => {
     if (phase !== "idle" || exiting) return;
@@ -3786,6 +4439,50 @@ export function SwipeableTruthCard({
     if (vote) onOpenVoteModal(post, vote);
   };
 
+  const handleConversationPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!isActive || (event.pointerType === "mouse" && event.button !== 0)) {
+      return;
+    }
+    conversationTapStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+    };
+  };
+
+  const handleConversationPointerUp = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!isActive || !onOpenConversation) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button,a,input,textarea,select")) {
+      lastConversationTapRef.current = 0;
+      conversationTapStartRef.current = null;
+      return;
+    }
+
+    const start = conversationTapStartRef.current;
+    conversationTapStartRef.current = null;
+    if (!start) return;
+
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    if (moved > 12) {
+      lastConversationTapRef.current = 0;
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastConversationTapRef.current <= 320) {
+      lastConversationTapRef.current = 0;
+      onOpenConversation(post);
+      return;
+    }
+
+    lastConversationTapRef.current = now;
+  };
+
   const offset = cardIndex - currentIndex;
   const translateY = offset === 0 ? "0%" : offset < 0 ? "-105%" : "105%";
   const isNearby = Math.abs(offset) <= 1;
@@ -3793,6 +4490,9 @@ export function SwipeableTruthCard({
 
   return (
     <div
+      data-truth-card-active={isActive ? "true" : undefined}
+      onPointerDown={handleConversationPointerDown}
+      onPointerUp={handleConversationPointerUp}
       style={{
         position: "absolute",
         inset: 0,
@@ -3800,13 +4500,15 @@ export function SwipeableTruthCard({
         opacity,
         transition: isDragging
           ? "none"
-          : "transform 0.34s cubic-bezier(0.2, 0.9, 0.2, 1), opacity 0.2s ease-out",
+          : "transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease-out",
         pointerEvents: isActive ? "auto" : "none",
-        willChange: isNearby ? "transform, opacity" : "auto",
+        willChange: isNearby ? "transform" : "auto",
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
         perspective: 1000,
         contain: "layout paint style",
+        isolation: "isolate",
+        zIndex: isActive ? 2 : offset > 0 ? 1 : 0,
         padding: "10px 16px 16px",
         display: "flex",
         flexDirection: "column",
@@ -3839,8 +4541,16 @@ export function SwipeableTruthCard({
           90%{opacity:0.72} 100%{opacity:0.72}
         }
         @keyframes questionReveal {
-          from { opacity:0; transform: translateY(10px); }
-          to   { opacity:1; transform: translateY(0); }
+          from { opacity:0; transform: translate3d(0,10px,0) scale(0.985); }
+          to   { opacity:1; transform: translate3d(0,0,0) scale(1); }
+        }
+        @keyframes answerReveal {
+          from { opacity:0; transform: translate3d(0,12px,0) scale(0.985); }
+          to   { opacity:1; transform: translate3d(0,0,0) scale(1); }
+        }
+        @keyframes truthBubbleAura {
+          0%, 100% { opacity: 0.18; transform: translate3d(-6%, -4%, 0) scale(1); }
+          50% { opacity: 0.34; transform: translate3d(4%, 3%, 0) scale(1.06); }
         }
         .truth-scroll::-webkit-scrollbar { display:none; }
       `}</style>
@@ -3854,13 +4564,55 @@ export function SwipeableTruthCard({
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          background: "#111",
-          boxShadow: isActive
-            ? "0 0 0 1.5px rgba(74,222,128,0.35), 0 24px 64px rgba(0,0,0,0.9), 0 0 80px rgba(74,222,128,0.07) inset"
+          background: truthBackground.shell,
+          boxShadow: reduceMotionDuringDrag
+            ? "0 12px 34px rgba(0,0,0,0.72)"
+            : isActive
+            ? truthBackground.activeShadow
             : "0 8px 32px rgba(0,0,0,0.7)",
-          transition: "box-shadow 0.5s ease",
+          transition: reduceMotionDuringDrag ? "none" : "box-shadow 0.35s ease",
+          transform: "translateZ(0)",
         }}
       >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: truthBackground.texture,
+            backgroundSize: "100% 100%, 100% 100%, 100% 100%",
+            opacity: reduceMotionDuringDrag ? 0.2 : 0.56,
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: truthBackground.wash,
+            opacity: reduceMotionDuringDrag ? 0.16 : 0.44,
+            mixBlendMode: reduceMotionDuringDrag ? "normal" : "screen",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.2))",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            border: "1px solid rgba(255,255,255,0.06)",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -120px 160px rgba(0,0,0,0.58), inset 0 120px 160px rgba(74,222,128,0.04)",
+            pointerEvents: "none",
+          }}
+        />
         {/* Ambient top glow */}
         <div
           style={{
@@ -3870,9 +4622,8 @@ export function SwipeableTruthCard({
             transform: "translateX(-50%)",
             width: "70%",
             height: "2px",
-            background:
-              "linear-gradient(90deg, transparent, #4ade80, transparent)",
-            opacity: isActive ? 0.7 : 0.2,
+            background: truthBackground.topGlow,
+            opacity: isActive ? 0.82 : 0.22,
             transition: "opacity 0.5s ease",
             borderRadius: "99px",
             zIndex: 10,
@@ -3885,10 +4636,14 @@ export function SwipeableTruthCard({
           data-truth-scroll="true"
           style={{
             flex: 1,
-            overflowY: "auto",
+            overflowY: lockInternalScroll ? "hidden" : "auto",
             padding: "28px 22px 12px",
-            WebkitOverflowScrolling: "touch",
-            overscrollBehavior: "contain",
+            WebkitOverflowScrolling: lockInternalScroll ? undefined : "touch",
+            overscrollBehavior: lockInternalScroll ? "none" : "contain",
+            touchAction: "pan-y",
+            position: "relative",
+            zIndex: 1,
+            pointerEvents: lockInternalScroll ? "none" : undefined,
           }}
         >
           {/* "TRUTH OR LIE" label */}
@@ -3905,17 +4660,19 @@ export function SwipeableTruthCard({
               style={{
                 height: "1px",
                 flex: 1,
-                background: "rgba(74,222,128,0.15)",
+                background:
+                  "linear-gradient(90deg, transparent, rgba(74,222,128,0.24))",
               }}
             />
             <span
               style={{
-                color: "#4ade80",
+                color: "#a7f3d0",
                 fontWeight: 900,
                 fontSize: "11px",
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
                 opacity: 0.75,
+                textShadow: "0 0 18px rgba(74,222,128,0.18)",
               }}
             >
               Truth or Lie
@@ -3924,7 +4681,8 @@ export function SwipeableTruthCard({
               style={{
                 height: "1px",
                 flex: 1,
-                background: "rgba(74,222,128,0.15)",
+                background:
+                  "linear-gradient(90deg, rgba(56,189,248,0.2), transparent)",
               }}
             />
           </div>
@@ -3998,10 +4756,13 @@ export function SwipeableTruthCard({
             >
               <div
                 style={{
-                  background: "rgba(74,222,128,0.12)",
-                  border: "1px solid rgba(74,222,128,0.25)",
+                  background:
+                    "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(56,189,248,0.1))",
+                  border: "1px solid rgba(74,222,128,0.28)",
                   borderRadius: "99px",
                   padding: "5px 14px",
+                  boxShadow:
+                    "0 10px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)",
                 }}
               >
                 <span
@@ -4011,7 +4772,9 @@ export function SwipeableTruthCard({
                     fontSize: "12px",
                     letterSpacing: "0.06em",
                     textTransform: "uppercase",
-                    animation: "truthGlow 3s ease-in-out infinite",
+                    animation: isDragging
+                      ? "none"
+                      : "truthGlow 3s ease-in-out infinite",
                     display: "inline-block",
                   }}
                 >
@@ -4076,43 +4839,90 @@ export function SwipeableTruthCard({
           <div
             style={{
               position: "relative",
-              borderRadius: "22px",
-              padding: "22px 20px",
-              marginBottom: "20px",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.07)",
-              animation: isActive
+              borderRadius: "26px 26px 26px 12px",
+              padding: "15px 16px 18px",
+              marginBottom: "14px",
+              marginRight: "28px",
+              background: truthBackground.questionBubble,
+              border: "1px solid rgba(255,255,255,0.09)",
+              boxShadow:
+                "0 16px 38px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -28px 60px rgba(74,222,128,0.035)",
+              overflow: "hidden",
+              isolation: "isolate",
+              animation: isActive && !isDragging
                 ? "questionReveal 0.6s ease 0.1s both"
                 : "none",
             }}
           >
-            {/* Decorative quote mark */}
             <span
+              aria-hidden="true"
               style={{
                 position: "absolute",
-                top: "10px",
-                left: "16px",
-                fontSize: "40px",
-                lineHeight: 1,
-                color: "rgba(74,222,128,0.15)",
-                fontWeight: 900,
-                userSelect: "none",
-                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
-                /* DISABLED: pointerEvents: "none", */
+                inset: "-40% -25%",
+                zIndex: 0,
+                background:
+                  "radial-gradient(circle at 24% 20%, rgba(255,255,255,0.14), transparent 34%), radial-gradient(circle at 70% 72%, rgba(74,222,128,0.1), transparent 34%)",
+                filter: "blur(10px)",
+                opacity: isActive && !isDragging ? 0.24 : 0.12,
+                animation:
+                  isActive && !isDragging
+                    ? "truthBubbleAura 7s ease-in-out 0.8s infinite"
+                    : "none",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                zIndex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                marginBottom: "10px",
               }}
             >
-              "
-            </span>
+              <span
+                style={{
+                  color: "#86efac",
+                  fontSize: "10px",
+                  fontWeight: 900,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Question
+              </span>
+              <span
+                style={{
+                  minWidth: 0,
+                  color: "rgba(255,255,255,0.32)",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {post.challenger.nickname.split(" ")[0]}
+              </span>
+            </div>
             <p
               style={{
+                position: "relative",
+                zIndex: 1,
                 color: "#fff",
                 fontWeight: 800,
-                fontSize: "22px",
-                lineHeight: 1.38,
-                textAlign: "center",
+                fontSize: post.question.length > 120 ? "18px" : "21px",
+                lineHeight: post.question.length > 120 ? 1.42 : 1.34,
+                textAlign: "left",
                 margin: 0,
                 letterSpacing: "-0.01em",
-                paddingTop: "6px",
+                overflowWrap: "anywhere",
+                display: "-webkit-box",
+                WebkitLineClamp: post.question.length > 160 ? 4 : 5,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
               }}
             >
               {post.question}
@@ -4208,15 +5018,42 @@ export function SwipeableTruthCard({
           ) : post.answer ? (
             <div
               style={{
-                borderRadius: "18px",
-                padding: "16px",
+                borderRadius: "26px 26px 12px 26px",
+                padding: "15px",
                 marginBottom: "8px",
-                background: "rgba(74,222,128,0.05)",
-                border: "1px solid rgba(74,222,128,0.14)",
+                marginLeft: "28px",
+                background: truthBackground.answerBubble,
+                border: "1px solid rgba(74,222,128,0.2)",
+                boxShadow:
+                  "0 14px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06)",
+                overflow: "hidden",
+                isolation: "isolate",
+                animation: isActive && !isDragging
+                  ? "answerReveal 0.62s ease 0.22s both"
+                  : "none",
               }}
             >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  inset: "-42% -24%",
+                  zIndex: 0,
+                  background:
+                    "radial-gradient(circle at 76% 20%, rgba(255,255,255,0.12), transparent 34%), radial-gradient(circle at 18% 74%, rgba(56,189,248,0.09), transparent 34%)",
+                  filter: "blur(10px)",
+                  opacity: isActive && !isDragging ? 0.22 : 0.1,
+                  animation:
+                    isActive && !isDragging
+                      ? "truthBubbleAura 7.6s ease-in-out 1.1s infinite"
+                      : "none",
+                  pointerEvents: "none",
+                }}
+              />
               <div
                 style={{
+                  position: "relative",
+                  zIndex: 1,
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
@@ -4234,14 +5071,14 @@ export function SwipeableTruthCard({
                 />
                 <span
                   style={{
-                    color: "#4ade80",
+                    color: "#bbf7d0",
                     fontSize: "11px",
-                    fontWeight: 700,
-                    letterSpacing: "0.08em",
+                    fontWeight: 900,
+                    letterSpacing: "0.11em",
                     textTransform: "uppercase",
                   }}
                 >
-                  Answered · {post.receiver.nickname.split(" ")[0]}
+                  Reply from {post.receiver.nickname.split(" ")[0]}
                 </span>
                 <span
                   style={{
@@ -4255,6 +5092,8 @@ export function SwipeableTruthCard({
               </div>
               <div
                 style={{
+                  position: "relative",
+                  zIndex: 1,
                   display: "flex",
                   gap: "12px",
                   alignItems: "flex-start",
@@ -4268,11 +5107,16 @@ export function SwipeableTruthCard({
                 />
                 <p
                   style={{
-                    color: "rgba(255,255,255,0.85)",
-                    fontSize: "15px",
-                    lineHeight: 1.55,
+                    color: "rgba(255,255,255,0.9)",
+                    fontSize: post.answer.length > 220 ? "14px" : "15px",
+                    lineHeight: post.answer.length > 220 ? 1.62 : 1.55,
                     margin: 0,
                     flex: 1,
+                    overflowWrap: "anywhere",
+                    display: "-webkit-box",
+                    WebkitLineClamp: post.answer.length > 260 ? 6 : 7,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
                   }}
                 >
                   {post.answer}
@@ -4286,10 +5130,16 @@ export function SwipeableTruthCard({
         <div
           style={{
             padding: "14px 20px 22px",
-            background: "rgba(0,0,0,0.4)",
-            backdropFilter: "blur(12px)",
+            background:
+              "linear-gradient(180deg, rgba(2,4,3,0.58), rgba(2,4,3,0.94))",
+            backdropFilter: reduceMotionDuringDrag ? "none" : "blur(12px)",
+            WebkitBackdropFilter: reduceMotionDuringDrag
+              ? "none"
+              : "blur(12px)",
             borderTop: "1px solid rgba(255,255,255,0.06)",
             flexShrink: 0,
+            position: "relative",
+            zIndex: 1,
           }}
         >
           {/* Micro-hint */}
@@ -4335,7 +5185,9 @@ export function SwipeableTruthCard({
                   letterSpacing: "0.02em",
                   touchAction: "manipulation",
                   WebkitTapHighlightColor: "transparent",
-                  animation: "btnPulseTruth 6s ease-in-out infinite",
+                  animation: isDragging
+                    ? "none"
+                    : "btnPulseTruth 6s ease-in-out infinite",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -4360,7 +5212,9 @@ export function SwipeableTruthCard({
                   letterSpacing: "0.02em",
                   touchAction: "manipulation",
                   WebkitTapHighlightColor: "transparent",
-                  animation: "btnPulseLie 6s ease-in-out infinite",
+                  animation: isDragging
+                    ? "none"
+                    : "btnPulseLie 6s ease-in-out infinite",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -4454,7 +5308,7 @@ export function SwipeableTruthCard({
       </div>
     </div>
   );
-}
+});
 
 // ─── TruthCard (feed view) ────────────────────────────────────────────────────
 interface TruthCardProps {
@@ -4484,14 +5338,18 @@ export function TruthCard({ post, onVoteClick }: TruthCardProps) {
     }
     setPhase("voted");
   };
+  const truthBackground = getTruthCardBackgroundTheme(post.id);
 
   return (
     <div
-      className="bg-[#1a1a1a] rounded-2xl p-4 mb-4 border border-gray-800 card transition-all duration-300 w-full overflow-hidden"
+      className="rounded-2xl p-4 mb-4 border card transition-all duration-300 w-full overflow-hidden"
       style={{
         WebkitTapHighlightColor: "transparent",
         outline: "none",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+        background: truthBackground.legacyShell,
+        borderColor: "rgba(255,255,255,0.08)",
+        boxShadow:
+          "0 18px 44px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.055)",
         padding: "16px",
       }}
     >
@@ -4560,8 +5418,24 @@ export function TruthCard({ post, onVoteClick }: TruthCardProps) {
         </span>{" "}
         about
       </p>
-      <div className="bg-[#2a2a2a] rounded-xl p-5 mt-2 mb-4">
-        <p className="text-white font-semibold text-lg leading-snug">
+      <div
+        className="rounded-xl p-5 mt-2 mb-4"
+        style={{
+          background: truthBackground.legacyQuestion,
+          border: "1px solid rgba(255,255,255,0.075)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.045)",
+        }}
+      >
+        <p
+          className="text-white font-semibold text-lg leading-snug"
+          style={{
+            overflowWrap: "anywhere",
+            display: "-webkit-box",
+            WebkitLineClamp: post.question.length > 160 ? 4 : 5,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
           {post.question}
         </p>
       </div>
@@ -4593,7 +5467,14 @@ export function TruthCard({ post, onVoteClick }: TruthCardProps) {
           })}
         </div>
       ) : post.answer ? (
-        <div className="mb-4 mt-4">
+        <div
+          className="mb-4 mt-4 rounded-xl p-4"
+          style={{
+            background: truthBackground.legacyAnswer,
+            border: "1px solid rgba(74,222,128,0.16)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.045)",
+          }}
+        >
           <div className="flex items-start space-x-4">
             <PostAvatar
               src={post.receiver.avatar}
@@ -4610,7 +5491,16 @@ export function TruthCard({ post, onVoteClick }: TruthCardProps) {
                   {formatTimestamp(post.createdAt)}
                 </span>
               </div>
-              <p className="text-white text-base leading-relaxed">
+              <p
+                className="text-white text-base leading-relaxed"
+                style={{
+                  overflowWrap: "anywhere",
+                  display: "-webkit-box",
+                  WebkitLineClamp: post.answer.length > 260 ? 6 : 7,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
                 {post.answer}
               </p>
             </div>
@@ -4746,19 +5636,30 @@ const formatTimestamp = (timestamp: any): string => {
 };
 
 // ─── MainScreen ───────────────────────────────────────────────────────────────
+type MainScreenView = "truth" | "dares";
+type DareAudience = "friends" | "community";
+
 export function MainScreen({
   isActive,
   onDaresClick,
   onNavigateToChat,
   onNavigateToProfile: _onNavigateToProfile,
   focusRequest,
+  activeView: activeViewProp,
+  initialDareAudience = "friends",
+  showViewToggle = true,
+  resetKey,
 }: {
   isActive?: boolean;
   onDaresClick: () => void;
   onNavigateToChat: () => void;
   onNavigateToProfile?: (userId: string) => void;
+  activeView?: MainScreenView;
+  initialDareAudience?: DareAudience;
+  showViewToggle?: boolean;
+  resetKey?: number;
   focusRequest?: {
-    view: "truth" | "dares";
+    view: MainScreenView;
     post: TruthPost | DarePost;
     nonce: number;
   } | null;
@@ -4783,10 +5684,14 @@ export function MainScreen({
   const subscribeToAlerts = useAlertStore((s) => s.subscribeToAlerts);
   const handledRealtimeAlertIds = useRef<Set<string>>(new Set());
   const publishedRealtimeDareIds = useRef<Set<string>>(new Set());
-  const [activeView, setActiveView] = useState<"truth" | "dares">("dares");
+  const [activeView, setActiveView] = useState<MainScreenView>(
+    activeViewProp ?? "dares",
+  );
   const [selectedDare, setSelectedDare] = useState<DarePost | null>(null);
   const [showVoteModal, setShowVoteModal] = useState(false);
   const [selectedTruth, setSelectedTruth] = useState<TruthPost | null>(null);
+  const [selectedTruthConversation, setSelectedTruthConversation] =
+    useState<TruthPost | null>(null);
   const [showTruthModal, setShowTruthModal] = useState(false);
   const [truthModalTab, setTruthModalTab] = useState<
     "truth" | "lie" | "comments"
@@ -4801,18 +5706,36 @@ export function MainScreen({
     null,
   );
   const [reelShareDare, setReelShareDare] = useState<DarePost | null>(null);
-  const [touchStart, setTouchStart] = useState<number | null>(null);
-  const [touchEnd, setTouchEnd] = useState<number | null>(null);
-  const [touchStartY, setTouchStartY] = useState<number | null>(null);
-  const [touchEndY, setTouchEndY] = useState<number | null>(null);
+  const picModeEnabled = true;
+  const picModeAnimationKey = 0;
+  const [dareAudience, setDareAudience] =
+    useState<DareAudience>(initialDareAudience);
+  const [selectedCommunityChallenge, setSelectedCommunityChallenge] =
+    useState<CommunityChallenge | null>(null);
+  const [showCommunityChallengeHub, setShowCommunityChallengeHub] =
+    useState(false);
+  const [joinedCommunityChallengeIds, setJoinedCommunityChallengeIds] =
+    useState<Set<string>>(() => new Set());
+  const canSwitchViewsInternally = showViewToggle;
+
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [isTruthDragging, setIsTruthDragging] = useState(false);
   const [currentTruthIndex, setCurrentTruthIndex] = useState(0);
   const activeReelIndexRef = useRef(0);
+  const mainTouchStartX = useRef<number | null>(null);
+  const mainTouchStartY = useRef<number | null>(null);
+  const mainTouchLastX = useRef<number | null>(null);
+  const mainTouchLastY = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!activeViewProp) return;
+    setActiveView(activeViewProp);
+    setIsTransitioning(false);
+  }, [activeViewProp]);
   const reelWheelLockRef = useRef(false);
   const reelWheelUnlockTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const reelScrollFrame = useRef<number | null>(null);
   const dareReelTouchStartX = useRef<number | null>(null);
   const dareReelTouchStartY = useRef<number | null>(null);
   const dareReelTouchStartIndex = useRef(0);
@@ -4828,7 +5751,6 @@ export function MainScreen({
 
   const displayTruthPosts = React.useMemo(() => {
     const seenIds = new Set<string>();
-    const seenPublishedTruths = new Set<string>();
     const focusedTruth =
       focusRequest?.view === "truth" ? (focusRequest.post as TruthPost) : null;
 
@@ -4841,16 +5763,6 @@ export function MainScreen({
       }
 
       seenIds.add(post.id);
-
-      const signature = [
-        post.challengerId || "",
-        post.receiverId || "",
-        post.question.trim().toLowerCase(),
-        post.answer?.trim().toLowerCase() || "",
-      ].join("::");
-
-      if (seenPublishedTruths.has(signature)) return false;
-      seenPublishedTruths.add(signature);
       return true;
     });
   }, [focusRequest, truthPosts]);
@@ -4874,191 +5786,8 @@ export function MainScreen({
       ),
     [displayTruthPosts, sessionVoteSnapshot],
   );
-  const effectiveTruthIndex = Math.min(
-    currentTruthIndex,
-    Math.max(orderedTruthPosts.length - 1, 0),
-  );
-
-  const visibleTruthPosts = React.useMemo(
-    () =>
-      orderedTruthPosts
-        .map((post, index) => ({ post, index }))
-        .filter(
-          ({ post, index }) =>
-            Boolean(post?.id) && Math.abs(index - effectiveTruthIndex) <= 1,
-        ),
-    [effectiveTruthIndex, orderedTruthPosts],
-  );
-
-  const truthTouchStartY = useRef<number | null>(null);
-  const truthTouchStartX = useRef<number | null>(null);
-  const truthDeckRef = useRef<HTMLDivElement>(null);
-  const truthScrollableRef = useRef<HTMLElement | null>(null);
-  const truthScrollTopAtStart = useRef<number>(0);
-  const truthScrollHeightAtStart = useRef<number>(0);
-  const truthClientHeightAtStart = useRef<number>(0);
-  const truthDragY = useRef(0);
-  const truthLastTouchY = useRef(0);
-  const truthLastTouchAt = useRef(0);
-  const truthVelocityY = useRef(0);
-  const truthDragFrame = useRef<number | null>(null);
-  const truthCanDragDeck = useRef(false);
-
-  const setTruthDeckDrag = React.useCallback((dragY: number) => {
-    truthDragY.current = dragY;
-    if (truthDragFrame.current !== null) return;
-
-    truthDragFrame.current = window.requestAnimationFrame(() => {
-      truthDragFrame.current = null;
-      truthDeckRef.current?.style.setProperty(
-        "--truth-drag-y",
-        `${truthDragY.current}px`,
-      );
-    });
-  }, []);
-
-  const handleTruthTouchStart = (e: React.TouchEvent) => {
-    const touch = e.targetTouches[0];
-    truthTouchStartY.current = touch.clientY;
-    truthTouchStartX.current = touch.clientX;
-    truthLastTouchY.current = touch.clientY;
-    truthLastTouchAt.current = performance.now();
-    truthVelocityY.current = 0;
-    truthCanDragDeck.current = false;
-    setTruthDeckDrag(0);
-    const scrollable = (e.currentTarget as HTMLElement).querySelector(
-      '[data-truth-scroll="true"]',
-    ) as HTMLElement | null;
-    if (scrollable) {
-      truthScrollableRef.current = scrollable;
-      truthScrollTopAtStart.current = scrollable.scrollTop;
-      truthScrollHeightAtStart.current = scrollable.scrollHeight;
-      truthClientHeightAtStart.current = scrollable.clientHeight;
-    } else {
-      truthScrollableRef.current = null;
-    }
-  };
-  const handleTruthTouchMove = (e: React.TouchEvent) => {
-    if (truthTouchStartY.current === null || isTransitioning) return;
-
-    const touch = e.targetTouches[0];
-    const now = performance.now();
-    const deltaSinceLast = touch.clientY - truthLastTouchY.current;
-    const elapsed = Math.max(now - truthLastTouchAt.current, 1);
-    truthVelocityY.current = deltaSinceLast / elapsed;
-    truthLastTouchY.current = touch.clientY;
-    truthLastTouchAt.current = now;
-
-    const dragY = touch.clientY - truthTouchStartY.current;
-    const dragX = Math.abs(
-      touch.clientX - (truthTouchStartX.current ?? touch.clientX),
-    );
-    const absDragY = Math.abs(dragY);
-
-    if (absDragY < 4) return;
-    if (dragX > absDragY * 0.6) {
-      setTruthDeckDrag(0);
-      return;
-    }
-
-    const scrollable = truthScrollableRef.current;
-    if (scrollable && !truthCanDragDeck.current) {
-      const atTop = truthScrollTopAtStart.current <= 0;
-      const atBottom =
-        truthScrollTopAtStart.current + truthClientHeightAtStart.current >=
-        truthScrollHeightAtStart.current - 2;
-      if (dragY < 0 && !atBottom) return;
-      if (dragY > 0 && !atTop) return;
-    }
-
-    truthCanDragDeck.current = true;
-    if (!isTruthDragging) setIsTruthDragging(true);
-
-    const hasNext = effectiveTruthIndex < orderedTruthPosts.length - 1;
-    const hasPrevious = effectiveTruthIndex > 0;
-    const edgeResistance =
-      (dragY < 0 && !hasNext) || (dragY > 0 && !hasPrevious);
-    setTruthDeckDrag(edgeResistance ? dragY * 0.28 : dragY);
-  };
-  const handleTruthTouchEnd = (e: React.TouchEvent) => {
-    if (truthTouchStartY.current === null || isTransitioning) return;
-    const endY = e.changedTouches[0].clientY;
-    const endX = e.changedTouches[0].clientX;
-    const distanceY = truthTouchStartY.current - endY;
-    const distanceX = Math.abs((truthTouchStartX.current ?? endX) - endX);
-    truthTouchStartY.current = null;
-    truthTouchStartX.current = null;
-    truthCanDragDeck.current = false;
-    const resetTruthDrag = () => {
-      setIsTruthDragging(false);
-      setTruthDeckDrag(0);
-    };
-    if (Math.abs(distanceY) < minSwipeDistance) {
-      resetTruthDrag();
-      return;
-    }
-    if (distanceX > Math.abs(distanceY) * 0.6) {
-      resetTruthDrag();
-      return;
-    }
-    const scrollable = truthScrollableRef.current;
-    if (scrollable) {
-      const atTop = truthScrollTopAtStart.current <= 0;
-      const atBottom =
-        truthScrollTopAtStart.current + truthClientHeightAtStart.current >=
-        truthScrollHeightAtStart.current - 2;
-      if (distanceY > 0 && !atBottom) {
-        resetTruthDrag();
-        return;
-      }
-      if (distanceY < 0 && !atTop) {
-        resetTruthDrag();
-        return;
-      }
-    }
-
-    const deckHeight = truthDeckRef.current?.clientHeight || 1;
-    const enoughDistance =
-      Math.abs(truthDragY.current) > Math.min(deckHeight * 0.18, 120);
-    const enoughVelocity = Math.abs(truthVelocityY.current) > 0.45;
-
-    setIsTruthDragging(false);
-    setTruthDeckDrag(0);
-
-    if (
-      distanceY > 0 &&
-      effectiveTruthIndex < orderedTruthPosts.length - 1 &&
-      (enoughDistance || enoughVelocity)
-    ) {
-      setCurrentTruthIndex((prev) => prev + 1);
-      setIsTransitioning(true);
-      setTimeout(() => setIsTransitioning(false), 360);
-    } else if (
-      distanceY < 0 &&
-      effectiveTruthIndex > 0 &&
-      (enoughDistance || enoughVelocity)
-    ) {
-      setCurrentTruthIndex((prev) => prev - 1);
-      setIsTransitioning(true);
-      setTimeout(() => setIsTransitioning(false), 360);
-    }
-  };
-
-  const handleTruthTouchCancel = () => {
-    truthTouchStartY.current = null;
-    truthTouchStartX.current = null;
-    truthCanDragDeck.current = false;
-    setIsTruthDragging(false);
-    setTruthDeckDrag(0);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (truthDragFrame.current !== null) {
-        window.cancelAnimationFrame(truthDragFrame.current);
-      }
-    };
-  }, []);
+  const truthReelContainerRef = useRef<HTMLDivElement>(null);
+  const truthScrollFrame = useRef<number | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -5172,6 +5901,18 @@ export function MainScreen({
     setShowTruthModal(false);
     setSelectedTruth(null);
   }, []);
+
+  const handleJoinCommunityChallenge = React.useCallback(
+    (challengeId: string) => {
+      setJoinedCommunityChallengeIds((current) => {
+        if (current.has(challengeId)) return current;
+        const next = new Set(current);
+        next.add(challengeId);
+        return next;
+      });
+    },
+    [],
+  );
   const handleFullscreenMedia = React.useCallback(
     (media: { url: string; type: "image" | "video"; thumbnail?: string }) => {
       setFullscreenMedia(media);
@@ -5190,10 +5931,14 @@ export function MainScreen({
     reelCommentsDare ||
     reelShareDare ||
     showVoteModal ||
-    showTruthModal
+    showTruthModal ||
+    selectedTruthConversation ||
+    selectedCommunityChallenge ||
+    showCommunityChallengeHub
   );
   const reelContainerRef = useRef<HTMLDivElement>(null);
-  const isDareScreenVisible = Boolean(isActive) && activeView === "dares";
+  const isDareScreenVisible =
+    Boolean(isActive) && activeView === "dares" && dareAudience === "friends";
   useEffect(() => {
     const el = reelContainerRef.current;
     if (!el) return;
@@ -5282,6 +6027,12 @@ export function MainScreen({
       if (reelWheelUnlockTimer.current) {
         clearTimeout(reelWheelUnlockTimer.current);
       }
+      if (reelScrollFrame.current !== null) {
+        window.cancelAnimationFrame(reelScrollFrame.current);
+      }
+      if (truthScrollFrame.current !== null) {
+        window.cancelAnimationFrame(truthScrollFrame.current);
+      }
     };
   }, []);
 
@@ -5303,7 +6054,7 @@ export function MainScreen({
   }, [registerDareCardVisit, sortedDarePosts]);
 
   const handleDareReelWheel = React.useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
+    (e: WheelEvent) => {
       if (!isDareScreenVisible || anyModalOpen) return;
 
       const verticalDelta = Math.abs(e.deltaY);
@@ -5339,6 +6090,18 @@ export function MainScreen({
       sortedDarePosts.length,
     ],
   );
+
+  useEffect(() => {
+    const container = reelContainerRef.current;
+    if (!container) return;
+
+    container.addEventListener("wheel", handleDareReelWheel, {
+      passive: false,
+    });
+    return () => {
+      container.removeEventListener("wheel", handleDareReelWheel);
+    };
+  }, [handleDareReelWheel]);
 
   const handleDareReelTouchStart = React.useCallback(
     (e: React.TouchEvent<HTMLDivElement>) => {
@@ -5384,25 +6147,69 @@ export function MainScreen({
     const container = reelContainerRef.current;
     if (!container) return;
     const handleScroll = () => {
-      const slideHeight = container.clientHeight;
-      if (!slideHeight) return;
-      const maxIndex = Math.max(0, sortedDarePosts.length - 1);
-      const idx = Math.min(
-        maxIndex,
-        Math.max(0, Math.round(container.scrollTop / slideHeight)),
-      );
-      const activeDare = sortedDarePosts[idx];
-      if (activeDare?.id) registerDareCardVisit(activeDare.id);
-      activeReelIndexRef.current = idx;
-      setActiveReelIndex(idx);
+      if (reelScrollFrame.current !== null) return;
+      reelScrollFrame.current = window.requestAnimationFrame(() => {
+        reelScrollFrame.current = null;
+        const slideHeight = container.clientHeight;
+        if (!slideHeight) return;
+        const maxIndex = Math.max(0, sortedDarePosts.length - 1);
+        const idx = Math.min(
+          maxIndex,
+          Math.max(0, Math.round(container.scrollTop / slideHeight)),
+        );
+        if (idx === activeReelIndexRef.current) return;
+
+        const activeDare = sortedDarePosts[idx];
+        if (activeDare?.id) registerDareCardVisit(activeDare.id);
+        activeReelIndexRef.current = idx;
+        setActiveReelIndex(idx);
+      });
     };
     container.addEventListener("scroll", handleScroll, { passive: true });
     handleScroll();
-    return () => container.removeEventListener("scroll", handleScroll);
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (reelScrollFrame.current !== null) {
+        window.cancelAnimationFrame(reelScrollFrame.current);
+        reelScrollFrame.current = null;
+      }
+    };
   }, [activeView, registerDareCardVisit, sortedDarePosts]);
 
   useEffect(() => {
+    if (activeView !== "truth") return;
+    const container = truthReelContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (truthScrollFrame.current !== null) return;
+      truthScrollFrame.current = window.requestAnimationFrame(() => {
+        truthScrollFrame.current = null;
+        const slideHeight = container.clientHeight;
+        if (!slideHeight) return;
+        const maxIndex = Math.max(0, orderedTruthPosts.length - 1);
+        const idx = Math.min(
+          maxIndex,
+          Math.max(0, Math.round(container.scrollTop / slideHeight)),
+        );
+        setCurrentTruthIndex((prev) => (prev === idx ? prev : idx));
+      });
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (truthScrollFrame.current !== null) {
+        window.cancelAnimationFrame(truthScrollFrame.current);
+        truthScrollFrame.current = null;
+      }
+    };
+  }, [activeView, orderedTruthPosts.length]);
+
+  useEffect(() => {
     if (!focusRequest || focusRequest.view !== "truth") return;
+    if (activeViewProp && activeViewProp !== "truth") return;
 
     setActiveView("truth");
     const targetIndex = orderedTruthPosts.findIndex(
@@ -5411,18 +6218,52 @@ export function MainScreen({
     if (targetIndex >= 0) {
       setCurrentTruthIndex(targetIndex);
     }
-  }, [focusRequest, orderedTruthPosts]);
+  }, [activeViewProp, focusRequest, orderedTruthPosts]);
+
+  useEffect(() => {
+    if (
+      !focusRequest ||
+      focusRequest.view !== "truth" ||
+      (activeViewProp && activeViewProp !== "truth") ||
+      activeView !== "truth"
+    ) {
+      return;
+    }
+
+    const targetIndex = orderedTruthPosts.findIndex(
+      (truth) => truth.id === focusRequest.post.id,
+    );
+
+    if (targetIndex < 0) return;
+
+    setCurrentTruthIndex(targetIndex);
+
+    const frame = window.requestAnimationFrame(() => {
+      const container = truthReelContainerRef.current;
+      if (!container) return;
+      container.scrollTo({
+        top: container.clientHeight * targetIndex,
+        behavior: "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeView, activeViewProp, focusRequest, orderedTruthPosts]);
+
 
   useEffect(() => {
     if (!focusRequest || focusRequest.view !== "dares") return;
+    if (activeViewProp && activeViewProp !== "dares") return;
 
     setActiveView("dares");
-  }, [focusRequest]);
+    setDareAudience("friends");
+  }, [activeViewProp, focusRequest]);
 
   useEffect(() => {
     if (
       !focusRequest ||
       focusRequest.view !== "dares" ||
+      (activeViewProp && activeViewProp !== "dares") ||
       activeView !== "dares"
     ) {
       return;
@@ -5434,6 +6275,7 @@ export function MainScreen({
 
     if (targetIndex < 0) return;
 
+    setDareAudience("friends");
     setActiveReelIndex(targetIndex);
 
     const frame = window.requestAnimationFrame(() => {
@@ -5446,7 +6288,7 @@ export function MainScreen({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [activeView, focusRequest, sortedDarePosts]);
+  }, [activeView, activeViewProp, focusRequest, sortedDarePosts]);
 
   useEffect(() => {
     if (activeView === "truth") {
@@ -5468,33 +6310,59 @@ export function MainScreen({
     window.scrollTo(0, 0);
 
     if (activeView === "dares") {
+      setDareAudience(initialDareAudience);
       setActiveReelIndex(0);
       if (reelContainerRef.current) reelContainerRef.current.scrollTop = 0;
       return;
     }
 
     setCurrentTruthIndex(0);
-    setTruthDeckDrag(0);
-  }, [activeView, isActive, setTruthDeckDrag]);
+    if (truthReelContainerRef.current) truthReelContainerRef.current.scrollTop = 0;
+  }, [activeView, initialDareAudience, isActive, resetKey]);
+
+  useEffect(() => {
+    if (activeView !== "dares") return;
+
+    setActiveReelIndex(0);
+    activeReelIndexRef.current = 0;
+    if (reelContainerRef.current) {
+      reelContainerRef.current.scrollTop = 0;
+    }
+  }, [activeView, dareAudience]);
 
   const onTouchStart = (e: React.TouchEvent) => {
-    setTouchEnd(null);
-    setTouchStart(e.targetTouches[0].clientX);
-    setTouchStartY(e.targetTouches[0].clientY);
+    const touch = e.targetTouches[0];
+    mainTouchStartX.current = touch.clientX;
+    mainTouchStartY.current = touch.clientY;
+    mainTouchLastX.current = touch.clientX;
+    mainTouchLastY.current = touch.clientY;
   };
   const onTouchMove = (e: React.TouchEvent) => {
-    setTouchEnd(e.targetTouches[0].clientX);
-    setTouchEndY(e.targetTouches[0].clientY);
+    const touch = e.targetTouches[0];
+    mainTouchLastX.current = touch.clientX;
+    mainTouchLastY.current = touch.clientY;
   };
   const onTouchEnd = () => {
+    const touchStart = mainTouchStartX.current;
+    const touchEnd = mainTouchLastX.current;
+    const touchStartY = mainTouchStartY.current;
+    const touchEndY = mainTouchLastY.current;
+    mainTouchStartX.current = null;
+    mainTouchStartY.current = null;
+    mainTouchLastX.current = null;
+    mainTouchLastY.current = null;
+
     if (
-      !touchStart ||
-      !touchEnd ||
-      !touchStartY ||
-      !touchEndY ||
-      isTransitioning
-    )
+      touchStart === null ||
+      touchEnd === null ||
+      touchStartY === null ||
+      touchEndY === null ||
+      isTransitioning ||
+      !canSwitchViewsInternally
+    ) {
       return;
+    }
+
     const distanceX = touchStart - touchEnd;
     const distanceY = Math.abs(touchStartY - touchEndY);
     if (Math.abs(distanceX) > minSwipeDistance && distanceX > distanceY * 0.6) {
@@ -5506,26 +6374,70 @@ export function MainScreen({
   };
 
   const NavHeader = () => (
-    <div className="nav-header" style={{ flexShrink: 0, paddingTop: 0 }}>
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="relative"></div>
-          <div className="flex items-center space-x-3"></div>
-        </div>
-        <div className="nav-tabs">
-          <button
-            onClick={() => setActiveView("dares")}
-            className={`nav-tab ${activeView === "dares" ? "active" : ""}`}
-          >
-            Dares
-          </button>
-          <button
-            onClick={() => setActiveView("truth")}
-            className={`nav-tab ${activeView === "truth" ? "active" : ""}`}
-          >
-            Truth
-          </button>
-        </div>
+    <div
+      className="nav-header"
+      style={{
+        flexShrink: 0,
+        paddingTop: "calc(var(--safe-area-top) + 12px)",
+        background:
+          "radial-gradient(circle at 50% -40%, rgba(74,222,128,0.18), transparent 58%), linear-gradient(180deg, rgba(10,15,11,0.98), rgba(4,7,5,0.94))",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        boxShadow: "0 20px 54px rgba(0,0,0,0.38)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(74,222,128,0))]" />
+      <div className="px-4 pb-4">
+        {showViewToggle ? (
+          <div className="mx-auto grid max-w-sm grid-cols-2 rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.94),rgba(10,14,10,0.98))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <button
+              onClick={() => setActiveView("dares")}
+              className={`rounded-full px-4 py-3 text-sm font-black transition-all duration-200 ${
+                activeView === "dares"
+                  ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_26px_rgba(74,222,128,0.3),inset_0_1px_0_rgba(255,255,255,0.3)]"
+                  : "text-[#94a3b8] hover:bg-white/[0.04] hover:text-white"
+              }`}
+            >
+              Dares
+            </button>
+            <button
+              onClick={() => setActiveView("truth")}
+              className={`rounded-full px-4 py-3 text-sm font-black transition-all duration-200 ${
+                activeView === "truth"
+                  ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_26px_rgba(74,222,128,0.3),inset_0_1px_0_rgba(255,255,255,0.3)]"
+                  : "text-[#94a3b8] hover:bg-white/[0.04] hover:text-white"
+              }`}
+            >
+              Truth
+            </button>
+          </div>
+        ) : activeView === "dares" ? (
+          <div className="mx-auto grid max-w-sm grid-cols-2 rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.9),rgba(10,14,10,0.96))] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.045)]">
+            {(["friends", "community"] as const).map((section) => (
+              <button
+                key={section}
+                type="button"
+                onClick={() => setDareAudience(section)}
+                className={`rounded-full px-4 py-2.5 text-sm font-black capitalize transition-all duration-200 ${
+                  dareAudience === section
+                    ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_24px_rgba(74,222,128,0.26),inset_0_1px_0_rgba(255,255,255,0.28)]"
+                    : "text-[#94a3b8] hover:bg-white/[0.04] hover:text-white"
+                }`}
+              >
+                {section}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-sm items-center justify-center rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.94),rgba(10,14,10,0.98))] px-4 py-3 shadow-[0_24px_70px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <span className="text-sm font-black uppercase tracking-[0.18em] text-[#d7ffe6]">
+              {activeView === "truth" ? "Truth" : "Feed"}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -5537,9 +6449,21 @@ export function MainScreen({
         transition: isTransitioning ? "transform 0.3s ease-out" : "none",
         touchAction: "auto",
       }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      onTouchStart={
+        activeView === "dares" && canSwitchViewsInternally
+          ? onTouchStart
+          : undefined
+      }
+      onTouchMove={
+        activeView === "dares" && canSwitchViewsInternally
+          ? onTouchMove
+          : undefined
+      }
+      onTouchEnd={
+        activeView === "dares" && canSwitchViewsInternally
+          ? onTouchEnd
+          : undefined
+      }
     >
       {activeView === "dares" ? (
         <div
@@ -5548,96 +6472,52 @@ export function MainScreen({
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            background: "#0a0a0a",
+            background:
+              "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.14), transparent 34%), linear-gradient(180deg, #060806 0%, #030403 100%)",
           }}
         >
           <NavHeader />
-          <div
-            ref={reelContainerRef}
-            onWheel={handleDareReelWheel}
-            onTouchStart={handleDareReelTouchStart}
-            onTouchEnd={handleDareReelTouchEnd}
-            onTouchCancel={handleDareReelTouchCancel}
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              overflowX: "hidden",
-              scrollSnapType: "y mandatory",
-              scrollBehavior: "smooth",
-              WebkitOverflowScrolling: "touch",
-              overscrollBehavior: "contain",
-              touchAction: "pan-y",
-            }}
-          >
+          {dareAudience === "friends" ? (
             <div
-              data-reel-index="0"
+              ref={reelContainerRef}
               style={{
-                height: "100%",
-                minHeight: "100%",
-                scrollSnapAlign: "start",
-                scrollSnapStop: "always",
-                overflow: "hidden",
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                overflowX: "hidden",
+                scrollSnapType: "y mandatory",
+                scrollBehavior: "auto",
+                WebkitOverflowScrolling: "touch",
+                overscrollBehavior: "contain",
+                touchAction: "pan-y",
+                contain: "layout paint style",
+                willChange: "scroll-position",
               }}
             >
-              {sortedDarePosts[0] ? (
-                <DareCard
-                  dare={sortedDarePosts[0]}
-                  reelMode
-                  isActive={isDareScreenVisible && activeReelIndex === 0}
-                  hasPlayedEntryAnimation={hasPlayedDareEntryAnimation(
-                    sortedDarePosts[0].id,
-                  )}
-                  playEntryAnimation={shouldPlayDareEntryAnimation(
-                    sortedDarePosts[0].id,
-                    isDareScreenVisible && activeReelIndex === 0,
-                  )}
-                  onVoteClick={handleVoteClick}
-                  onFullscreenMedia={handleFullscreenMedia}
-                  onOpenComments={handleOpenComments}
-                  onOpenShare={handleOpenShare}
-                  onVote={handleDareVote}
-                  onNavigateToProfile={_onNavigateToProfile}
-                />
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    height: "100%",
-                    color: "rgba(255,255,255,0.6)",
-                  }}
-                >
-                  {loadingDares ? "Loading dares..." : "No approved dares yet"}
-                </div>
-              )}
-            </div>
-            {sortedDarePosts
-              .slice(1)
-              .filter((dare) => dare && dare.id)
-              .map((dare, i) => (
-                <div
-                  key={dare.id}
-                  data-reel-index={String(i + 1)}
-                  style={{
-                    height: "100%",
-                    minHeight: "100%",
-                    scrollSnapAlign: "start",
-                    scrollSnapStop: "always",
-                    overflow: "hidden",
-                  }}
-                >
+              <div
+                data-reel-index="0"
+                style={{
+                  height: "100%",
+                  minHeight: "100%",
+                  scrollSnapAlign: "start",
+                  scrollSnapStop: "always",
+                  overflow: "hidden",
+                  contain: "layout paint style",
+                  transform: "translateZ(0)",
+                  backfaceVisibility: "hidden",
+                }}
+              >
+                {sortedDarePosts[0] ? (
                   <DareCard
-                    dare={dare}
+                    dare={sortedDarePosts[0]}
                     reelMode
-                    isActive={isDareScreenVisible && activeReelIndex === i + 1}
+                    isActive={isDareScreenVisible && activeReelIndex === 0}
                     hasPlayedEntryAnimation={hasPlayedDareEntryAnimation(
-                      dare.id,
+                      sortedDarePosts[0].id,
                     )}
                     playEntryAnimation={shouldPlayDareEntryAnimation(
-                      dare.id,
-                      isDareScreenVisible && activeReelIndex === i + 1,
+                      sortedDarePosts[0].id,
+                      isDareScreenVisible && activeReelIndex === 0,
                     )}
                     onVoteClick={handleVoteClick}
                     onFullscreenMedia={handleFullscreenMedia}
@@ -5645,10 +6525,71 @@ export function MainScreen({
                     onOpenShare={handleOpenShare}
                     onVote={handleDareVote}
                     onNavigateToProfile={_onNavigateToProfile}
+                    picModeEnabled={picModeEnabled}
+                    picModeAnimationKey={picModeAnimationKey}
                   />
-                </div>
-              ))}
-          </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      height: "100%",
+                      color: "rgba(255,255,255,0.6)",
+                    }}
+                  >
+                    {loadingDares ? "Loading dares..." : "No approved dares yet"}
+                  </div>
+                )}
+              </div>
+              {sortedDarePosts
+                .slice(1)
+                .filter((dare) => dare && dare.id)
+                .map((dare, i) => (
+                  <div
+                    key={dare.id}
+                    data-reel-index={String(i + 1)}
+                    style={{
+                      height: "100%",
+                      minHeight: "100%",
+                      scrollSnapAlign: "start",
+                      scrollSnapStop: "always",
+                      overflow: "hidden",
+                      contain: "layout paint style",
+                      transform: "translateZ(0)",
+                      backfaceVisibility: "hidden",
+                    }}
+                  >
+                    <DareCard
+                      dare={dare}
+                      reelMode
+                      isActive={isDareScreenVisible && activeReelIndex === i + 1}
+                      hasPlayedEntryAnimation={hasPlayedDareEntryAnimation(
+                        dare.id,
+                      )}
+                      playEntryAnimation={shouldPlayDareEntryAnimation(
+                        dare.id,
+                        isDareScreenVisible && activeReelIndex === i + 1,
+                      )}
+                      onVoteClick={handleVoteClick}
+                      onFullscreenMedia={handleFullscreenMedia}
+                      onOpenComments={handleOpenComments}
+                      onOpenShare={handleOpenShare}
+                      onVote={handleDareVote}
+                      onNavigateToProfile={_onNavigateToProfile}
+                      picModeEnabled={picModeEnabled}
+                      picModeAnimationKey={picModeAnimationKey}
+                    />
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <CommunityChallengeFeed
+              joinedChallengeIds={joinedCommunityChallengeIds}
+              onPreview={setSelectedCommunityChallenge}
+              onJoin={handleJoinCommunityChallenge}
+            />
+          )}
         </div>
       ) : (
         <div
@@ -5657,39 +6598,59 @@ export function MainScreen({
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            background: "#0a0a0a",
+            background:
+              "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.14), transparent 34%), linear-gradient(180deg, #060806 0%, #030403 100%)",
             paddingBottom: "calc(80px + var(--safe-area-bottom))",
           }}
         >
           <NavHeader />
           <div
-            ref={truthDeckRef}
+            ref={truthReelContainerRef}
+            data-active-truth-index={currentTruthIndex}
             style={{
               flex: 1,
-              position: "relative",
-              overflow: "hidden",
+              minHeight: 0,
+              overflowY: "auto",
+              overflowX: "hidden",
+              scrollSnapType: "y mandatory",
+              scrollBehavior: "smooth",
+              WebkitOverflowScrolling: "touch",
               touchAction: "pan-y",
               overscrollBehavior: "contain",
-              WebkitUserSelect: isTruthDragging ? "none" : undefined,
-              userSelect: isTruthDragging ? "none" : undefined,
+              contain: "layout paint style",
+              willChange: "scroll-position",
             }}
-            onTouchStart={handleTruthTouchStart}
-            onTouchMove={handleTruthTouchMove}
-            onTouchEnd={handleTruthTouchEnd}
-            onTouchCancel={handleTruthTouchCancel}
           >
             {orderedTruthPosts.length > 0 ? (
-              visibleTruthPosts.map(({ post, index }) => (
-                <SwipeableTruthCard
-                  key={`truth-card-${post.id}-${index}`}
-                  post={post}
-                  onVoteClick={handleTruthVoteClick}
-                  onOpenVoteModal={handleOpenTruthModal}
-                  cardIndex={index}
-                  currentIndex={effectiveTruthIndex}
-                  isDragging={isTruthDragging}
-                  onNavigateToProfile={_onNavigateToProfile}
-                />
+              orderedTruthPosts.map((post, index) => (
+                <div
+                  key={`truth-reel-${post.id}-${index}`}
+                  data-truth-reel-index={String(index)}
+                  style={{
+                    height: "100%",
+                    minHeight: "100%",
+                    scrollSnapAlign: "start",
+                    scrollSnapStop: "always",
+                    overflow: "hidden",
+                    position: "relative",
+                    contain: "layout paint style",
+                    transform: "translateZ(0)",
+                    backfaceVisibility: "hidden",
+                  }}
+                >
+                  <SwipeableTruthCard
+                    post={post}
+                    onVoteClick={handleTruthVoteClick}
+                    onOpenVoteModal={handleOpenTruthModal}
+                    onOpenConversation={setSelectedTruthConversation}
+                    cardIndex={0}
+                    currentIndex={0}
+                    isDragging={false}
+                    isCurrentCard={index === currentTruthIndex}
+                    lockInternalScroll
+                    onNavigateToProfile={_onNavigateToProfile}
+                  />
+                </div>
               ))
             ) : (
               <div
@@ -5828,6 +6789,37 @@ export function MainScreen({
         </div>
       )}
 
+      {selectedCommunityChallenge && (
+        <CommunityChallengePreviewScreen
+          challenge={selectedCommunityChallenge}
+          isJoined={joinedCommunityChallengeIds.has(
+            selectedCommunityChallenge.id,
+          )}
+          onClose={() => setSelectedCommunityChallenge(null)}
+          onJoin={() =>
+            handleJoinCommunityChallenge(selectedCommunityChallenge.id)
+          }
+          onOpenHub={() => {
+            setSelectedCommunityChallenge(null);
+            setShowCommunityChallengeHub(true);
+          }}
+        />
+      )}
+      {showCommunityChallengeHub && (
+        <div className="fixed inset-0 z-[10000] bg-[#030403]">
+          <ChallengeHubScreen
+            isActive
+            onBack={() => setShowCommunityChallengeHub(false)}
+          />
+        </div>
+      )}
+      {selectedTruthConversation && (
+        <TruthConversationScreen
+          post={selectedTruthConversation}
+          onClose={() => setSelectedTruthConversation(null)}
+          onNavigateToProfile={_onNavigateToProfile}
+        />
+      )}
       {selectedDare && (
         <DareVoteModal
           isOpen={showVoteModal}

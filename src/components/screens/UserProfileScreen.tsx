@@ -1329,25 +1329,41 @@ export function UserProfileScreen({
   const showFriendsButton = currentUser?.id !== userId && isFriend;
 
   return (
-    <div className="screen-container bg-[radial-gradient(circle_at_top,#162016_0%,#0b100b_38%,#070a07_100%)]">
+    <div
+      className="screen-container"
+      style={{
+        background:
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.12), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)",
+        fontFamily:
+          "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
+      }}
+    >
       {/* Header */}
-      <div className="safe-area-top sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
-        <div className="p-4">
-          <div className="flex items-center space-x-4">
+      <div
+        className="px-4"
+        style={{ paddingTop: "calc(var(--safe-area-top) + 12px)" }}
+      >
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={onBack}
-              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_18px_44px_rgba(0,0,0,0.32)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/8 hover:text-white"
+              aria-label="Back"
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={21} />
             </button>
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-bold text-white">
-                @{stripAtSymbol(profile.username || "user")}
-              </h1>
-              <p className="truncate text-xs uppercase tracking-[0.18em] text-[#64748b]">
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-[#86efac]">
+                <Users size={13} />
+                Dare Profile
+              </div>
+              <h1 className="truncate text-[32px] font-black leading-none text-white">
                 {profile.display_name || profile.username || "Profile"}
-              </p>
+              </h1>
             </div>
+          </div>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] border border-white/8 bg-white/[0.04] text-[#4ade80] shadow-[0_18px_44px_rgba(0,0,0,0.32)]">
+            <Users size={24} />
           </div>
         </div>
       </div>
@@ -1410,18 +1426,19 @@ export function UserProfileScreen({
       )}
 
       {/* Profile Content */}
-      <div className="custom-scrollbar flex-1 overflow-y-auto pb-[calc(var(--safe-area-bottom)+2rem)]">
+      <div className="custom-scrollbar flex-1 overflow-y-auto pb-[calc(var(--bottom-nav-total-height)+24px)]">
         {/* Avatar and Basic Info */}
-        <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-4 sm:px-5 sm:pt-5">
-          <div className="mb-4 overflow-hidden rounded-[26px] border border-white/6 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(16,19,16,0.98))] p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.26)] sm:rounded-[28px] sm:p-4">
-            <div className="pointer-events-none -mx-4 -mt-4 mb-4 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.32),transparent)]" />
+        <div className="mx-auto w-full max-w-4xl px-4 pb-4 sm:px-5">
+          <div className="relative mb-5 overflow-hidden rounded-[34px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,20,17,0.96),rgba(7,9,8,0.98))] p-5 shadow-[0_30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.82),rgba(74,222,128,0))]" />
+            <div className="pointer-events-none absolute right-[-40px] top-[-58px] h-44 w-44 rounded-full bg-[#4ade80]/10 blur-3xl" />
 
-            <div className="mb-3.5 flex items-start gap-3 sm:mb-4 sm:gap-4">
+            <div className="relative z-10 mb-5 flex items-start gap-4">
               <div className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAvatarPreview(true)}
-                  className="block rounded-full transition-transform duration-200 hover:scale-[1.02]"
+                  className="block rounded-full bg-[linear-gradient(135deg,rgba(74,222,128,0.9),rgba(255,255,255,0.18)_42%,rgba(96,165,250,0.38))] p-[3px] shadow-[0_12px_38px_rgba(0,0,0,0.45),0_0_28px_rgba(74,222,128,0.14)] transition-transform duration-200 hover:scale-[1.02]"
                 >
                   <Avatar
                     src={profile.avatar_url || ""}
@@ -1442,17 +1459,17 @@ export function UserProfileScreen({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <div className="inline-flex rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#86efac] sm:px-3 sm:text-[10px]">
+                  <div className="inline-flex rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[#86efac]">
                     Profile
                   </div>
                   {profile.created_at && (
-                    <div className="inline-flex rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#94a3b8] sm:px-3 sm:text-[10px]">
+                    <div className="inline-flex rounded-full border border-white/8 bg-white/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#94a3b8]">
                       {formatJoinDate(profile.created_at)}
                     </div>
                   )}
                 </div>
                 <div className="flex flex-col items-start gap-y-1 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-3">
-                  <h2 className="text-[22px] font-bold leading-none tracking-[-0.03em] text-white sm:text-[24px]">
+                  <h2 className="text-[26px] font-black leading-none text-white sm:text-[30px]">
                     {profile.display_name || profile.username}
                   </h2>
                   <button
@@ -1462,7 +1479,7 @@ export function UserProfileScreen({
                         onNavigateToProfile(userId);
                       }
                     }}
-                    className={`text-[15px] font-semibold text-[#4ade80] sm:text-sm ${
+                    className={`text-[15px] font-bold text-[#6ee7b7] sm:text-sm ${
                       onNavigateToProfile
                         ? "cursor-pointer hover:text-[#86efac]"
                         : "cursor-default"
@@ -1471,48 +1488,48 @@ export function UserProfileScreen({
                     @{stripAtSymbol(profile.username)}
                   </button>
                 </div>
-                <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-[#94a3b8] sm:text-sm">
+                <p className="mt-3 max-w-2xl text-[14px] font-semibold leading-relaxed text-[#94a3b8]">
                   {profile.bio || "No bio yet"}
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 rounded-[22px] border border-white/6 bg-[linear-gradient(180deg,rgba(18,22,18,0.98),rgba(12,15,12,0.98))] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:gap-2.5 sm:rounded-[24px] sm:p-2.5">
-              <div className="rounded-[18px] bg-white/[0.03] px-2 py-2.5 text-center sm:rounded-[20px] sm:px-3 sm:py-3">
-                <div className="mb-1 text-[18px] font-bold leading-none text-white sm:text-[20px]">
+            <div className="relative z-10 grid grid-cols-3 gap-2">
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.035] px-3 py-4 text-center shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
+                <div className="mb-1 text-[22px] font-black leading-none text-white">
                   {userFeedPosts.length}
                 </div>
-                <div className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[#64748b]">
                   Posts
                 </div>
               </div>
-              <div className="rounded-[18px] bg-white/[0.03] px-2 py-2.5 text-center sm:rounded-[20px] sm:px-3 sm:py-3">
-                <div className="mb-1 text-[18px] font-bold leading-none text-white sm:text-[20px]">
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.035] px-3 py-4 text-center shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
+                <div className="mb-1 text-[22px] font-black leading-none text-white">
                   {userAllDares.length}
                 </div>
-                <div className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[#64748b]">
                   Dares
                 </div>
               </div>
               <button
                 type="button"
-                className="rounded-[18px] border border-white/6 bg-white/[0.03] px-2 py-2.5 text-center transition-colors hover:border-[#4ade80]/18 hover:bg-[#202420] sm:rounded-[20px] sm:px-3 sm:py-3"
+                className="rounded-[22px] border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-4 text-center shadow-[0_18px_44px_rgba(0,0,0,0.18)] transition-colors hover:border-[#4ade80]/35 hover:bg-[#4ade80]/14"
                 onClick={() => {
                   setShowFriendsModal(true);
                   setLoadingFriends(true);
                   handleFriendsClick();
                 }}
               >
-                <div className="mb-1 text-[18px] font-bold leading-none text-white sm:text-[20px]">
+                <div className="mb-1 text-[22px] font-black leading-none text-white">
                   {friendsCount}
                 </div>
-                <div className="text-[10px] uppercase tracking-[0.14em] text-[#64748b]">
+                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[#86efac]">
                   Friends
                 </div>
               </button>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap">
+            <div className="relative z-10 mt-4 grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap">
               {showFriendButton && (
                 <button
                   onClick={handleSendFriendRequest}
@@ -1597,13 +1614,13 @@ export function UserProfileScreen({
           <>
             {/* Tab Navigation */}
             <div className="mx-auto w-full max-w-4xl px-5">
-              <div className="flex rounded-full border border-white/6 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(17,21,17,0.98))] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+              <div className="flex rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.92),rgba(10,14,10,0.96))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.05)]">
                 <button
                   onClick={() => setActiveTab("posts")}
-                  className={`flex-1 rounded-full px-3 py-3 text-center font-semibold transition-all sm:px-4 ${
+                  className={`flex-1 rounded-full px-3 py-3 text-center font-black transition-all sm:px-4 ${
                     activeTab === "posts"
-                      ? "bg-[#4ade80] text-black shadow-[0_10px_26px_rgba(74,222,128,0.24)]"
-                      : "text-[#64748b] hover:text-white"
+                      ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_26px_rgba(74,222,128,0.28)]"
+                      : "text-[#94a3b8] hover:text-white"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-1.5 sm:gap-2">
@@ -1615,10 +1632,10 @@ export function UserProfileScreen({
                   onClick={() => {
                     setActiveTab("truths");
                   }}
-                  className={`flex-1 rounded-full px-3 py-3 text-center font-semibold transition-all sm:px-4 ${
+                  className={`flex-1 rounded-full px-3 py-3 text-center font-black transition-all sm:px-4 ${
                     activeTab === "truths"
-                      ? "bg-[#4ade80] text-black shadow-[0_10px_26px_rgba(74,222,128,0.24)]"
-                      : "text-[#64748b] hover:text-white"
+                      ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_26px_rgba(74,222,128,0.28)]"
+                      : "text-[#94a3b8] hover:text-white"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-1.5 sm:gap-2">
@@ -1630,10 +1647,10 @@ export function UserProfileScreen({
                   onClick={() => {
                     setActiveTab("dares");
                   }}
-                  className={`flex-1 rounded-full px-3 py-3 text-center font-semibold transition-all sm:px-4 ${
+                  className={`flex-1 rounded-full px-3 py-3 text-center font-black transition-all sm:px-4 ${
                     activeTab === "dares"
-                      ? "bg-[#4ade80] text-black shadow-[0_10px_26px_rgba(74,222,128,0.24)]"
-                      : "text-[#64748b] hover:text-white"
+                      ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_26px_rgba(74,222,128,0.28)]"
+                      : "text-[#94a3b8] hover:text-white"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-1.5 sm:gap-2">
@@ -1647,14 +1664,14 @@ export function UserProfileScreen({
             {/* Tab Content */}
             <div className="mx-auto w-full max-w-4xl px-5 py-5">
               {activeTab === "posts" && (
-                <div>
+                <div className="rounded-[34px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,20,17,0.96),rgba(7,9,8,0.98))] p-4 shadow-[0_30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.04)]">
                   {userFeedPosts.length === 0 ? (
-                    <div className="rounded-[30px] border border-white/6 bg-[linear-gradient(180deg,rgba(22,26,22,0.98),rgba(15,18,15,0.98))] px-6 py-12 text-center">
-                      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-white/8 bg-white/5 text-[#64748b]">
+                    <div className="rounded-[28px] border border-white/8 bg-white/[0.035] px-6 py-12 text-center">
+                      <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-[28px] border border-white/8 bg-white/[0.04] text-[#64748b]">
                         <Grid3X3 size={26} />
                       </div>
-                      <p className="font-semibold text-white">No posts yet</p>
-                      <p className="mt-2 text-sm text-[#64748b]">
+                      <p className="text-lg font-black text-white">No posts yet</p>
+                      <p className="mt-2 text-sm font-semibold text-[#64748b]">
                         Posts will show up here once something gets shared.
                       </p>
                     </div>
@@ -1685,7 +1702,17 @@ export function UserProfileScreen({
               )}
 
               {activeTab === "truths" && (
-                <div style={{ padding: "10px 16px 24px" }}>
+                <div
+                  style={{
+                    padding: "20px",
+                    borderRadius: "34px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background:
+                      "linear-gradient(180deg, rgba(16,20,17,0.96), rgba(7,9,8,0.98))",
+                    boxShadow:
+                      "0 30px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+                  }}
+                >
                   {loadingPublishedTruths ? (
                     <div
                       style={{
@@ -1777,11 +1804,11 @@ export function UserProfileScreen({
                               animationDelay: `${index * 0.04}s`,
                               width: "100%",
                               background:
-                                "linear-gradient(135deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))",
+                                "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))",
                               border: "1px solid rgba(255,255,255,0.08)",
                               borderLeft: `3px solid ${badge.color}`,
-                              borderRadius: "20px",
-                              padding: "24px 28px",
+                              borderRadius: "24px",
+                              padding: "22px 24px",
                               color: "#fff",
                               cursor: "pointer",
                               display: "flex",
@@ -1903,7 +1930,17 @@ export function UserProfileScreen({
               )}
 
               {activeTab === "dares" && (
-                <div style={{ padding: "10px 16px 24px" }}>
+                <div
+                  style={{
+                    padding: "20px",
+                    borderRadius: "34px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background:
+                      "linear-gradient(180deg, rgba(16,20,17,0.96), rgba(7,9,8,0.98))",
+                    boxShadow:
+                      "0 30px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+                  }}
+                >
                   {loadingPublishedDares ? (
                     <div
                       style={{
@@ -1999,11 +2036,11 @@ export function UserProfileScreen({
                               animationDelay: `${index * 0.04}s`,
                               width: "100%",
                               background:
-                                "linear-gradient(135deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))",
+                                "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))",
                               border: "1px solid rgba(255,255,255,0.08)",
                               borderLeft: `3px solid ${badge.color}`,
-                              borderRadius: "20px",
-                              padding: "24px 28px",
+                              borderRadius: "24px",
+                              padding: "22px 24px",
                               color: "#fff",
                               cursor: "pointer",
                               display: "flex",
@@ -2336,3 +2373,5 @@ export function UserProfileScreen({
     </div>
   );
 }
+
+

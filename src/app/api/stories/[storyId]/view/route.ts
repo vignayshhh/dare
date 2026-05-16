@@ -4,6 +4,24 @@ import { withSecurity } from "../../../_lib/withSecurity";
 import { adminDb, FieldValue } from "../../../_lib/admin";
 import { LIMITS } from "../../../_lib/rateLimit";
 
+function normalizeViewerViewCounts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const counts: Record<string, number> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([userId, count]) => {
+    if (typeof count !== "number" || !Number.isFinite(count)) return;
+
+    const normalizedCount = Math.max(0, Math.floor(count));
+    if (normalizedCount > 0) {
+      counts[userId] = normalizedCount;
+    }
+  });
+
+  return counts;
+}
+
 async function areAcceptedFriends(userA: string, userB: string): Promise<boolean> {
   const [forward, reverse] = await Promise.all([
     adminDb
@@ -53,13 +71,25 @@ export const POST = withSecurity(
     }
 
     const viewers = Array.isArray(story.viewers) ? story.viewers : [];
+    const viewerViewCounts = normalizeViewerViewCounts(story.viewerViewCounts);
+    const currentViewerCount =
+      viewerViewCounts[ctx.uid] ?? (viewers.includes(ctx.uid) ? 1 : 0);
+    const nextViewerViewCounts = {
+      ...viewerViewCounts,
+      [ctx.uid]: currentViewerCount + 1,
+    };
+
     if (viewers.includes(ctx.uid)) {
+      await storyRef.update({
+        viewerViewCounts: nextViewerViewCounts,
+      });
       return NextResponse.json({ ok: true, duplicate: true });
     }
 
     await storyRef.update({
       viewers: FieldValue.arrayUnion(ctx.uid),
       viewCount: FieldValue.increment(1),
+      viewerViewCounts: nextViewerViewCounts,
     });
 
     return NextResponse.json({ ok: true });

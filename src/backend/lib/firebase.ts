@@ -1,5 +1,4 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getAuth } from "firebase/auth";
 import {
   getFirestore,
@@ -84,8 +83,6 @@ let realtimeDb: any = null;
 let storage: any = null;
 let firebaseInitialized = false;
 let firebaseInitError: Error | null = null;
-const appCheckDebugSetting =
-  process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_DEBUG?.trim() || "";
 
 // Lazy initialization function to prevent module-level hanging on mobile
 function initializeFirebase() {
@@ -98,43 +95,6 @@ function initializeFirebase() {
       app = initializeApp(firebaseConfig);
     } else {
       app = getApp();
-    }
-
-    // SECURITY: Initialize Firebase App Check (reCAPTCHA v3) in the browser only.
-    // Enable by setting NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY in your env after
-    // configuring App Check in Firebase Console -> App Check -> Register app.
-    // Until the env var is set, this is a silent no-op.
-    // Skip on mobile to prevent hanging on reCAPTCHA loading (mobile browsers can
-    // have issues with reCAPTCHA v3, and the allowedDevOrigins fix in next.config.js
-    // resolves the real mobile touch issue)
-    const isMobile =
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent,
-      );
-    if (
-      typeof window !== "undefined" &&
-      process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY &&
-      !isMobile
-    ) {
-      try {
-        // Debug token for local development — set window.FIREBASE_APPCHECK_DEBUG_TOKEN
-        // to true before this runs, then copy the token printed in console to the
-        // Firebase Console -> App Check -> Debug tokens list.
-        if (process.env.NODE_ENV === "development" && appCheckDebugSetting) {
-          (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN =
-            appCheckDebugSetting === "true"
-              ? true
-              : appCheckDebugSetting;
-        }
-        initializeAppCheck(app, {
-          provider: new ReCaptchaV3Provider(
-            process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY,
-          ),
-          isTokenAutoRefreshEnabled: true,
-        });
-      } catch (e) {
-        console.warn("App Check init failed (continuing without):", e);
-      }
     }
 
     auth = getAuth(app);

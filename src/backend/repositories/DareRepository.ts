@@ -34,6 +34,7 @@ export class DareRepository implements IDareRepository {
         state: "SENT",
         proof_media_url: null,
         proof_media_type: null,
+        proof_thumbnail_url: null,
         challenger_vote: null,
         validation_threshold_met: false,
         created_at: serverTimestamp(),
@@ -153,6 +154,10 @@ export class DareRepository implements IDareRepository {
         firestoreUpdates.proof_media_type = updates.proofMediaType;
       }
 
+      if (updates.proofThumbnailUrl !== undefined) {
+        firestoreUpdates.proof_thumbnail_url = updates.proofThumbnailUrl;
+      }
+
       if (updates.challengerVote !== undefined) {
         firestoreUpdates.challenger_vote = updates.challengerVote;
       }
@@ -175,11 +180,13 @@ export class DareRepository implements IDareRepository {
     dareId: string,
     mediaUrl: string,
     mediaType: "TEXT" | "PHOTO" | "VIDEO",
+    thumbnailUrl?: string,
   ): Promise<Dare> {
     return this.updateDare(dareId, {
       state: "PROOF_SUBMITTED",
       proofMediaUrl: mediaUrl,
       proofMediaType: mediaType,
+      proofThumbnailUrl: thumbnailUrl,
     });
   }
 
@@ -339,6 +346,7 @@ export class DareRepository implements IDareRepository {
       state: data.state,
       proofMediaUrl: data.proof_media_url,
       proofMediaType: data.proof_media_type,
+      proofThumbnailUrl: data.proof_thumbnail_url || null,
       challengerVote: data.challenger_vote,
       validationThresholdMet: data.validation_threshold_met,
       createdAt: data.created_at,

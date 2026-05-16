@@ -20,6 +20,24 @@ function toIsoString(value: unknown): string {
   return new Date().toISOString();
 }
 
+function normalizeViewerViewCounts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const counts: Record<string, number> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([userId, count]) => {
+    if (typeof count !== "number" || !Number.isFinite(count)) return;
+
+    const normalizedCount = Math.max(0, Math.floor(count));
+    if (normalizedCount > 0) {
+      counts[userId] = normalizedCount;
+    }
+  });
+
+  return counts;
+}
+
 export const GET = withSecurity(
   { rateLimit: LIMITS.FEED_FETCH, skipCsrf: true },
   async (_req, ctx) => {
@@ -77,6 +95,7 @@ export const GET = withSecurity(
           expiresAt: toIsoString(data.expiresAt),
           viewCount: data.viewCount || 0,
           viewers,
+          viewerViewCounts: normalizeViewerViewCounts(data.viewerViewCounts),
           author: {
             id: data.userId,
             username: `@user_${String(data.userId || "").slice(0, 8)}`,

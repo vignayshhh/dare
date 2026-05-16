@@ -304,7 +304,7 @@ function ActivityCard({
             "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.08), rgba(255,255,255,0))",
           transform: "skewX(-18deg)",
           pointerEvents: "none",
-          animation: `sheenSweep 4.8s ease-in-out infinite`,
+          animation: `sheenSweep 7.4s ease-in-out infinite`,
           animationDelay: `${index * 0.22}s`,
         }}
       />
@@ -663,7 +663,7 @@ export function ActivityScreen({
           position: "sticky",
           top: 0,
           zIndex: 40,
-          padding: "calc(18px + env(safe-area-inset-top, 0px)) 16px 16px",
+          padding: "calc(18px + var(--safe-area-top)) 16px 16px",
           background:
             "linear-gradient(180deg, rgba(3,3,3,0.98) 0%, rgba(3,3,3,0.92) 78%, rgba(3,3,3,0.82) 100%)",
           backdropFilter: "blur(18px)",
@@ -1066,7 +1066,8 @@ export function ActivityScreen({
         }
         @keyframes sheenSweep {
           0% { transform: translateX(-140%) skewX(-18deg); opacity: 0; }
-          20% { opacity: 0.18; }
+          16% { opacity: 0.18; }
+          44% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
           100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
         }
         @keyframes statFloat {

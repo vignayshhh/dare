@@ -1811,11 +1811,17 @@ function GuestMainShareSheet({
 
 export function GuestMainScreen({
   onNavigateToProfile,
+  activeView: activeViewProp,
+  showViewToggle = true,
 }: {
   onNavigateToProfile?: (userId: string) => void;
+  activeView?: "truth" | "dares";
+  showViewToggle?: boolean;
 }) {
   const currentGuestUser = guestUsers[0];
-  const [activeView, setActiveView] = useState<"truth" | "dares">("dares");
+  const [activeView, setActiveView] = useState<"truth" | "dares">(
+    activeViewProp ?? "dares",
+  );
   const [activeReelIndex, setActiveReelIndex] = useState(0);
   const [fullscreenMedia, setFullscreenMedia] = useState<{
     url: string;
@@ -1855,6 +1861,13 @@ export function GuestMainScreen({
   const truthVelocityY = useRef(0);
   const truthDragFrame = useRef<number | null>(null);
   const truthCanDragDeck = useRef(false);
+  const canSwitchViewsInternally = showViewToggle;
+
+  useEffect(() => {
+    if (!activeViewProp) return;
+    setActiveView(activeViewProp);
+    setIsTransitioning(false);
+  }, [activeViewProp]);
 
   const displayTruthPosts = useMemo(() => buildTruthPosts(), []);
   const displayDarePosts = useMemo(() => buildDarePosts(), []);
@@ -2027,24 +2040,32 @@ export function GuestMainScreen({
       className="nav-header"
       style={{
         flexShrink: 0,
-        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingTop: "var(--safe-area-top)",
       }}
     >
       <div style={{ padding: "8px 14px 10px" }}>
-        <div className="nav-tabs">
-          <button
-            onClick={() => setActiveView("dares")}
-            className={`nav-tab ${activeView === "dares" ? "active" : ""}`}
-          >
-            Dares
-          </button>
-          <button
-            onClick={() => setActiveView("truth")}
-            className={`nav-tab ${activeView === "truth" ? "active" : ""}`}
-          >
-            Truth
-          </button>
-        </div>
+        {showViewToggle ? (
+          <div className="nav-tabs">
+            <button
+              onClick={() => setActiveView("dares")}
+              className={`nav-tab ${activeView === "dares" ? "active" : ""}`}
+            >
+              Dares
+            </button>
+            <button
+              onClick={() => setActiveView("truth")}
+              className={`nav-tab ${activeView === "truth" ? "active" : ""}`}
+            >
+              Truth
+            </button>
+          </div>
+        ) : (
+          <div className="nav-tabs grid-cols-1">
+            <div className="nav-tab active pointer-events-none">
+              {activeView === "truth" ? "Truth" : "Feed"}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2054,7 +2075,8 @@ export function GuestMainScreen({
       className="screen-container"
       style={{
         transition: isTransitioning ? "transform 0.3s ease-out" : "none",
-        touchAction: activeView === "dares" ? "none" : "auto",
+        touchAction:
+          activeView === "dares" && canSwitchViewsInternally ? "none" : "auto",
       }}
       onTouchStart={(e) => {
         setTouchStart(e.targetTouches[0].clientX);
@@ -2071,7 +2093,11 @@ export function GuestMainScreen({
         if (isTransitioning) return;
         const distanceX = touchStart - touchEnd;
         const distanceY = Math.abs(touchStartY - touchEndY);
-        if (Math.abs(distanceX) > minSwipeDistance && distanceX > distanceY * 0.6) {
+        if (
+          canSwitchViewsInternally &&
+          Math.abs(distanceX) > minSwipeDistance &&
+          distanceX > distanceY * 0.6
+        ) {
           setIsTransitioning(true);
           if (distanceX > 0) setActiveView("truth");
           else setActiveView("dares");

@@ -28,12 +28,14 @@ class OptimizedFeedService {
   private readonly friendIdsTtlMs = 5 * 60 * 1000;
   private readonly authorDetailsTtlMs = 15 * 60 * 1000;
   private readonly engagementTtlMs = 5 * 60 * 1000;
+  private readonly localUserLikesTtlMs = 30 * 24 * 60 * 60 * 1000;
   // Enable visibility-based subscription unloading to reduce Firebase reads for inactive tabs
   private readonly enableVisibilityUnloading = true; // Set to true to enable
   private userLikedPostIds = new Map<
     string,
     { ids: Set<string>; expiresAt: number }
   >();
+  private userLikesRefreshInFlight = new Map<string, Promise<Set<string>>>();
   private readonly userLikesTtlMs = 5 * 60 * 1000;
   private friendIdsCache = new Map<
     string,
@@ -105,11 +107,138 @@ class OptimizedFeedService {
     return this.authReadyPromise;
   }
 
+  private getLocalUserLikesKey(userId: string): string {
+    return `dare:user-liked-posts:${userId}`;
+  }
+
+  private readLocalUserLikes(userId: string): Set<string> | null {
+    if (typeof window === "undefined") return null;
+
+    try {
+      const raw = window.localStorage.getItem(this.getLocalUserLikesKey(userId));
+      if (!raw) return null;
+
+      const parsed = JSON.parse(raw) as {
+        ids?: unknown;
+        updatedAt?: unknown;
+      };
+      if (!Array.isArray(parsed.ids) || typeof parsed.updatedAt !== "number") {
+        return null;
+      }
+      if (Date.now() - parsed.updatedAt > this.localUserLikesTtlMs) {
+        window.localStorage.removeItem(this.getLocalUserLikesKey(userId));
+        return null;
+      }
+
+      return new Set(
+        parsed.ids.filter((id): id is string => typeof id === "string"),
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private writeLocalUserLikes(userId: string, ids: Set<string>): void {
+    if (typeof window === "undefined") return;
+
+    try {
+      window.localStorage.setItem(
+        this.getLocalUserLikesKey(userId),
+        JSON.stringify({
+          ids: Array.from(ids).slice(0, 500),
+          updatedAt: Date.now(),
+        }),
+      );
+    } catch {
+      // Local storage may be unavailable/private; server hydration still works.
+    }
+  }
+
+  private cacheUserLikes(
+    userId: string,
+    ids: Set<string>,
+    ttlMs = this.userLikesTtlMs,
+  ): void {
+    this.userLikedPostIds.set(userId, {
+      ids,
+      expiresAt: Date.now() + ttlMs,
+    });
+    this.writeLocalUserLikes(userId, ids);
+  }
+
+  private refreshUserLikesFromServer(userId: string): Promise<Set<string>> {
+    const inFlight = this.userLikesRefreshInFlight.get(userId);
+    if (inFlight) return inFlight;
+
+    const refresh = (async () => {
+      const authReady = await this.waitForAuthReady();
+      if (!authReady) {
+        console.warn(
+          `⚠️ [preloadUserLikes] auth not ready within timeout for ${userId}; using local cache`,
+        );
+        return this.readLocalUserLikes(userId) ?? new Set<string>();
+      }
+
+      try {
+        const cacheKey = `likes:${userId}`;
+        const cached = await redisCache.get<string[]>(cacheKey);
+        if (cached) {
+          const ids = new Set(cached);
+          this.cacheUserLikes(userId, ids);
+          return ids;
+        }
+
+        const q = query(
+          collection(db, "post_likes"),
+          where("user_id", "==", userId),
+          firestoreLimit(200),
+        );
+        const snap = await getDocsFromServer(q);
+        const ids = new Set<string>();
+        snap.forEach((d) => ids.add(d.data().post_id));
+        console.log(
+          `🔄 [preloadUserLikes] server fetch -> ${ids.size} liked post(s) for user ${userId}`,
+          Array.from(ids),
+        );
+        this.cacheUserLikes(userId, ids);
+        redisCache.set(cacheKey, Array.from(ids), 300).catch(() => {});
+        return ids;
+      } catch (error) {
+        console.error(
+          `❌ [preloadUserLikes] query failed for user ${userId}:`,
+          error,
+        );
+        return this.readLocalUserLikes(userId) ?? new Set<string>();
+      }
+    })().finally(() => {
+      this.userLikesRefreshInFlight.delete(userId);
+    });
+
+    this.userLikesRefreshInFlight.set(userId, refresh);
+    return refresh;
+  }
+
+  getCachedLikedPostIds(userId: string): Set<string> {
+    const cached = this.userLikedPostIds.get(userId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return new Set(cached.ids);
+    }
+
+    return this.readLocalUserLikes(userId) ?? new Set<string>();
+  }
+
   private async preloadUserLikes(userId: string): Promise<Set<string>> {
     const now = Date.now();
     const cached = this.userLikedPostIds.get(userId);
     if (cached && cached.expiresAt > now) {
       return cached.ids;
+    }
+
+    const localLikes = this.readLocalUserLikes(userId);
+    if (localLikes) {
+      this.cacheUserLikes(userId, localLikes);
+      this.refreshUserLikesFromServer(userId).catch(() => {});
+      return localLikes;
     }
 
     // CRITICAL: wait for Firebase Auth to restore on the client before
@@ -131,10 +260,7 @@ class OptimizedFeedService {
       const cached = await redisCache.get<string[]>(cacheKey);
       if (cached) {
         const ids = new Set(cached);
-        this.userLikedPostIds.set(userId, {
-          ids,
-          expiresAt: now + this.userLikesTtlMs,
-        });
+        this.cacheUserLikes(userId, ids);
         return ids;
       }
 
@@ -157,10 +283,7 @@ class OptimizedFeedService {
         `🔄 [preloadUserLikes] server fetch \u2192 ${ids.size} liked post(s) for user ${userId}`,
         Array.from(ids),
       );
-      this.userLikedPostIds.set(userId, {
-        ids,
-        expiresAt: now + this.userLikesTtlMs,
-      });
+      this.cacheUserLikes(userId, ids);
 
       // Cache in Redis with 5min TTL
       redisCache.set(cacheKey, Array.from(ids), 300).catch(() => {});
@@ -178,47 +301,76 @@ class OptimizedFeedService {
   // Called by optimistic like/unlike to keep preloaded cache in sync
   updateLikeCache(userId: string, postId: string, liked: boolean): void {
     const cached = this.userLikedPostIds.get(userId);
-    if (cached) {
-      if (liked) {
-        cached.ids.add(postId);
-      } else {
-        cached.ids.delete(postId);
-      }
+    const ids = new Set(cached?.ids ?? this.readLocalUserLikes(userId) ?? []);
+
+    if (liked) {
+      ids.add(postId);
+    } else {
+      ids.delete(postId);
     }
+
+    this.cacheUserLikes(userId, ids);
   }
 
   private async rehydrateCachedFeedLikes<
-    T extends { id: string; is_liked_by_user?: boolean; likes_count?: number },
+    T extends {
+      id: string;
+      is_liked_by_user?: boolean;
+      likes_count?: number;
+      comments_count?: number;
+    },
   >(posts: T[], userId: string): Promise<T[]> {
     if (posts.length === 0) return posts;
 
     const likedPostIds = await this.preloadUserLikes(userId);
+    const zeroLikesPostIds = posts
+      .filter((post) => post.likes_count === 0)
+      .map((post) => post.id);
+    const zeroCommentsPostIds = posts
+      .filter((post) => post.comments_count === 0)
+      .map((post) => post.id);
 
-    // Fetch fresh like counts from aggregated counters for all posts
-    // to ensure cached posts show correct counts immediately
-    const postIds = posts.map((p) => p.id);
-    const likeCounts = await Promise.all(
-      postIds.map((postId) => aggregatedCounters.getCounter(postId, "likes")),
+    const [zeroLikeCounts, zeroCommentCounts] = await Promise.all([
+      Promise.all(
+        zeroLikesPostIds.map((postId) =>
+          aggregatedCounters.getCounter(postId, "likes"),
+        ),
+      ),
+      Promise.all(
+        zeroCommentsPostIds.map((postId) =>
+          aggregatedCounters.getCounter(postId, "comments"),
+        ),
+      ),
+    ]);
+    const zeroLikeCountMap = new Map<string, number>(
+      zeroLikesPostIds.map((postId, index) => [
+        postId,
+        zeroLikeCounts[index] ?? 0,
+      ]),
+    );
+    const zeroCommentCountMap = new Map<string, number>(
+      zeroCommentsPostIds.map((postId, index) => [
+        postId,
+        zeroCommentCounts[index] ?? 0,
+      ]),
     );
 
-    const likeCountMap = new Map<string, number>();
-    postIds.forEach((postId, index) => {
-      likeCountMap.set(postId, likeCounts[index]);
-    });
-
-    return posts.map((post) => {
-      const freshLikeCount = likeCountMap.get(post.id) ?? 0;
-      // Use Math.max to prefer the fresh count but fall back to cached if fresh is 0
-      const finalLikeCount = Math.max(
-        freshLikeCount,
-        typeof post.likes_count === "number" ? post.likes_count : 0,
-      );
-      return {
-        ...post,
-        is_liked_by_user: likedPostIds.has(post.id),
-        likes_count: finalLikeCount,
-      };
-    });
+    return posts.map((post) => ({
+      ...post,
+      is_liked_by_user: likedPostIds.has(post.id),
+      likes_count:
+        post.likes_count === 0
+          ? (zeroLikeCountMap.get(post.id) ?? 0)
+          : typeof post.likes_count === "number"
+            ? post.likes_count
+            : 0,
+      comments_count:
+        post.comments_count === 0
+          ? (zeroCommentCountMap.get(post.id) ?? 0)
+          : typeof post.comments_count === "number"
+            ? post.comments_count
+            : 0,
+    }));
   }
 
   private normalizeTimestamp(value: any): string {
@@ -404,41 +556,69 @@ class OptimizedFeedService {
       });
     });
 
-    // Load authoritative counts from aggregated counters for all posts.
-    // aggregatedCounters.getCounter falls back to counting the actual
-    // post_likes / post_comments documents when the counter doc is missing,
-    // so this works even for legacy posts whose denormalized `likes_count`
-    // on the `posts` doc is stale (e.g. Cloud Function trigger not yet
-    // running when the like was created). This is what fixes "count only
+    // Modern posts carry live denormalized counters on the post document.
     // shows correctly after opening the likes modal" — the modal path
-    // counted docs directly while the feed path trusted the stale
-    // denormalized field.
-    const [commentsCounts, likesCounts] = await Promise.all([
+    // Trust those fields here so a feed snapshot does not fan out into
+    // per-post counter reads. Only legacy posts without counter fields use
+    // the batched fallback queries above.
+    const zeroLikesPostIds = missingEngagementPostIds.filter((id) => {
+      const raw = rawPostsMap.get(id);
+      return (
+        typeof raw?.likes_count === "number" &&
+        typeof raw?.comments_count === "number" &&
+        raw.likes_count === 0
+      );
+    });
+    const zeroCommentsPostIds = missingEngagementPostIds.filter((id) => {
+      const raw = rawPostsMap.get(id);
+      return (
+        typeof raw?.likes_count === "number" &&
+        typeof raw?.comments_count === "number" &&
+        raw.comments_count === 0
+      );
+    });
+
+    const [zeroLikeCounts, zeroCommentCounts] = await Promise.all([
       Promise.all(
-        missingEngagementPostIds.map((postId) =>
-          aggregatedCounters.getCounter(postId, "comments"),
-        ),
-      ),
-      Promise.all(
-        missingEngagementPostIds.map((postId) =>
+        zeroLikesPostIds.map((postId) =>
           aggregatedCounters.getCounter(postId, "likes"),
         ),
       ),
+      Promise.all(
+        zeroCommentsPostIds.map((postId) =>
+          aggregatedCounters.getCounter(postId, "comments"),
+        ),
+      ),
     ]);
+    const zeroLikeCountMap = new Map<string, number>(
+      zeroLikesPostIds.map((postId, index) => [
+        postId,
+        zeroLikeCounts[index] ?? 0,
+      ]),
+    );
+    const zeroCommentCountMap = new Map<string, number>(
+      zeroCommentsPostIds.map((postId, index) => [
+        postId,
+        zeroCommentCounts[index] ?? 0,
+      ]),
+    );
 
-    missingEngagementPostIds.forEach((postId, index) => {
+    missingEngagementPostIds.forEach((postId) => {
       const raw = rawPostsMap.get(postId);
       const hasDenormalized =
         typeof raw?.likes_count === "number" &&
         typeof raw?.comments_count === "number";
 
       if (hasDenormalized) {
-        // Prefer the aggregated counter (which falls back to an actual
-        // post_likes count) over the denormalized field on the post doc,
-        // since the latter can be stale.
         const engagementData = {
-          likesCount: Math.max(raw.likes_count, likesCounts[index] ?? 0),
-          commentsCount: commentsCounts[index],
+          likesCount:
+            raw.likes_count === 0
+              ? (zeroLikeCountMap.get(postId) ?? 0)
+              : raw.likes_count,
+          commentsCount:
+            raw.comments_count === 0
+              ? (zeroCommentCountMap.get(postId) ?? 0)
+              : raw.comments_count,
           isLikedByUser: userLikedIds.has(postId),
         };
         this.engagementCache.set(`${postId}:${userId}`, {
@@ -449,10 +629,10 @@ class OptimizedFeedService {
         const cacheKey = `engagement:${postId}:${userId}`;
         redisCache.set(cacheKey, engagementData, 300).catch(() => {});
       } else {
-        // Legacy fallback - use aggregated counters for comments
+        // Legacy fallback for posts created before counters were denormalized.
         const engagementData = {
           likesCount: legacyLikesMap.get(postId)?.likesCount ?? 0,
-          commentsCount: commentsCounts[index],
+          commentsCount: legacyCommentsMap.get(postId) ?? 0,
           isLikedByUser: legacyLikesMap.get(postId)?.isLikedByUser ?? false,
         };
         this.engagementCache.set(`${postId}:${userId}`, {
@@ -729,11 +909,10 @@ class OptimizedFeedService {
           orderBy,
           limit,
           onSnapshot,
-          startAfter,
         } = await import("firebase/firestore");
         const { db } = await import("@/backend/lib/firebase");
 
-        let q = query(
+        const q = query(
           collection(db, "posts"),
           where("author_id", "in", queryAuthorIds),
           orderBy("created_at", "desc"),
@@ -809,7 +988,7 @@ class OptimizedFeedService {
       } = await import("firebase/firestore");
       const { db } = await import("@/backend/lib/firebase");
 
-      let q = query(
+      const q = query(
         collection(db, "posts"),
         where("author_id", "in", queryAuthorIds),
         orderBy("created_at", "desc"),

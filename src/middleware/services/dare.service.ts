@@ -16,6 +16,7 @@ export interface CreateDareRequest {
 export interface DareProof {
   media_url: string;
   media_type: "TEXT" | "PHOTO" | "VIDEO";
+  thumbnail_url?: string;
 }
 
 export interface DareWithUsers {
@@ -40,6 +41,7 @@ export interface DareWithUsers {
   ghost_mode_until?: string | null;
   proof_media_url?: string | null;
   proof_media_type?: "TEXT" | "PHOTO" | "VIDEO" | null;
+  proof_thumbnail_url?: string | null;
   challenger?: {
     id: string;
     user_id: string;
@@ -80,6 +82,7 @@ function toCompatDare(dare: DareEntity): DareWithUsers {
     ghost_mode_until: dare.ghostModeUntil,
     proof_media_url: dare.proofMediaUrl,
     proof_media_type: dare.proofMediaType,
+    proof_thumbnail_url: dare.proofThumbnailUrl,
   };
 }
 
@@ -174,6 +177,7 @@ class DareServiceCompat {
       receiverId,
       proof.media_url,
       proof.media_type,
+      proof.thumbnail_url,
     );
     if (!response.success) throw new Error(response.error || "Failed to submit proof");
   }

@@ -17,20 +17,38 @@ import {
   ThumbsDown,
   Send,
   Users,
+  MoreVertical,
+  Sparkles,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import {
   storyService,
   type StoryDTO,
   type StoryAudienceDTO,
+  type StoryAudienceScope,
 } from "../../middleware/services/story.service";
 import { storyReactionService } from "../../middleware/services/story-reaction.service";
 import {
+  createGeneratedStoryMusicPlayer,
   getStoryFilterPreset,
   getStoryMusicPreset,
 } from "../../utils/storyEnhancements";
 
 const STORY_DURATION = 5000;
+
+const mergeStoryAudience = (
+  previous: StoryAudienceDTO | undefined,
+  incoming: StoryAudienceDTO,
+  scope: StoryAudienceScope,
+): StoryAudienceDTO => {
+  if (scope === "all") return incoming;
+
+  return {
+    viewers: scope === "views" ? incoming.viewers : previous?.viewers ?? [],
+    likes: scope === "likes" ? incoming.likes : previous?.likes ?? [],
+    hates: scope === "hates" ? incoming.hates : previous?.hates ?? [],
+  };
+};
 
 const getStoryCreatedAtTime = (story: StoryDTO) => {
   const createdAt = new Date(story.createdAt).getTime();
@@ -50,60 +68,6 @@ const getAuthorStoryIndexes = (stories: StoryDTO[], authorId?: string) => {
     })
     .map(({ index }) => index);
 };
-
-function startGeneratedStoryMusic(musicId: string) {
-  const AudioContextCtor =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext;
-
-  if (!AudioContextCtor || musicId === "none") return null;
-
-  const context = new AudioContextCtor();
-  const master = context.createGain();
-  master.gain.value = 0.035;
-  master.connect(context.destination);
-
-  const patterns: Record<string, { notes: number[]; tempo: number; type: OscillatorType }> = {
-    pulse: { notes: [196, 247, 294, 247], tempo: 320, type: "sine" },
-    glow: { notes: [330, 392, 494, 587], tempo: 520, type: "triangle" },
-    afterhours: { notes: [110, 147, 165, 147], tempo: 420, type: "sine" },
-  };
-  const pattern = patterns[musicId] || patterns.pulse;
-  let step = 0;
-
-  const playNote = () => {
-    if (context.state === "suspended") {
-      void context.resume();
-    }
-
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const now = context.currentTime;
-
-    oscillator.type = pattern.type;
-    oscillator.frequency.value = pattern.notes[step % pattern.notes.length];
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
-
-    oscillator.connect(gain);
-    gain.connect(master);
-    oscillator.start(now);
-    oscillator.stop(now + 0.24);
-    step += 1;
-  };
-
-  playNote();
-  const timer = window.setInterval(playNote, pattern.tempo);
-
-  return {
-    stop: () => {
-      window.clearInterval(timer);
-      void context.close();
-    },
-  };
-}
 
 interface StoryViewerProps {
   stories: StoryDTO[];
@@ -164,6 +128,7 @@ export function StoryViewer({
   const [audienceByStoryId, setAudienceByStoryId] = useState<
     Record<string, StoryAudienceDTO | undefined>
   >({});
+  const [showOwnerOptions, setShowOwnerOptions] = useState(false);
 
   const replyInputRef = useRef<HTMLInputElement | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -180,6 +145,7 @@ export function StoryViewer({
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const touchStartTime = useRef(0);
+  const activeMediaGestureRef = useRef(false);
   const suppressClickUntilRef = useRef(0);
   const onCloseRef = useRef(onClose);
 
@@ -199,7 +165,12 @@ export function StoryViewer({
   const mediaLoaded = mediaKey !== null && loadedMediaKey === mediaKey;
   const reaction = reactionMap[story?.id] ?? null;
   const storyAudience = story ? audienceByStoryId[story.id] : undefined;
-  const shouldPauseStory = isPaused || replyFocused || sendingReply;
+  const shouldPauseStory =
+    isPaused ||
+    replyFocused ||
+    sendingReply ||
+    showAudienceSheet ||
+    showOwnerOptions;
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setVisible(true));
@@ -255,6 +226,11 @@ export function StoryViewer({
         return sameAuthorNextIndex;
       }
 
+      if (isOwner) {
+        handleClose();
+        return index;
+      }
+
       if (index < storiesLengthRef.current - 1) {
         resetStoryProgress();
         return index + 1;
@@ -262,7 +238,7 @@ export function StoryViewer({
       handleClose();
       return index;
     });
-  }, [getAdjacentSameAuthorStoryIndex, handleClose, resetStoryProgress]);
+  }, [getAdjacentSameAuthorStoryIndex, handleClose, isOwner, resetStoryProgress]);
 
   const goPrev = useCallback(() => {
     setCurrentIndex((index) => {
@@ -272,13 +248,17 @@ export function StoryViewer({
         return sameAuthorPrevIndex;
       }
 
+      if (isOwner) {
+        return index;
+      }
+
       if (index > 0) {
         resetStoryProgress();
         return index - 1;
       }
       return index;
     });
-  }, [getAdjacentSameAuthorStoryIndex, resetStoryProgress]);
+  }, [getAdjacentSameAuthorStoryIndex, isOwner, resetStoryProgress]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -424,6 +404,7 @@ export function StoryViewer({
 
   useEffect(() => {
     setShowAudienceSheet(false);
+    setShowOwnerOptions(false);
   }, [story?.id]);
 
   useEffect(() => {
@@ -440,7 +421,10 @@ export function StoryViewer({
     const musicId = currentStoryMusicId;
     if (!musicId || musicId === "none" || shouldPauseStory || isMuted) return;
 
-    const player = startGeneratedStoryMusic(musicId);
+    const player = createGeneratedStoryMusicPlayer(musicId, {
+      masterGain: 0.035,
+      noteDurationMs: 240,
+    });
     return () => player?.stop();
   }, [currentStoryId, currentStoryMusicId, isMuted, shouldPauseStory]);
 
@@ -461,15 +445,48 @@ export function StoryViewer({
     return () => window.removeEventListener("keydown", handler);
   }, [goNext, goPrev, handleClose]);
 
+  const isStoryNavigationTarget = (target: EventTarget | null) =>
+    target instanceof HTMLElement &&
+    !target.closest(
+      'button, input, textarea, [role="dialog"], [data-story-interactive="true"]',
+    );
+
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
+  const resetTouchGesture = () => {
+    activeMediaGestureRef.current = false;
+    touchStartX.current = 0;
+    touchStartY.current = 0;
+    touchStartTime.current = 0;
+    clearHoldTimer();
+    setIsPaused(false);
+  };
+
   const onTouchStart = (event: React.TouchEvent) => {
+    if (!isStoryNavigationTarget(event.target)) {
+      resetTouchGesture();
+      return;
+    }
+    activeMediaGestureRef.current = true;
     touchStartX.current = event.touches[0].clientX;
     touchStartY.current = event.touches[0].clientY;
     touchStartTime.current = Date.now();
+    clearHoldTimer();
     holdTimerRef.current = setTimeout(() => setIsPaused(true), 120);
   };
 
   const onTouchEnd = (event: React.TouchEvent) => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    if (!activeMediaGestureRef.current) {
+      resetTouchGesture();
+      return;
+    }
+    activeMediaGestureRef.current = false;
+    clearHoldTimer();
     setIsPaused(false);
 
     const dx = event.changedTouches[0].clientX - touchStartX.current;
@@ -503,23 +520,34 @@ export function StoryViewer({
     }
   };
 
-  const onMouseDown = () => {
+  const onTouchCancel = () => {
+    resetTouchGesture();
+  };
+
+  const onMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isStoryNavigationTarget(event.target)) {
+      resetTouchGesture();
+      return;
+    }
+    activeMediaGestureRef.current = true;
+    clearHoldTimer();
     holdTimerRef.current = setTimeout(() => setIsPaused(true), 150);
   };
 
   const onMouseUp = () => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    activeMediaGestureRef.current = false;
+    clearHoldTimer();
     setIsPaused(false);
   };
 
   const onMouseLeave = () => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    setIsPaused(false);
+    resetTouchGesture();
   };
 
   const onClickZone = (event: React.MouseEvent<HTMLDivElement>) => {
     if (Date.now() < suppressClickUntilRef.current) return;
     if ((event.target as HTMLElement).closest("button, input, textarea")) return;
+    if (!isStoryNavigationTarget(event.target)) return;
 
     const x = event.clientX;
     const width = event.currentTarget.clientWidth;
@@ -599,29 +627,33 @@ export function StoryViewer({
     }
   }, [onReply, replyText, sendingReply, story]);
 
+  const loadAudienceForTab = useCallback(
+    async (tab: AudienceTab = "views") => {
+      if (!story) return;
+
+      setAudienceLoading(true);
+      try {
+        const audience = await storyService.getStoryAudience(story.id, tab);
+        setAudienceByStoryId((prev) => ({
+          ...prev,
+          [story.id]: mergeStoryAudience(prev[story.id], audience, tab),
+        }));
+      } finally {
+        setAudienceLoading(false);
+      }
+    },
+    [story],
+  );
+
   const openAudienceSheet = useCallback(
     async (tab: AudienceTab = "views") => {
       if (!story) return;
 
       setAudienceTab(tab);
       setShowAudienceSheet(true);
-
-      if (audienceByStoryId[story.id]) {
-        return;
-      }
-
-      setAudienceLoading(true);
-      try {
-        const audience = await storyService.getStoryAudience(story.id);
-        setAudienceByStoryId((prev) => ({
-          ...prev,
-          [story.id]: audience,
-        }));
-      } finally {
-        setAudienceLoading(false);
-      }
+      await loadAudienceForTab(tab);
     },
-    [audienceByStoryId, story],
+    [loadAudienceForTab, story],
   );
 
   if (!story) return null;
@@ -638,6 +670,11 @@ export function StoryViewer({
       : audienceTab === "hates"
         ? storyAudience?.hates ?? []
         : storyAudience?.viewers ?? [];
+  const totalViewerOpens =
+    storyAudience?.viewers.reduce(
+      (total, entry) => total + Math.max(1, entry.viewCount || 1),
+      0,
+    ) ?? story.viewCount;
   const shellStyle: React.CSSProperties = {
     maxWidth: 430,
     width: "100%",
@@ -694,12 +731,16 @@ export function StoryViewer({
         style={shellStyle}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchCancel}
         onMouseDown={onMouseDown}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
         onClick={onClickZone}
       >
-        <div className="absolute left-0 right-0 top-0 z-40 px-2 pt-[calc(env(safe-area-inset-top,0px)+8px)]">
+        <div
+          className="absolute left-0 right-0 top-0 z-40 px-2"
+          style={{ paddingTop: "calc(var(--safe-area-top) + 8px)" }}
+        >
           {shouldSegmentProgress ? (
             <div
               key={`${progressKey}-${currentStoryId ?? currentIndex}`}
@@ -755,6 +796,7 @@ export function StoryViewer({
           {isVideo ? (
             <video
               key={mediaKey ?? story.id}
+              data-story-media="true"
               ref={videoRef}
               src={story.media.url || undefined}
               className={mediaClassName}
@@ -779,7 +821,7 @@ export function StoryViewer({
               onEnded={goNext}
               onTimeUpdate={onTimeUpdate}
               style={{
-                pointerEvents: "none",
+                pointerEvents: "auto",
                 maxHeight: "100dvh",
                 filter: filterPreset.cssFilter,
               }}
@@ -787,6 +829,7 @@ export function StoryViewer({
           ) : (
             <img
               key={mediaKey ?? story.id}
+              data-story-media="true"
               src={story.media.url || undefined}
               alt={story.caption ?? "Story"}
               className={mediaClassName}
@@ -802,7 +845,7 @@ export function StoryViewer({
                 }
               }}
               style={{
-                pointerEvents: "none",
+                pointerEvents: "auto",
                 maxHeight: "100dvh",
                 filter: filterPreset.cssFilter,
               }}
@@ -847,8 +890,43 @@ export function StoryViewer({
           />
         </div>
 
-        <div className="pointer-events-none absolute left-0 right-0 top-0 z-30 flex items-center justify-between px-3 pb-6 pt-[calc(env(safe-area-inset-top,0px)+28px)]">
+        <div
+          className="pointer-events-none absolute left-0 right-0 top-0 z-30 flex items-center justify-between px-3 pb-6"
+          style={{ paddingTop: "calc(var(--safe-area-top) + 28px)" }}
+        >
           <div className="pointer-events-auto flex items-center gap-2.5">
+            {isOwner && onDelete && (
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowOwnerOptions((value) => !value);
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/40 text-white backdrop-blur-sm transition-transform active:scale-95"
+                  aria-label="Story options"
+                >
+                  <MoreVertical size={16} />
+                </button>
+                {showOwnerOptions && (
+                  <div className="absolute left-0 top-10 w-40 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(21,26,22,0.98),rgba(8,11,9,0.98))] p-1.5 shadow-[0_18px_36px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setShowOwnerOptions(false);
+                        onDelete(story.id);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-red-300 transition-colors active:scale-[0.98]"
+                      style={{ background: "rgba(248,113,113,0.1)" }}
+                    >
+                      <Trash2 size={13} />
+                      Delete story
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <button
               type="button"
               className="relative shrink-0"
@@ -943,34 +1021,23 @@ export function StoryViewer({
           }}
         >
           {isOwner ? (
-            <div className="pointer-events-auto flex items-center justify-between pb-1">
+            <div className="pointer-events-auto flex items-center justify-between gap-3 pb-1">
               <button
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   void openAudienceSheet("views");
                 }}
-                className="flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm transition-transform active:scale-95"
+                aria-label={`View story viewers, ${story.viewCount} ${
+                  story.viewCount === 1 ? "person" : "people"
+                }`}
+                className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-[linear-gradient(180deg,rgba(25,31,26,0.88),rgba(9,12,10,0.9))] text-[#a8f0bf] shadow-[0_16px_34px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md transition-all active:scale-95"
               >
-                <Eye size={13} style={{ color: "#00ff88" }} />
-                <span className="text-xs font-semibold text-white/80">
-                  {story.viewCount} {story.viewCount === 1 ? "view" : "views"}
-                </span>
+                <Users
+                  size={17}
+                  className="transition-colors group-hover:text-[#c7f8d4]"
+                />
               </button>
-              {onDelete && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete(story.id);
-                  }}
-                  className="flex items-center gap-1.5 rounded-full border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-400 transition-transform active:scale-95"
-                  style={{ background: "rgba(255,68,68,0.15)" }}
-                >
-                  <Trash2 size={12} />
-                  Delete
-                </button>
-              )}
             </div>
           ) : (
             <div
@@ -1124,102 +1191,162 @@ export function StoryViewer({
 
         {showAudienceSheet && isOwner && (
           <div
-            className="app-modal-backdrop absolute inset-0 z-[70] flex items-end bg-black/70"
+            className="app-modal-backdrop absolute inset-0 z-[70] flex items-end bg-black/78 backdrop-blur-[2px]"
             onClick={() => setShowAudienceSheet(false)}
           >
             <div
-              className="app-modal-sheet w-full rounded-t-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,18,0.98),rgba(10,12,10,0.99))] px-4 pb-[calc(var(--safe-area-bottom)+18px)] pt-4 shadow-[0_-20px_40px_rgba(0,0,0,0.38)]"
+              className="app-modal-sheet flex max-h-[78dvh] w-full flex-col rounded-t-[34px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,20,17,0.98),rgba(7,9,8,0.99))] shadow-[0_-30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.04)]"
               onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Story viewers"
             >
-              <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/15" />
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-white">Story Activity</p>
-                  <p className="text-xs text-white/45">
-                    Views, likes, and hates for this story
-                  </p>
+              <div className="mx-auto mt-3 h-1 w-12 shrink-0 rounded-full bg-white/15" />
+              <div className="app-modal-sheet-content relative px-4 pb-[calc(var(--safe-area-bottom)+16px)] pt-4">
+                <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.82),rgba(74,222,128,0))]" />
+                <div className="pointer-events-none absolute left-1/2 top-16 h-36 w-36 -translate-x-1/2 rounded-full bg-[#4ade80]/10 blur-3xl" />
+
+                <div className="relative z-10 mb-4 flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#4ade80] shadow-[0_18px_44px_rgba(0,0,0,0.32)]">
+                      <Eye size={21} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#86efac]">
+                        <Sparkles size={11} />
+                        Story activity
+                      </div>
+                      <p className="truncate text-xl font-black leading-none text-white">
+                        Viewers
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAudienceSheet(false)}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_18px_44px_rgba(0,0,0,0.26)] transition-colors active:scale-95"
+                    aria-label="Close story viewers"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAudienceSheet(false)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/75"
+
+                <div className="relative z-10 mb-4 overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.92),rgba(10,14,10,0.96))] p-3 shadow-[0_24px_70px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)]">
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        ["views", "Views", audienceCounts.views, <Users size={13} key="views" />],
+                        ["likes", "Likes", audienceCounts.likes, <Heart size={13} key="likes" />],
+                        ["hates", "Hates", audienceCounts.hates, <ThumbsDown size={13} key="hates" />],
+                      ] as Array<[AudienceTab, string, number, React.ReactNode]>
+                    ).map(([tabKey, label, count, icon]) => {
+                      const active = audienceTab === tabKey;
+                      return (
+                        <button
+                          key={tabKey}
+                          type="button"
+                          onClick={() => {
+                            setAudienceTab(tabKey);
+                            void loadAudienceForTab(tabKey);
+                          }}
+                          className={`rounded-[22px] border px-3 py-3 text-left transition-all ${
+                            active
+                              ? "border-[#4ade80]/35 bg-[#4ade80]/12 text-white shadow-[0_12px_30px_rgba(74,222,128,0.14)]"
+                              : "border-white/8 bg-white/[0.04] text-[#94a3b8]"
+                          }`}
+                        >
+                          <div
+                            className={`mb-2 flex items-center gap-2 ${
+                              active ? "text-[#86efac]" : "text-[#64748b]"
+                            }`}
+                          >
+                            {icon}
+                            <span className="text-[10px] font-black uppercase tracking-[0.14em]">
+                              {label}
+                            </span>
+                          </div>
+                          <div className="text-xl font-black text-white">
+                            {count}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {audienceTab === "views" && audienceCounts.views > 0 && (
+                    <div className="mt-3 flex items-center justify-between rounded-[22px] border border-[#4ade80]/18 bg-[#4ade80]/10 px-3.5 py-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#86efac]">
+                          Total opens
+                        </p>
+                        <p className="mt-0.5 text-xs font-semibold text-[#94a3b8]">
+                          Includes repeat story views
+                        </p>
+                      </div>
+                      <span className="text-lg font-black text-white">
+                        {totalViewerOpens}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  className="app-modal-sheet-scroll relative z-10 pr-0.5"
+                  style={{ WebkitOverflowScrolling: "touch" }}
                 >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="mb-4 grid grid-cols-3 gap-2">
-                {(
-                  [
-                    ["views", "Views", audienceCounts.views, <Users size={13} key="views" />],
-                    ["likes", "Likes", audienceCounts.likes, <Heart size={13} key="likes" />],
-                    ["hates", "Hates", audienceCounts.hates, <ThumbsDown size={13} key="hates" />],
-                  ] as Array<[AudienceTab, string, number, React.ReactNode]>
-                ).map(([tabKey, label, count, icon]) => {
-                  const active = audienceTab === tabKey;
-                  return (
-                    <button
-                      key={tabKey}
-                      type="button"
-                      onClick={() => setAudienceTab(tabKey)}
-                      className={`rounded-[22px] border px-3 py-3 text-left transition-all ${
-                        active
-                          ? "border-[#4ade80]/30 bg-[#4ade80]/10"
-                          : "border-white/8 bg-white/[0.03]"
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center gap-2 text-white/70">
-                        {icon}
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
-                          {label}
-                        </span>
+                  {audienceLoading && !storyAudience ? (
+                    <div className="flex items-center justify-center rounded-[28px] border border-white/8 bg-white/[0.035] py-10 text-sm font-semibold text-[#94a3b8]">
+                      Loading story activity...
+                    </div>
+                  ) : audienceEntries.length === 0 ? (
+                    <div className="rounded-[28px] border border-white/8 bg-white/[0.035] px-4 py-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#64748b]">
+                        <Users size={20} />
                       </div>
-                      <div className="text-lg font-bold text-white">{count}</div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="max-h-[42vh] overflow-y-auto">
-                {audienceLoading && !storyAudience ? (
-                  <div className="flex items-center justify-center py-10 text-sm text-white/55">
-                    Loading story activity...
-                  </div>
-                ) : audienceEntries.length === 0 ? (
-                  <div className="rounded-[24px] border border-white/8 bg-white/[0.03] px-4 py-8 text-center">
-                    <p className="text-sm font-semibold text-white/80">
-                      No {audienceTab} yet
-                    </p>
-                    <p className="mt-1 text-xs text-white/45">
-                      This story does not have any {audienceTab} to show right now.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {audienceEntries.map((entry) => (
-                      <div
-                        key={`${audienceTab}-${entry.userId}`}
-                        className="flex items-center gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] px-3.5 py-3"
-                      >
-                        <Avatar
-                          src={entry.avatar}
-                          alt={entry.displayName}
-                          userId={entry.userId}
-                          username={entry.username}
-                          size="sm"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-white">
-                            {entry.username}
-                          </p>
-                          <p className="truncate text-xs text-white/45">
-                            {entry.displayName}
-                          </p>
+                      <p className="text-sm font-black text-white/85">
+                        No {audienceTab} yet
+                      </p>
+                      <p className="mt-1 text-xs font-semibold text-[#64748b]">
+                        Activity will appear here as people interact.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 pb-1">
+                      {audienceEntries.map((entry) => (
+                        <div
+                          key={`${audienceTab}-${entry.userId}`}
+                          className="flex items-center gap-3 rounded-[24px] border border-white/8 bg-white/[0.04] px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                        >
+                          <Avatar
+                            src={entry.avatar}
+                            alt={entry.displayName}
+                            userId={entry.userId}
+                            username={entry.username}
+                            size="sm"
+                            className="ring-1 ring-[#4ade80]/16"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-black text-white">
+                              {entry.username}
+                            </p>
+                            <p className="truncate text-xs font-semibold text-[#64748b]">
+                              {entry.displayName}
+                            </p>
+                          </div>
+                          {audienceTab === "views" ? (
+                            <div className="shrink-0 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1 text-xs font-black text-[#86efac]">
+                              {Math.max(1, entry.viewCount || 1)}x
+                            </div>
+                          ) : (
+                            <div className="shrink-0 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-bold text-[#94a3b8]">
+                              {audienceTab === "likes" ? "Liked" : "Hated"}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

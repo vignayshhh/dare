@@ -79,6 +79,14 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
+    match /challenge-room-proofs/{userId}/{fileName=**} {
+      // Community challenge room proofs are visible inside signed-in room feeds.
+      // Writes stay owner-scoped and MIME / size restricted.
+      allow read: if isSignedIn();
+      allow write, create: if isOwner(userId) && isImageOrVideo() && underMaxMedia() && isSafeFileName();
+      allow delete: if isOwner(userId);
+    }
+
     match /stories/{userId}/{fileName=**} {
       // SECURITY: Stories - only owner can read to prevent unauthorized access
       // Application layer handles story access control based on friendship

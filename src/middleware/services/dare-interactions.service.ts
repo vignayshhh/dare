@@ -69,6 +69,13 @@ export interface DareVoteData {
   userVote: "REAL" | "FAKE" | null;
 }
 
+export interface DareMediaLike {
+  id: string;
+  dareId: string;
+  userId: string;
+  createdAt: string;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 class DareInteractionsService {
@@ -158,6 +165,50 @@ class DareInteractionsService {
   }
 
   // ── Comments ────────────────────────────────────────────────────────────
+
+  /** Like a dare media item. Idempotent: one like doc per user per dare. */
+  async likeMedia(dareId: string, userId: string): Promise<void> {
+    try {
+      const likeRef = doc(db, "dare_media_likes", `${dareId}_${userId}`);
+      const existing = await getDoc(likeRef);
+      if (existing.exists()) return;
+
+      await setDoc(likeRef, {
+        dare_id: dareId,
+        user_id: userId,
+        created_at: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("❌ likeMedia:", error);
+      throw error;
+    }
+  }
+
+  /** Subscribe to real-time media like count for a dare. */
+  subscribeToMediaLikeCount(
+    dareId: string,
+    callback: (count: number) => void,
+  ): Unsubscribe {
+    const q = query(
+      collection(db, "dare_media_likes"),
+      where("dare_id", "==", dareId),
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.size);
+    });
+  }
+
+  /** Subscribe to whether the current user already liked this dare media. */
+  subscribeToUserMediaLike(
+    dareId: string,
+    userId: string,
+    callback: (liked: boolean) => void,
+  ): Unsubscribe {
+    const likeRef = doc(db, "dare_media_likes", `${dareId}_${userId}`);
+    return onSnapshot(likeRef, (snap) => {
+      callback(snap.exists());
+    });
+  }
 
   /** Add a comment to a dare. */
   async addComment(

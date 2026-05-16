@@ -20,6 +20,11 @@ import {
   type ChatSwitchSignal,
 } from "../../middleware/services/messaging.service";
 import {
+  chatInviteService,
+  type ChatInvite,
+} from "../../middleware/services/chat-invite.service";
+import { friendsService } from "../../middleware/services/service-factory";
+import {
   isSharedStoryPreviewActive,
   parseSharedPostPayload,
   parseSharedStoryPayload,
@@ -27,7 +32,16 @@ import {
   type SharedStoryPayload,
 } from "../../utils/sharedPostMessage";
 import { uploadOptimizedMedia } from "../../utils/mediaUpload";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Reply,
+  Search,
+  UserMinus,
+  UserPlus,
+  X,
+} from "lucide-react";
 
 type From = "me" | "them";
 type Status = "seen" | "delivered" | "screenshot";
@@ -37,7 +51,8 @@ type EvType =
   | "opened_noreply"
   | "long_unsent"
   | "mention"
-  | "ignored";
+  | "ignored"
+  | "invite";
 
 interface Msg {
   id: string;
@@ -88,6 +103,15 @@ interface OptimisticPhotoMessage {
   failed?: boolean;
 }
 
+interface OptimisticTextMessage {
+  id: string;
+  conversationId: string;
+  text: string;
+  replyTo: ReplyTarget | null;
+  createdAt: number;
+  failed?: boolean;
+}
+
 const FRIEND = {
   name: "Nina Creates",
   avatar: "https://picsum.photos/seed/nina/100/100",
@@ -95,7 +119,11 @@ const FRIEND = {
 
 function summarizeMessageForReply(msg: Msg): string {
   const trimmed = msg.text.trim();
-  if (trimmed && !/^photo$/i.test(trimmed) && !/^\d+\s+photos$/i.test(trimmed)) {
+  if (
+    trimmed &&
+    !/^photo$/i.test(trimmed) &&
+    !/^\d+\s+photos$/i.test(trimmed)
+  ) {
     return trimmed.length > 96 ? `${trimmed.slice(0, 96)}...` : trimmed;
   }
   if (msg.photoUrls.length > 1) return `${msg.photoUrls.length} photos`;
@@ -108,6 +136,120 @@ function summarizeMessageForReply(msg: Msg): string {
 function replyPreviewLabel(replyTo: ReplyTarget): string {
   if (replyTo.mediaType === "PHOTO") return replyTo.content || "Photo";
   return replyTo.content || "Message";
+}
+
+function getBrowserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function parsePresenceTimestamp(value: unknown): number | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) ? time : null;
+  }
+  if (typeof value === "number") {
+    const time = value < 10_000_000_000 ? value * 1000 : value;
+    return Number.isFinite(time) ? time : null;
+  }
+  if (typeof value === "string") {
+    const time = Date.parse(value);
+    return Number.isFinite(time) ? time : null;
+  }
+  if (typeof value === "object") {
+    const timestamp = value as {
+      seconds?: number;
+      nanoseconds?: number;
+      toDate?: () => Date;
+    };
+    if (typeof timestamp.toDate === "function") {
+      const time = timestamp.toDate().getTime();
+      return Number.isFinite(time) ? time : null;
+    }
+    if (typeof timestamp.seconds === "number") {
+      const time =
+        timestamp.seconds * 1000 +
+        Math.floor((timestamp.nanoseconds ?? 0) / 1_000_000);
+      return Number.isFinite(time) ? time : null;
+    }
+  }
+  return null;
+}
+
+function getDateKey(date: Date, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  }
+}
+
+function formatLastSeenLabel(
+  timestamp: number | null,
+  timeZone: string,
+): string {
+  if (!timestamp) return "OFFLINE";
+  const safeTimeZone = timeZone || getBrowserTimeZone();
+  const lastSeenDate = new Date(timestamp);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const timeFormatterOptions: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  };
+  const dateFormatterOptions: Intl.DateTimeFormatOptions = {
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+  };
+  const time = (() => {
+    try {
+      return new Intl.DateTimeFormat("en-US", {
+        ...timeFormatterOptions,
+        timeZone: safeTimeZone,
+      }).format(lastSeenDate);
+    } catch {
+      return new Intl.DateTimeFormat("en-US", timeFormatterOptions).format(
+        lastSeenDate,
+      );
+    }
+  })();
+
+  const seenKey = getDateKey(lastSeenDate, safeTimeZone);
+  const todayKey = getDateKey(now, safeTimeZone);
+  const yesterdayKey = getDateKey(yesterday, safeTimeZone);
+
+  if (seenKey === todayKey) return `last seen today at ${time}`;
+  if (seenKey === yesterdayKey) return `last seen yesterday at ${time}`;
+
+  const date = (() => {
+    try {
+      return new Intl.DateTimeFormat("en-US", {
+        ...dateFormatterOptions,
+        timeZone: safeTimeZone,
+      }).format(lastSeenDate);
+    } catch {
+      return new Intl.DateTimeFormat("en-US", dateFormatterOptions).format(
+        lastSeenDate,
+      );
+    }
+  })();
+  return `last seen ${date} at ${time}`;
 }
 
 // ─── Event label helpers ─────────────────────────────────────────────────────
@@ -214,6 +356,20 @@ const getIgnoredLabel = (text: string) => {
   );
 };
 
+const getInviteLabel = (text: string) => {
+  const m = text.match(
+    /^(.+?)\s+(was invited|has joined this conversation|was removed|left)$/i,
+  );
+  return m ? (
+    <span>
+      <span style={{ color: "#3df57f", fontWeight: 700 }}>{m[1]}</span>
+      <span style={{ color: "#888" }}> {m[2]}</span>
+    </span>
+  ) : (
+    <span style={{ color: "#888" }}>{text}</span>
+  );
+};
+
 const EV_CFG: Record<
   EvType,
   { icon: string; accent: string; label: (t: string) => React.ReactNode }
@@ -239,6 +395,11 @@ const EV_CFG: Record<
     icon: "🫥",
     accent: "#ff6b6b",
     label: (text: string) => getIgnoredLabel(text),
+  },
+  invite: {
+    icon: "+",
+    accent: "#3df57f",
+    label: getInviteLabel,
   },
 };
 
@@ -387,6 +548,7 @@ function SysLine({
         <span style={{ color: "#777" }}>{text}</span>
       );
     }
+    if (type === "invite") return getInviteLabel(text);
     if (type === "screenshot")
       return (
         <span>
@@ -484,7 +646,9 @@ function SysLine({
     >
       <div
         style={{
-          background: "#111",
+          background:
+            "linear-gradient(180deg, rgba(22,26,22,0.98), rgba(13,16,13,0.98))",
+          border: "1px solid rgba(255,255,255,0.08)",
           borderRadius: collapsed ? 50 : 22,
           padding: collapsed ? "7px 16px" : "20px 24px 18px",
           display: "flex",
@@ -512,7 +676,7 @@ function SysLine({
               width: 44,
               height: 44,
               borderRadius: "50%",
-              background: "#1a1a1a",
+              background: "rgba(255,255,255,0.045)",
               border: `1.5px solid ${cfg.accent}55`,
               display: "flex",
               alignItems: "center",
@@ -747,6 +911,11 @@ function StoryReplyCard({
     story ? isSharedStoryPreviewActive(story) : false,
   );
   const [storyDeleted, setStoryDeleted] = useState(false);
+  const [liveStoryMedia, setLiveStoryMedia] = useState<{
+    url?: string;
+    thumbnail?: string;
+  } | null>(null);
+  const [sharpPreviewLoaded, setSharpPreviewLoaded] = useState(false);
 
   useEffect(() => {
     if (!story) return;
@@ -772,25 +941,47 @@ function StoryReplyCard({
 
   useEffect(() => {
     setStoryDeleted(false);
+    setLiveStoryMedia(null);
     if (!story || !previewActive) return;
 
     const db = getFirestore();
     return onSnapshot(
       doc(db, "stories", story.storyId),
       (snapshot) => {
-        setStoryDeleted(!snapshot.exists());
+        const exists = snapshot.exists();
+        setStoryDeleted(!exists);
+        if (!exists) {
+          setLiveStoryMedia(null);
+          return;
+        }
+
+        const data = snapshot.data() as {
+          media?: { url?: string; thumbnail?: string };
+          mediaUrl?: string;
+          thumbnail?: string;
+        };
+        setLiveStoryMedia({
+          url: data.media?.url || data.mediaUrl || "",
+          thumbnail: data.media?.thumbnail || data.thumbnail || "",
+        });
       },
       () => {
         setStoryDeleted(false);
+        setLiveStoryMedia(null);
       },
     );
   }, [previewActive, story?.storyId]);
 
-  if (!story) return null;
-  const previewUrl = story.media.thumbnail || story.media.url || "";
+  const previewUrl =
+    liveStoryMedia?.url || story?.media.url || story?.media.thumbnail || "";
+  const previewPoster =
+    liveStoryMedia?.thumbnail || story?.media.thumbnail || previewUrl;
+  const hasSeparatePoster = Boolean(
+    previewPoster && previewPoster !== previewUrl,
+  );
   const hasPreview = previewActive && !storyDeleted && Boolean(previewUrl);
-  const isVideo = story.media.type === "video";
-  const replyText = story.replyText || msg.text;
+  const isVideo = story?.media.type === "video";
+  const replyText = story?.replyText || msg.text;
   const collapsedStoryLabel = storyDeleted
     ? "Story deleted"
     : previewActive
@@ -811,6 +1002,12 @@ function StoryReplyCard({
         borderTopLeftRadius: 4,
       };
 
+  useEffect(() => {
+    setSharpPreviewLoaded(false);
+  }, [previewUrl]);
+
+  if (!story) return null;
+
   return (
     <div
       style={{
@@ -825,11 +1022,13 @@ function StoryReplyCard({
       <div
         style={{
           position: "relative",
-          width: 176,
-          height: hasPreview ? 250 : 64,
+          width: 190,
+          height: hasPreview ? 304 : 64,
           borderRadius: hasPreview ? 20 : 18,
           overflow: "hidden",
-          background: hasPreview ? "#050505" : "rgba(255,255,255,0.045)",
+          background: hasPreview
+            ? "linear-gradient(180deg, #050505, #0c0c0c)"
+            : "rgba(255,255,255,0.045)",
           border: isOwn
             ? "1px solid rgba(61,245,127,0.2)"
             : "1px solid rgba(255,255,255,0.1)",
@@ -842,6 +1041,7 @@ function StoryReplyCard({
           isVideo ? (
             <video
               src={previewUrl}
+              poster={previewPoster}
               muted
               playsInline
               preload="metadata"
@@ -853,17 +1053,48 @@ function StoryReplyCard({
               }}
             />
           ) : (
-            <img
-              src={previewUrl}
-              alt="Story preview"
-              loading="lazy"
-              style={{
-                display: "block",
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-              }}
-            />
+            <>
+              {hasSeparatePoster && (
+                <img
+                  src={previewPoster}
+                  alt=""
+                  aria-hidden="true"
+                  loading="eager"
+                  decoding="async"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    filter: "blur(14px)",
+                    transform: "scale(1.08)",
+                    opacity: sharpPreviewLoaded ? 0 : 0.72,
+                    transition: "opacity 0.22s ease",
+                  }}
+                />
+              )}
+              <img
+                src={previewUrl}
+                alt="Story preview"
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
+                onLoad={() => setSharpPreviewLoaded(true)}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "block",
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  opacity: sharpPreviewLoaded || !hasSeparatePoster ? 1 : 0,
+                  transform: "translateZ(0)",
+                  transition: "opacity 0.18s ease",
+                  background: "#050505",
+                }}
+              />
+            </>
           )
         ) : (
           <div
@@ -948,12 +1179,10 @@ function StoryReplyCard({
   );
 }
 
-function parseDailyChallengeStarter(text: string):
-  | {
-      askerName: string;
-      question: string;
-    }
-  | null {
+function parseDailyChallengeStarter(text: string): {
+  askerName: string;
+  question: string;
+} | null {
   const marker = " asked you a question as part of their daily challenge.";
   const markerIndex = text.indexOf(marker);
   if (markerIndex <= 0) return null;
@@ -1138,7 +1367,10 @@ function ChatPhotoViewer({
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
-  const safeIndex = Math.min(Math.max(index, 0), Math.max(photos.length - 1, 0));
+  const safeIndex = Math.min(
+    Math.max(index, 0),
+    Math.max(photos.length - 1, 0),
+  );
   const activePhoto = photos[safeIndex];
   const hasMultiple = photos.length > 1;
 
@@ -1209,6 +1441,17 @@ function ChatPhotoViewer({
 
   const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (isSettling) return;
+    const target = event.target;
+    const touchedMedia =
+      target instanceof HTMLElement
+        ? target.closest('[data-photo-viewer-media="true"]')
+        : null;
+    if (!touchedMedia) {
+      touchStartRef.current = null;
+      setIsDragging(false);
+      setDragOffset(0);
+      return;
+    }
     const touch = event.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
     setIsDragging(true);
@@ -1304,7 +1547,8 @@ function ChatPhotoViewer({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "calc(58px + env(safe-area-inset-top, 0px)) 14px calc(58px + env(safe-area-inset-bottom, 0px))",
+          padding:
+            "calc(58px + var(--safe-area-top)) 14px calc(58px + var(--safe-area-bottom))",
         }}
       >
         {(hasMultiple ? [-1, 0, 1] : [0]).map((slot) => {
@@ -1313,6 +1557,7 @@ function ChatPhotoViewer({
           return (
             <img
               key={`${photo.key}-${slot}`}
+              data-photo-viewer-media="true"
               src={photo.url}
               alt={`Chat photo ${photoIndex + 1} of ${photos.length}`}
               draggable={false}
@@ -1320,7 +1565,7 @@ function ChatPhotoViewer({
                 position: "absolute",
                 maxWidth: "calc(100% - 28px)",
                 maxHeight:
-                  "calc(100% - 116px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))",
+                  "calc(100% - 116px - var(--safe-area-top) - var(--safe-area-bottom))",
                 objectFit: "contain",
                 borderRadius: 6,
                 transform: `translate3d(calc(${slot * 100}% + ${dragOffset}px), 0, 0)`,
@@ -1341,7 +1586,7 @@ function ChatPhotoViewer({
         onClick={(event) => event.stopPropagation()}
         style={{
           position: "absolute",
-          top: "calc(14px + env(safe-area-inset-top, 0px))",
+          top: "calc(14px + var(--safe-area-top))",
           left: 14,
           right: 14,
           display: "flex",
@@ -1432,7 +1677,10 @@ function MessageGestureFrame({
 }) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const pendingDragRef = useRef(0);
   const [dragX, setDragX] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
 
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current) {
@@ -1441,14 +1689,45 @@ function MessageGestureFrame({
     }
   };
 
-  const resetDrag = () => setDragX(0);
+  const setDragOnFrame = (nextDragX: number) => {
+    pendingDragRef.current = nextDragX;
+    if (dragFrameRef.current !== null) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      setDragX(pendingDragRef.current);
+      dragFrameRef.current = null;
+    });
+  };
+
+  const resetDrag = () => {
+    if (dragFrameRef.current !== null) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    pendingDragRef.current = 0;
+    setIsPulling(false);
+    setDragX(0);
+  };
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer();
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current);
+      }
+    };
+  }, []);
+
+  const replyProgress = Math.min(1, Math.abs(dragX) / 34);
+  const showReplyCue = replyProgress > 0.04;
+  const replyCueSide: React.CSSProperties =
+    msg.from === "me" ? { right: 18 } : { left: 18 };
 
   return (
     <div
       onTouchStart={(event) => {
         const touch = event.touches[0];
         touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-        setDragX(0);
+        resetDrag();
         clearLongPressTimer();
         longPressTimerRef.current = setTimeout(() => {
           onLongPress?.(msg);
@@ -1466,7 +1745,14 @@ function MessageGestureFrame({
         if (Math.abs(dx) > 10 || Math.abs(dy) > 10) clearLongPressTimer();
         if (Math.abs(dx) > Math.abs(dy) * 1.25) {
           const directionAllowed = msg.from === "me" ? dx < 0 : dx > 0;
-          setDragX(directionAllowed ? dx * 0.34 : dx * 0.12);
+          const sign = dx < 0 ? -1 : 1;
+          const resistance = directionAllowed ? 0.46 : 0.14;
+          const eased = Math.min(
+            directionAllowed ? 84 : 20,
+            Math.pow(Math.abs(dx), 0.92) * resistance,
+          );
+          setIsPulling(directionAllowed);
+          setDragOnFrame(sign * eased);
         }
       }}
       onTouchEnd={(event) => {
@@ -1484,7 +1770,7 @@ function MessageGestureFrame({
         const directionAllowed = msg.from === "me" ? dx < 0 : dx > 0;
         if (
           directionAllowed &&
-          Math.abs(dx) > 78 &&
+          Math.abs(dx) > 64 &&
           Math.abs(dx) > Math.abs(dy) * 1.35
         ) {
           onReply?.(msg);
@@ -1501,13 +1787,55 @@ function MessageGestureFrame({
         onLongPress?.(msg);
       }}
       style={{
-        transform: `translateX(${dragX}px)`,
-        transition: dragX === 0 ? "transform 0.22s ease" : "none",
+        position: "relative",
         touchAction: "pan-y",
         WebkitTapHighlightColor: "transparent",
       }}
     >
-      {children}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: "50%",
+          ...replyCueSide,
+          width: 34,
+          height: 34,
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#07130c",
+          background:
+            "linear-gradient(135deg, rgba(61,245,127,0.96), rgba(134,239,172,0.9))",
+          boxShadow: "0 10px 28px rgba(61,245,127,0.22)",
+          opacity: showReplyCue ? 0.35 + replyProgress * 0.65 : 0,
+          transform: `translateY(-50%) scale(${0.72 + replyProgress * 0.28})`,
+          transition: isPulling
+            ? "none"
+            : "opacity 0.16s ease, transform 0.2s ease",
+          pointerEvents: "none",
+        }}
+      >
+        <Reply
+          size={17}
+          strokeWidth={2.6}
+          style={{
+            transform: msg.from === "me" ? "scaleX(-1)" : "none",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          transform: `translate3d(${dragX}px, 0, 0)`,
+          transition:
+            dragX === 0
+              ? "transform 0.28s cubic-bezier(0.2, 0.84, 0.24, 1)"
+              : "none",
+          willChange: "transform",
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -1524,33 +1852,57 @@ function InlineReplyPreview({
   return (
     <div
       style={{
-        margin: "0 0 6px",
-        padding: "8px 10px",
-        borderRadius: 12,
-        background: own ? "rgba(61,245,127,0.1)" : "rgba(255,255,255,0.06)",
-        borderLeft: `3px solid ${own ? "#3df57f" : "#94a3b8"}`,
+        position: "relative",
+        margin: "0 0 7px",
+        padding: "7px 9px 7px 11px",
+        borderRadius: 10,
+        background: own
+          ? "linear-gradient(135deg, rgba(3,18,10,0.46), rgba(61,245,127,0.09))"
+          : "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.035))",
+        border: own
+          ? "1px solid rgba(61,245,127,0.16)"
+          : "1px solid rgba(255,255,255,0.08)",
         color: own ? "#d7ffe6" : "rgba(255,255,255,0.82)",
         maxWidth: "100%",
+        overflow: "hidden",
       }}
     >
       <div
         style={{
-          color: own ? "#86efac" : "#cbd5e1",
-          fontSize: 11,
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          background: own ? "#3df57f" : "#8b9aaf",
+          opacity: own ? 0.95 : 0.82,
+        }}
+      />
+      <div
+        style={{
+          color: own ? "#86efac" : "#d6dde8",
+          fontSize: 12,
           fontWeight: 900,
           marginBottom: 3,
+          letterSpacing: "0.02em",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
         }}
       >
         {replyTo.senderName}
       </div>
       <div
         style={{
-          fontSize: 12,
-          lineHeight: 1.25,
-          whiteSpace: "nowrap",
+          fontSize: 14.5,
+          lineHeight: 1.32,
           overflow: "hidden",
-          textOverflow: "ellipsis",
-          opacity: 0.9,
+          display: "-webkit-box",
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: "vertical",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere",
+          opacity: 0.86,
         }}
       >
         {replyPreviewLabel(replyTo)}
@@ -1567,6 +1919,7 @@ function Bubble({
   onOpenPhoto,
   onReply,
   onLongPress,
+  showSenderName,
 }: {
   msg: Msg;
   showStatus: boolean;
@@ -1575,16 +1928,34 @@ function Bubble({
   onOpenPhoto?: (msg: Msg, photoIndex: number) => void;
   onReply?: (msg: Msg) => void;
   onLongPress?: (msg: Msg) => void;
+  showSenderName?: boolean;
 }) {
   const own = msg.from === "me";
   const dailyChallengeStarter = parseDailyChallengeStarter(msg.text);
+  const senderLabel = (msg.senderName || (own ? "You" : "Guest")).trim();
   const wrapMessage = (node: React.ReactNode) => (
-    <MessageGestureFrame
-      msg={msg}
-      onReply={onReply}
-      onLongPress={onLongPress}
-    >
-      {node}
+    <MessageGestureFrame msg={msg} onReply={onReply} onLongPress={onLongPress}>
+      <div>
+        {showSenderName && senderLabel && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: own ? "flex-end" : "flex-start",
+              padding: own ? "0 30px 2px 14px" : "0 14px 2px 30px",
+              marginTop: 4,
+              color: own ? "rgba(134,239,172,0.78)" : "rgba(255,255,255,0.52)",
+              fontSize: 11,
+              fontWeight: 850,
+              lineHeight: 1.2,
+              letterSpacing: "0.02em",
+              textTransform: "none",
+            }}
+          >
+            {senderLabel}
+          </div>
+        )}
+        {node}
+      </div>
     </MessageGestureFrame>
   );
 
@@ -1624,12 +1995,15 @@ function Bubble({
                 style={{
                   maxWidth: "82%",
                   padding: msg.replyTo ? 7 : isDisplayCaption ? 4 : 3,
-                  borderRadius: 18,
+                  borderRadius: 17,
                   borderTopRightRadius: 4,
-                  background: "rgba(61,245,127,0.08)",
+                  background:
+                    "linear-gradient(180deg, rgba(31,37,35,0.78) 0%, rgba(18,23,21,0.86) 62%, rgba(10,14,12,0.92) 100%)",
+                  border: "1px solid rgba(148,163,184,0.1)",
                   overflow: "hidden",
                   position: "relative",
-                  boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
+                  boxShadow:
+                    "0 10px 28px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.045)",
                 }}
               >
                 <InlineReplyPreview replyTo={msg.replyTo} own={own} />
@@ -1683,7 +2057,7 @@ function Bubble({
                                   : "3px 3px 14px 3px",
                           background: "#080808",
                         }}
-                        >
+                      >
                         <img
                           src={url}
                           alt="Sent photo"
@@ -1749,9 +2123,9 @@ function Bubble({
                 {isDisplayCaption && (
                   <div
                     style={{
-                      padding: "9px 10px 7px",
-                      color: "#d7ffe6",
-                      fontSize: 15,
+                      padding: "8px 9px 6px",
+                      color: "#e5e7eb",
+                      fontSize: 14,
                       lineHeight: 1.35,
                       wordBreak: "break-word",
                     }}
@@ -1766,7 +2140,7 @@ function Bubble({
                 viewBox="0 0 12 12"
                 style={{ flexShrink: 0, marginTop: 4 }}
               >
-                <path d="M 0 0 L 12 0 L 0 10 Z" fill="rgba(61,245,127,0.08)" />
+                <path d="M 0 0 L 12 0 L 0 10 Z" fill="rgba(31,37,35,0.78)" />
               </svg>
             </>
           ) : (
@@ -1777,17 +2151,21 @@ function Bubble({
                 viewBox="0 0 12 12"
                 style={{ flexShrink: 0, marginTop: 4 }}
               >
-                <path d="M 12 0 L 0 0 L 12 10 Z" fill="#191919" />
+                <path d="M 12 0 L 0 0 L 12 10 Z" fill="rgba(16,23,17,0.82)" />
               </svg>
               <div
                 style={{
                   maxWidth: "82%",
                   padding: msg.replyTo ? 7 : isDisplayCaption ? 4 : 3,
-                  borderRadius: 18,
+                  borderRadius: 17,
                   borderTopLeftRadius: 4,
-                  background: "#191919",
+                  background:
+                    "linear-gradient(180deg, rgba(16,23,17,0.82) 0%, rgba(10,15,11,0.9) 66%, rgba(5,8,6,0.94) 100%)",
+                  border: "1px solid rgba(134,239,172,0.075)",
                   overflow: "hidden",
                   position: "relative",
+                  boxShadow:
+                    "0 10px 28px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.035)",
                 }}
               >
                 <InlineReplyPreview replyTo={msg.replyTo} own={own} />
@@ -1907,9 +2285,9 @@ function Bubble({
                 {isDisplayCaption && (
                   <div
                     style={{
-                      padding: "9px 10px 7px",
+                      padding: "8px 9px 6px",
                       color: "#fff",
-                      fontSize: 15,
+                      fontSize: 14,
                       lineHeight: 1.35,
                       wordBreak: "break-word",
                     }}
@@ -2078,16 +2456,18 @@ function Bubble({
             <div
               style={{
                 maxWidth: "82%",
-                padding: "12px 16px",
-                fontSize: 17,
-                lineHeight: 1.5,
+                padding: "10.5px 14px",
+                fontSize: 16,
+                lineHeight: 1.45,
                 wordBreak: "break-word",
-                borderRadius: 18,
+                borderRadius: 17,
                 borderTopRightRadius: 4,
-                background: "rgba(61,245,127,0.08)",
-                color: "#3df57f",
-                border: "none",
-                boxShadow: "0 2px 8px rgba(61,245,127,0.08)",
+                background:
+                  "linear-gradient(180deg, rgba(31,37,35,0.8) 0%, rgba(18,23,21,0.88) 62%, rgba(10,14,12,0.94) 100%)",
+                color: "#e5e7eb",
+                border: "1px solid rgba(148,163,184,0.11)",
+                boxShadow:
+                  "0 10px 28px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.045)",
               }}
             >
               <InlineReplyPreview replyTo={msg.replyTo} own={own} />
@@ -2099,7 +2479,7 @@ function Bubble({
               viewBox="0 0 12 12"
               style={{ flexShrink: 0, marginTop: 4 }}
             >
-              <path d="M 0 0 L 12 0 L 0 10 Z" fill="rgba(61,245,127,0.08)" />
+              <path d="M 0 0 L 12 0 L 0 10 Z" fill="rgba(31,37,35,0.8)" />
             </svg>
           </>
         ) : (
@@ -2110,20 +2490,23 @@ function Bubble({
               viewBox="0 0 12 12"
               style={{ flexShrink: 0, marginTop: 4 }}
             >
-              <path d="M 12 0 L 0 0 L 12 10 Z" fill="#191919" />
+              <path d="M 12 0 L 0 0 L 12 10 Z" fill="rgba(16,23,17,0.84)" />
             </svg>
             <div
               style={{
                 maxWidth: "82%",
-                padding: "12px 16px",
-                fontSize: 17,
-                lineHeight: 1.5,
+                padding: "10.5px 14px",
+                fontSize: 16,
+                lineHeight: 1.45,
                 wordBreak: "break-word",
-                borderRadius: 18,
+                borderRadius: 17,
                 borderTopLeftRadius: 4,
-                background: "#191919",
-                color: "#fff",
-                border: "none",
+                background:
+                  "linear-gradient(180deg, rgba(16,23,17,0.84) 0%, rgba(10,15,11,0.9) 66%, rgba(5,8,6,0.94) 100%)",
+                color: "#f1f5f9",
+                border: "1px solid rgba(134,239,172,0.075)",
+                boxShadow:
+                  "0 10px 28px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.035)",
               }}
             >
               <InlineReplyPreview replyTo={msg.replyTo} own={own} />
@@ -2218,15 +2601,12 @@ export default function MessagingScreen({
     unfreezeChat,
     sendRealTimeMessage,
     setTypingIndicator,
-    setOnlineStatus,
     setCurrentConversation,
     trackScreenshot,
     trackOpenedNoReply,
     trackLongUnsent,
     trackMention,
-    trackIgnoredMessage,
     trackSeenMessage,
-    clearIgnoredTracking,
     markMessageAsSeen,
     deleteMessage,
     clearError,
@@ -2236,9 +2616,22 @@ export default function MessagingScreen({
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("seen");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteSearch, setInviteSearch] = useState("");
+  const [inviteFriends, setInviteFriends] = useState<any[]>([]);
+  const [loadingInviteFriends, setLoadingInviteFriends] = useState(false);
+  const [sendingInviteId, setSendingInviteId] = useState<string | null>(null);
+  const [conversationInvites, setConversationInvites] = useState<ChatInvite[]>(
+    [],
+  );
+  const [conversationInvitesReady, setConversationInvitesReady] =
+    useState(false);
   const [sendingMedia, setSendingMedia] = useState(false);
   const [optimisticPhotoMessages, setOptimisticPhotoMessages] = useState<
     OptimisticPhotoMessage[]
+  >([]);
+  const [optimisticTextMessages, setOptimisticTextMessages] = useState<
+    OptimisticTextMessage[]
   >([]);
   const [photoViewer, setPhotoViewer] = useState<{
     photos: ChatPhoto[];
@@ -2280,13 +2673,82 @@ export default function MessagingScreen({
         : [],
     [activeConversationId, messages],
   );
+  const originalParticipantIds = useMemo(
+    () =>
+      [currentConversation?.user1_id, currentConversation?.user2_id].filter(
+        Boolean,
+      ) as string[],
+    [currentConversation?.user1_id, currentConversation?.user2_id],
+  );
+  const isOriginalParticipant =
+    !!user?.id && originalParticipantIds.includes(user.id);
+  const acceptedTemporaryInvites = useMemo(
+    () => conversationInvites.filter((invite) => invite.status === "accepted"),
+    [conversationInvites],
+  );
+  const enteredTemporaryInvites = useMemo(
+    () => acceptedTemporaryInvites.filter((invite) => invite.entered_at),
+    [acceptedTemporaryInvites],
+  );
+  const temporaryGroupModeActive = enteredTemporaryInvites.length > 0;
+  const currentUserTemporaryInvite = useMemo(
+    () =>
+      user?.id
+        ? acceptedTemporaryInvites.find(
+            (invite) => invite.invitee_id === user.id,
+          )
+        : undefined,
+    [acceptedTemporaryInvites, user?.id],
+  );
+  const temporaryAccessEnded =
+    !!user?.id &&
+    !!currentConversation &&
+    conversationInvitesReady &&
+    !isOriginalParticipant &&
+    !currentUserTemporaryInvite;
+
+  useEffect(() => {
+    if (!user?.id || !currentConversation?.id || !currentUserTemporaryInvite) {
+      return;
+    }
+
+    const key = `${currentConversation.id}:${currentUserTemporaryInvite.id}`;
+    if (enteredInviteEventIdsRef.current.has(key)) return;
+    enteredInviteEventIdsRef.current.add(key);
+
+    void chatInviteService
+      .markInviteEntered(currentUserTemporaryInvite.id, user.id)
+      .catch((error) => {
+        enteredInviteEventIdsRef.current.delete(key);
+        console.error("Unable to mark chat invite entered:", error);
+      });
+  }, [currentConversation?.id, currentUserTemporaryInvite, user?.id]);
 
   const [localFrozenBy, setLocalFrozenBy] = useState<string | null>(null);
-  const [_firestoreOnline, setFirestoreOnline] = useState(false);
   const [_rtdbOnline, setRtdbOnline] = useState(false);
   const [friendGhostMode, setFriendGhostMode] = useState(false);
-  const friendOnline = _firestoreOnline || _rtdbOnline;
-  const [friendTyping, setFriendTyping] = useState(false);
+  const friendOnline =
+    _rtdbOnline ||
+    onlineFriends.includes(
+      currentConversation?.other_user?.user_id ||
+        currentConversation?.other_user?.id ||
+        "",
+    );
+  const [friendRealtimeLastSeenAt, setFriendRealtimeLastSeenAt] = useState<
+    number | null
+  >(null);
+  const [friendRealtimeTimeZone, setFriendRealtimeTimeZone] =
+    useState(getBrowserTimeZone);
+  const [friendFirestoreLastSeenAt, setFriendFirestoreLastSeenAt] = useState<
+    number | null
+  >(null);
+  const [friendFirestoreTimeZone, setFriendFirestoreTimeZone] =
+    useState(getBrowserTimeZone);
+  const friendLastSeenAt =
+    friendRealtimeLastSeenAt ?? friendFirestoreLastSeenAt;
+  const friendTimeZone = friendRealtimeLastSeenAt
+    ? friendRealtimeTimeZone
+    : friendFirestoreTimeZone;
   const [liveDraft, setLiveDraft] = useState<string | null>(null);
 
   const draftThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2307,15 +2769,18 @@ export default function MessagingScreen({
   const longTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trackedMentions = useRef(new Set<string>());
   const subscribedConvId = useRef<string | null>(null);
+  const enteredInviteEventIdsRef = useRef(new Set<string>());
   const pendingSeenMarksRef = useRef(new Set<string>());
   const ghostRef = useRef(false);
   const isTypingRef = useRef(false);
+  const temporaryAccessEndedRef = useRef(false);
   const lastPresenceSwitchRef = useRef<string>("");
   const mutualChatEstablishedRef = useRef(false);
   const frozenRef = useRef(frozen);
   const convRef = useRef(currentConversation);
   const userIdRef = useRef(user?.id);
   const optimisticPhotoMessagesRef = useRef<OptimisticPhotoMessage[]>([]);
+  const menuActionPointerHandledRef = useRef(0);
 
   useEffect(() => {
     frozenRef.current = frozen;
@@ -2330,10 +2795,42 @@ export default function MessagingScreen({
     userIdRef.current = user?.id;
   }, [user?.id]);
   useEffect(() => {
+    temporaryAccessEndedRef.current = temporaryAccessEnded;
+  }, [temporaryAccessEnded]);
+  useEffect(() => {
     optimisticPhotoMessagesRef.current = optimisticPhotoMessages;
   }, [optimisticPhotoMessages]);
   useEffect(() => {
-    if (!currentConversation?.id || !user?.id || typeof window === "undefined") {
+    if (!temporaryAccessEnded) return;
+    if (draftThrottleRef.current) {
+      clearTimeout(draftThrottleRef.current);
+      draftThrottleRef.current = null;
+    }
+    longTimer.current && clearTimeout(longTimer.current);
+    longTimer.current = null;
+    lastDraftRef.current = "";
+    isTypingRef.current = false;
+    setInput("");
+    setReplyTarget(null);
+    setLiveDraft(null);
+    setOptimisticSwitchEvents([]);
+    unsubscribeFromRealTimeMessages();
+    unsubscribeFromRealTimeEvents();
+    unsubscribeFromTypingIndicators();
+    unsubscribeFromFreezeStatus();
+  }, [
+    temporaryAccessEnded,
+    unsubscribeFromRealTimeMessages,
+    unsubscribeFromRealTimeEvents,
+    unsubscribeFromTypingIndicators,
+    unsubscribeFromFreezeStatus,
+  ]);
+  useEffect(() => {
+    if (
+      !currentConversation?.id ||
+      !user?.id ||
+      typeof window === "undefined"
+    ) {
       setHiddenMessageIds(new Set());
       return;
     }
@@ -2417,7 +2914,6 @@ export default function MessagingScreen({
         {
           current_chat_user_id: "",
           current_chat_user_name: "",
-          last_seen: serverTimestamp(),
         },
         { merge: true },
       ).catch(() => {});
@@ -2428,7 +2924,10 @@ export default function MessagingScreen({
       {
         current_chat_user_id: otherUserId,
         current_chat_user_name: otherUserName,
+        is_online: true,
         last_seen: serverTimestamp(),
+        timezone: getBrowserTimeZone(),
+        updated_at: serverTimestamp(),
       },
       { merge: true },
     ).catch(() => {});
@@ -2438,7 +2937,6 @@ export default function MessagingScreen({
         {
           current_chat_user_id: "",
           current_chat_user_name: "",
-          last_seen: serverTimestamp(),
         },
         { merge: true },
       ).catch(() => {});
@@ -2454,7 +2952,7 @@ export default function MessagingScreen({
 
   useEffect(() => {
     setOptimisticSwitchEvents([]);
-    if (!currentConversation?.id || !user?.id) return;
+    if (!currentConversation?.id || !user?.id || temporaryAccessEnded) return;
     return messagingService.subscribeToOptimisticChatSwitchSignals(
       currentConversation.id,
       user.id,
@@ -2482,27 +2980,10 @@ export default function MessagingScreen({
         }, 12000);
       },
     );
-  }, [currentConversation?.id, user?.id]);
-
-  function writeTypingHelper(isTyping: boolean, convId?: string) {
-    const id = convId ?? convRef.current?.id;
-    const uid = userIdRef.current;
-    if (!id || !uid) return;
-    const db = getFirestore();
-    const typingRef = doc(db, "conversations", id, "typing", uid);
-    if (isTyping) {
-      setDoc(typingRef, {
-        is_typing: true,
-        updated_at: serverTimestamp(),
-      }).catch((err) => console.error("[typing write]", id, uid, err));
-    } else {
-      deleteDoc(typingRef).catch((err) =>
-        console.error("[typing delete]", id, uid, err),
-      );
-    }
-  }
+  }, [currentConversation?.id, user?.id, temporaryAccessEnded]);
 
   function writeDraftHelper(text: string, convId?: string) {
+    if (temporaryAccessEndedRef.current) return;
     const id = convId ?? convRef.current?.id;
     const uid = userIdRef.current;
     if (!id || !uid) return;
@@ -2524,7 +3005,7 @@ export default function MessagingScreen({
     const conv = convRef.current;
     if (!conv || !isTypingRef.current) return;
     isTypingRef.current = false;
-    writeTypingHelper(false, conv.id);
+    if (temporaryAccessEndedRef.current) return;
     setTypingIndicator(conv.id, false);
   }, [setTypingIndicator]); // eslint-disable-line
 
@@ -2583,32 +3064,15 @@ export default function MessagingScreen({
       clearTimeout(draftThrottleRef.current);
       draftThrottleRef.current = null;
     }
-    writeDraftHelper("", conv.id);
     lastDraftRef.current = "";
     isTypingRef.current = false;
-    writeTypingHelper(false, conv.id);
+    if (temporaryAccessEndedRef.current) return;
+    writeDraftHelper("", conv.id);
     setTypingIndicator(conv.id, false);
   }, [setTypingIndicator]); // eslint-disable-line
 
-  function writeTyping(isTyping: boolean, convId?: string) {
-    const id = convId ?? convRef.current?.id;
-    const uid = userIdRef.current;
-    if (!id || !uid) return;
-    const db = getFirestore();
-    const typingRef = doc(db, "conversations", id, "typing", uid);
-    if (isTyping) {
-      setDoc(typingRef, {
-        is_typing: true,
-        updated_at: serverTimestamp(),
-      }).catch((err) => console.error("[typing write 2]", id, uid, err));
-    } else {
-      deleteDoc(typingRef).catch((err) =>
-        console.error("[typing delete 2]", id, uid, err),
-      );
-    }
-  }
-
   function writeDraft(text: string, convId?: string) {
+    if (temporaryAccessEndedRef.current) return;
     const id = convId ?? convRef.current?.id;
     const uid = userIdRef.current;
     if (!id || !uid) return;
@@ -2627,36 +3091,10 @@ export default function MessagingScreen({
   }
 
   // ── Own presence ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    const uid = user?.id;
-    if (!uid) return;
-    const db = getFirestore();
-    const presenceRef = doc(db, "presence", uid);
-    const goOnline = () =>
-      setDoc(presenceRef, { online: true, last_seen: serverTimestamp() }).catch(
-        () => {},
-      );
-    const goOffline = () =>
-      setDoc(presenceRef, {
-        online: false,
-        last_seen: serverTimestamp(),
-      }).catch(() => {});
-    goOnline();
-    const onVisibility = () =>
-      document.visibilityState === "hidden" ? goOffline() : goOnline();
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("beforeunload", goOffline);
-    return () => {
-      goOffline();
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("beforeunload", goOffline);
-    };
-  }, [user?.id]);
-
   // ── Freeze listener ───────────────────────────────────────────────────────
   useEffect(() => {
     const convId = currentConversation?.id;
-    if (!convId) {
+    if (!convId || temporaryAccessEnded) {
       setLocalFrozenBy(null);
       return;
     }
@@ -2668,9 +3106,15 @@ export default function MessagingScreen({
           snap.exists() ? (snap.data()?.frozen_by ?? null) : null,
         );
       },
+      (error) => {
+        if (error?.code !== "permission-denied") {
+          console.error("Unable to subscribe to freeze status:", error);
+        }
+        setLocalFrozenBy(null);
+      },
     );
     return () => unsub();
-  }, [currentConversation?.id]);
+  }, [currentConversation?.id, temporaryAccessEnded]);
 
   // ── Friend online listener ────────────────────────────────────────────────
   useEffect(() => {
@@ -2678,69 +3122,91 @@ export default function MessagingScreen({
       currentConversation?.other_user?.user_id ||
       currentConversation?.other_user?.id;
     if (!friendId) {
-      setFirestoreOnline(false);
       setFriendGhostMode(false);
+      setFriendFirestoreLastSeenAt(null);
+      setFriendFirestoreTimeZone(getBrowserTimeZone());
       setLivePresenceSwitchTarget(null);
       lastPresenceSwitchRef.current = "";
       return;
     }
+    setFriendFirestoreLastSeenAt(null);
+    setFriendFirestoreTimeZone(getBrowserTimeZone());
     const db = getFirestore();
-    const unsub = onSnapshot(doc(db, "presence", friendId), (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        setFirestoreOnline(d?.online === true || d?.status === "online");
-        const ghostExpiryRaw =
-          d?.ghost_mode_expires_at?.toDate?.()?.toISOString?.() ||
-          d?.ghost_mode_expires_at ||
-          null;
-        const ghostExpiryMs = ghostExpiryRaw
-          ? new Date(ghostExpiryRaw).getTime()
-          : 0;
-        setFriendGhostMode(
-          d?.ghost_mode === true &&
-            Number.isFinite(ghostExpiryMs) &&
-            ghostExpiryMs > Date.now(),
-        );
-        const targetUserId = String(d?.current_chat_user_id || "");
-        const targetUserName = String(d?.current_chat_user_name || "");
-        const currentUserId = String(user?.id || "");
-        const friendIsActivelyInThisConversation =
-          !!targetUserId && !!currentUserId && targetUserId === currentUserId;
+    const handlePresenceUnavailable = () => {
+      setFriendGhostMode(false);
+      setFriendFirestoreLastSeenAt(null);
+      setFriendFirestoreTimeZone(getBrowserTimeZone());
+      setLivePresenceSwitchTarget(null);
+      lastPresenceSwitchRef.current = "";
+    };
 
-        if (friendIsActivelyInThisConversation) {
-          mutualChatEstablishedRef.current = true;
-          lastPresenceSwitchRef.current = "";
-          setLivePresenceSwitchTarget(null);
-          return;
-        }
+    const unsub = onSnapshot(
+      doc(db, "presence", friendId),
+      (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          setFriendFirestoreLastSeenAt(parsePresenceTimestamp(d?.last_seen));
+          setFriendFirestoreTimeZone(
+            typeof d?.timezone === "string" && d.timezone
+              ? d.timezone
+              : getBrowserTimeZone(),
+          );
+          const ghostExpiryRaw =
+            d?.ghost_mode_expires_at?.toDate?.()?.toISOString?.() ||
+            d?.ghost_mode_expires_at ||
+            null;
+          const ghostExpiryMs = ghostExpiryRaw
+            ? new Date(ghostExpiryRaw).getTime()
+            : 0;
+          setFriendGhostMode(
+            d?.ghost_mode === true &&
+              Number.isFinite(ghostExpiryMs) &&
+              ghostExpiryMs > Date.now(),
+          );
+          const targetUserId = String(d?.current_chat_user_id || "");
+          const targetUserName = String(d?.current_chat_user_name || "");
+          const currentUserId = String(user?.id || "");
+          const friendIsActivelyInThisConversation =
+            !!targetUserId && !!currentUserId && targetUserId === currentUserId;
 
-        if (
-          mutualChatEstablishedRef.current &&
-          targetUserId &&
-          currentUserId &&
-          targetUserId !== currentUserId &&
-          targetUserId !== friendId
-        ) {
-          const nextKey = `${friendId}:${targetUserId}:${targetUserName}`;
-          if (lastPresenceSwitchRef.current !== nextKey) {
-            lastPresenceSwitchRef.current = nextKey;
-            setLivePresenceSwitchTarget({
-              userId: targetUserId,
-              userName: targetUserName || "someone",
-              isActive: true,
-            });
+          if (friendIsActivelyInThisConversation) {
+            mutualChatEstablishedRef.current = true;
+            lastPresenceSwitchRef.current = "";
+            setLivePresenceSwitchTarget(null);
+            return;
+          }
+
+          if (
+            mutualChatEstablishedRef.current &&
+            targetUserId &&
+            currentUserId &&
+            targetUserId !== currentUserId &&
+            targetUserId !== friendId
+          ) {
+            const nextKey = `${friendId}:${targetUserId}:${targetUserName}`;
+            if (lastPresenceSwitchRef.current !== nextKey) {
+              lastPresenceSwitchRef.current = nextKey;
+              setLivePresenceSwitchTarget({
+                userId: targetUserId,
+                userName: targetUserName || "someone",
+                isActive: true,
+              });
+            }
+          } else {
+            lastPresenceSwitchRef.current = "";
+            setLivePresenceSwitchTarget(null);
           }
         } else {
-          lastPresenceSwitchRef.current = "";
-          setLivePresenceSwitchTarget(null);
+          handlePresenceUnavailable();
         }
-      } else {
-        setFirestoreOnline(false);
-        setFriendGhostMode(false);
-        setLivePresenceSwitchTarget(null);
-        lastPresenceSwitchRef.current = "";
-      }
-    });
+      },
+      (error) => {
+        if (error?.code !== "permission-denied") {
+          console.error("Unable to subscribe to friend presence:", error);
+        }
+        handlePresenceUnavailable();
+      },
+    );
     return () => unsub();
   }, [
     currentConversation?.other_user?.user_id,
@@ -2753,43 +3219,55 @@ export default function MessagingScreen({
     const friendId =
       currentConversation?.other_user?.user_id ||
       currentConversation?.other_user?.id;
-    if (!friendId) {
-      setRtdbOnline(false);
-      return;
-    }
-    const unsub = messagingService.subscribeToUsersOnlineStatus(
-      [friendId],
-      (onlineIds) => {
-        setRtdbOnline(onlineIds.includes(friendId));
-      },
-    );
-    return () => unsub();
-  }, [
-    currentConversation?.other_user?.user_id,
-    currentConversation?.other_user?.id,
-  ]);
+    console.log("🔍 [MessagingScreen DEBUG] Presence subscription setup:", {
+      friendId,
+      conversationId: currentConversation?.id,
+      hasFriend: !!friendId,
+    });
 
-  useEffect(() => {
-    const convId = currentConversation?.id;
-    const friendId =
-      currentConversation?.other_user?.user_id ||
-      currentConversation?.other_user?.id;
-    if (!convId || !friendId) {
-      setFriendTyping(false);
+    if (!friendId) {
+      console.log("🔍 [MessagingScreen DEBUG] No friendId, clearing presence");
+      setRtdbOnline(false);
+      setFriendRealtimeLastSeenAt(null);
+      setFriendRealtimeTimeZone(getBrowserTimeZone());
       return;
     }
-    const db = getFirestore();
-    const unsub = onSnapshot(
-      doc(db, "conversations", convId, "typing", friendId),
-      (snap) => {
-        setFriendTyping(
-          snap.exists() ? snap.data()?.is_typing === true : false,
-        );
+    setFriendRealtimeLastSeenAt(null);
+    setFriendRealtimeTimeZone(getBrowserTimeZone());
+
+    const unsub = messagingService.subscribeToUsersLivePresenceStatus(
+      [friendId],
+      (statuses) => {
+        console.log("🔍 [MessagingScreen DEBUG] Presence status callback:", {
+          friendId,
+          allStatuses: statuses,
+          status: statuses.find((entry) => entry.userId === friendId),
+        });
+        const status = statuses.find((entry) => entry.userId === friendId);
+        const isOnline = status?.isOnline ?? false;
+        const lastSeen = parsePresenceTimestamp(status?.lastSeen);
+        const timezone = status?.timezone || getBrowserTimeZone();
+
+        console.log("🔍 [MessagingScreen DEBUG] Updating presence state:", {
+          friendId,
+          isOnline,
+          lastSeen,
+          timezone,
+        });
+
+        setRtdbOnline(isOnline);
+        setFriendRealtimeLastSeenAt(lastSeen);
+        setFriendRealtimeTimeZone(timezone);
       },
     );
-    return () => unsub();
+    return () => {
+      console.log(
+        "🔍 [MessagingScreen DEBUG] Unsubscribing presence for:",
+        friendId,
+      );
+      unsub();
+    };
   }, [
-    currentConversation?.id,
     currentConversation?.other_user?.user_id,
     currentConversation?.other_user?.id,
   ]);
@@ -2797,7 +3275,7 @@ export default function MessagingScreen({
   useEffect(() => {
     const convId = currentConversation?.id;
     const friendId = currentConversation?.other_user?.user_id;
-    if (!convId || !friendId) {
+    if (!convId || !friendId || temporaryAccessEnded) {
       setLiveDraft(null);
       return;
     }
@@ -2809,14 +3287,23 @@ export default function MessagingScreen({
           snap.exists() && snap.data()?.text ? snap.data().text : null,
         );
       },
+      (error) => {
+        if (error?.code !== "permission-denied") {
+          console.error("Unable to subscribe to live draft:", error);
+        }
+        setLiveDraft(null);
+      },
     );
     return () => unsub();
-  }, [currentConversation?.id, currentConversation?.other_user?.user_id]);
+  }, [
+    currentConversation?.id,
+    currentConversation?.other_user?.user_id,
+    temporaryAccessEnded,
+  ]);
 
   // ── Boot ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) return;
-    setOnlineStatus(true);
     return () => {
       subscribedConvId.current = null;
       clearRealtimeTypingSignals();
@@ -2824,12 +3311,12 @@ export default function MessagingScreen({
       unsubscribeFromRealTimeEvents();
       unsubscribeFromTypingIndicators();
       unsubscribeFromFreezeStatus();
-      setOnlineStatus(false);
     };
   }, [user?.id, clearRealtimeTypingSignals]); // eslint-disable-line
 
   // ── Subscribe to conversation ─────────────────────────────────────────────
   useEffect(() => {
+    if (temporaryAccessEnded) return;
     if (!user?.id || conversations.length === 0) return;
     const targetId =
       conversationId ??
@@ -2843,6 +3330,10 @@ export default function MessagingScreen({
     if (subscribedConvId.current) clearRealtimeTypingSignals();
     subscribedConvId.current = conversation.id;
     setCurrentConversation(conversation);
+    console.log(
+      "🔍 [MessagingScreen DEBUG] Subscribing to RTDB for conversation:",
+      conversation.id,
+    );
     subscribeToRealTimeMessages(conversation.id);
     subscribeToRealTimeEvents(conversation.id);
     subscribeToTypingIndicators(conversation.id);
@@ -2851,7 +3342,87 @@ export default function MessagingScreen({
     setHasOpenedChat(false);
     setInput(loadLocalDraft(conversation.id));
     lastDraftRef.current = "";
-  }, [user?.id, conversationId, conversations]); // eslint-disable-line
+  }, [user?.id, conversationId, conversations, temporaryAccessEnded]); // eslint-disable-line
+
+  useEffect(() => {
+    if (
+      temporaryAccessEnded ||
+      !user?.id ||
+      !conversationId ||
+      currentConversation?.id === conversationId
+    ) {
+      return;
+    }
+    if (
+      conversations.some((conversation) => conversation.id === conversationId)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void chatInviteService
+      .getConversationForUser(conversationId, user.id)
+      .then((conversation) => {
+        if (cancelled || !conversation) return;
+        subscribedConvId.current = conversation.id;
+        setCurrentConversation(conversation);
+        subscribeToRealTimeMessages(conversation.id);
+        subscribeToRealTimeEvents(conversation.id);
+        subscribeToTypingIndicators(conversation.id);
+        subscribeToFreezeStatus(conversation.id);
+        setInput(loadLocalDraft(conversation.id));
+      })
+      .catch((error) => console.error("Unable to open temporary chat:", error));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    user?.id,
+    conversationId,
+    currentConversation?.id,
+    conversations,
+    setCurrentConversation,
+    subscribeToRealTimeMessages,
+    subscribeToRealTimeEvents,
+    subscribeToTypingIndicators,
+    subscribeToFreezeStatus,
+    loadLocalDraft,
+    temporaryAccessEnded,
+  ]);
+
+  useEffect(() => {
+    if (!currentConversation?.id || !user?.id) {
+      setConversationInvites([]);
+      setConversationInvitesReady(false);
+      return;
+    }
+    const candidateInviteeIds = [
+      ...(currentConversation.temporary_participant_ids || []),
+      ...inviteFriends.map(
+        (friend: any) => friend.userId || friend.user_id || friend.id,
+      ),
+    ].filter(
+      (id, index, self): id is string =>
+        !!id && id !== user.id && self.indexOf(id) === index,
+    );
+    return chatInviteService.subscribeConversationInvites(
+      currentConversation.id,
+      user.id,
+      isOriginalParticipant,
+      candidateInviteeIds,
+      (invites) => {
+        setConversationInvites(invites);
+        setConversationInvitesReady(true);
+      },
+    );
+  }, [
+    currentConversation?.id,
+    currentConversation?.temporary_participant_ids,
+    inviteFriends,
+    isOriginalParticipant,
+    user?.id,
+  ]);
 
   // ── Viewport ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -2897,16 +3468,18 @@ export default function MessagingScreen({
     if (!currentConversation || !user?.id) return;
     const otherUserId = currentConversation.other_user?.user_id;
     if (!otherUserId) return;
-    const incoming = activeMessages.filter(
-      (msg) => msg.senderId === otherUserId && !msg.isOwn,
+    const seenOwnMessages = activeMessages.filter(
+      (msg) => msg.senderId === user.id && msg.isOwn && msg.is_seen,
     );
-    if (incoming.length === 0) return;
-    const latest = incoming[incoming.length - 1];
+    if (seenOwnMessages.length === 0) return;
+    const latest = seenOwnMessages[seenOwnMessages.length - 1];
     trackSeenMessage(
       latest.id,
       currentConversation.id,
-      latest.senderId,
-      latest.senderName,
+      otherUserId,
+      currentConversation.other_user?.display_name ||
+        currentConversation.other_user?.username ||
+        "Someone",
     );
   }, [activeMessages, currentConversation, user?.id, trackSeenMessage]);
 
@@ -2954,7 +3527,10 @@ export default function MessagingScreen({
   };
 
   useEffect(() => {
-    if (!currentConversation?.id) return;
+    if (!currentConversation?.id || temporaryAccessEnded) {
+      setCurrentMoodBlock(null);
+      return;
+    }
     const db = getFirestore();
     const moodBlockRef = doc(
       db,
@@ -2963,32 +3539,41 @@ export default function MessagingScreen({
       "meta",
       "moodBlock",
     );
-    const unsub = onSnapshot(moodBlockRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as {
-          mood: "angry" | "crying" | "irritated" | "depressed";
-          initiatedBy: string;
-          initiatedByName: string;
-          startTime: number;
-          endTime: number;
-        };
-        if (data.endTime > Date.now()) {
-          setCurrentMoodBlock(data);
-          const timeUntilExpiry = data.endTime - Date.now();
-          setTimeout(() => {
+    const unsub = onSnapshot(
+      moodBlockRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as {
+            mood: "angry" | "crying" | "irritated" | "depressed";
+            initiatedBy: string;
+            initiatedByName: string;
+            startTime: number;
+            endTime: number;
+          };
+          if (data.endTime > Date.now()) {
+            setCurrentMoodBlock(data);
+            const timeUntilExpiry = data.endTime - Date.now();
+            setTimeout(() => {
+              setCurrentMoodBlock(null);
+              deleteDoc(moodBlockRef).catch(() => {});
+            }, timeUntilExpiry);
+          } else {
             setCurrentMoodBlock(null);
             deleteDoc(moodBlockRef).catch(() => {});
-          }, timeUntilExpiry);
+          }
         } else {
           setCurrentMoodBlock(null);
-          deleteDoc(moodBlockRef).catch(() => {});
         }
-      } else {
+      },
+      (error) => {
+        if (error?.code !== "permission-denied") {
+          console.error("Unable to subscribe to mood block:", error);
+        }
         setCurrentMoodBlock(null);
-      }
-    });
+      },
+    );
     return () => unsub();
-  }, [currentConversation?.id]);
+  }, [currentConversation?.id, temporaryAccessEnded]);
 
   // ── Progress bar ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -3067,6 +3652,7 @@ export default function MessagingScreen({
       "long_unsent",
       "mention",
       "ignored",
+      "invite",
     ].includes(t);
 
   const getEventText = (event: MessageEvent): string => {
@@ -3084,6 +3670,21 @@ export default function MessagingScreen({
       case "mention":
         return `@${event.data?.mentioned_username || "someone"} was notified that you two are talking about them`;
       case "ignored":
+        if (event.data?.ignored_direction === "they_ignored_me") {
+          const ignorerName =
+            event.data?.user_name ||
+            currentConversation?.other_user?.display_name ||
+            currentConversation?.other_user?.username ||
+            "Someone";
+          const ignoredName =
+            event.data?.ignored_user_name ||
+            user?.displayName ||
+            user?.username ||
+            "your";
+          return event.user_id === user?.id
+            ? `${ignorerName} ignored your message`
+            : `You ignored ${ignoredName}'s message`;
+        }
         if (event.user_id === user?.id) {
           // Current user did the ignoring â show whose message they ignored
           const ignoredName =
@@ -3103,6 +3704,21 @@ export default function MessagingScreen({
             "Someone";
           return `${ignorerName} ignored your message`;
         }
+      case "invite": {
+        const invitedName = event.data?.user_name || "Someone";
+        switch (event.data?.action) {
+          case "invited":
+            return `${invitedName} was invited`;
+          case "joined":
+            return `${invitedName} has joined this conversation`;
+          case "removed":
+            return `${invitedName} was removed`;
+          case "left":
+            return `${invitedName} left`;
+          default:
+            return `${invitedName} was invited`;
+        }
+      }
       default:
         return "Unknown event";
     }
@@ -3157,58 +3773,186 @@ export default function MessagingScreen({
           "https://picsum.photos/seed/default/100/100",
       }
     : FRIEND;
+  const friendTyping = useMemo(() => {
+    const convId = currentConversation?.id;
+    const friendId =
+      currentConversation?.other_user?.user_id ||
+      currentConversation?.other_user?.id;
+    return (
+      !!convId &&
+      !!friendId &&
+      typingUsers.some(
+        (typingUser) =>
+          typingUser.conversation_id === convId &&
+          typingUser.user_id === friendId &&
+          typingUser.is_typing,
+      )
+    );
+  }, [
+    currentConversation?.id,
+    currentConversation?.other_user?.user_id,
+    currentConversation?.other_user?.id,
+    typingUsers,
+  ]);
+  const friendStatusLabel = useMemo(() => {
+    if (friendTyping) return "TYPING...";
+    if (friendOnline) return "ACTIVE NOW";
+    return formatLastSeenLabel(friendLastSeenAt, friendTimeZone);
+  }, [friendTyping, friendOnline, friendLastSeenAt, friendTimeZone]);
+  const friendStatusIsLive = friendTyping || friendOnline;
+
+  useEffect(() => {
+    const convId = currentConversation?.id;
+    const friendId =
+      currentConversation?.other_user?.user_id ||
+      currentConversation?.other_user?.id;
+    console.log("[MessagingScreen DEBUG] final header indicators:", {
+      conversationId: convId,
+      friendId,
+      friendUsername: currentConversation?.other_user?.username,
+      friendOnline,
+      friendTyping,
+      friendStatusLabel,
+      friendStatusIsLive,
+      friendLastSeenAt,
+      friendTimeZone,
+      onlineFriends,
+      matchingTypingUsers: typingUsers.filter(
+        (typingUser) =>
+          typingUser.conversation_id === convId &&
+          typingUser.user_id === friendId,
+      ),
+    });
+  }, [
+    currentConversation?.id,
+    currentConversation?.other_user?.user_id,
+    currentConversation?.other_user?.id,
+    currentConversation?.other_user?.username,
+    friendOnline,
+    friendTyping,
+    friendStatusLabel,
+    friendStatusIsLive,
+    friendLastSeenAt,
+    friendTimeZone,
+    onlineFriends,
+    typingUsers,
+  ]);
 
   const arrivedPhotoUrls = new Set(
     activeMessages
       .filter((msg) => {
-        const mediaType = String(msg.media_type || msg.mediaType || "").toUpperCase();
+        const mediaType = String(
+          msg.media_type || msg.mediaType || "",
+        ).toUpperCase();
         return mediaType === "PHOTO";
       })
       .map((msg) => msg.mediaUrl || msg.media_url)
       .filter(Boolean),
   );
+  const arrivedOwnTextMessages = activeMessages
+    .filter((msg) => {
+      const mediaType = String(
+        msg.media_type || msg.mediaType || "TEXT",
+      ).toUpperCase();
+      return (
+        (msg.senderId || msg.sender_id) === user?.id &&
+        mediaType !== "PHOTO" &&
+        mediaType !== "VIDEO"
+      );
+    })
+    .map((msg) => {
+      const rawTime = msg.timestamp ?? msg.created_at;
+      const time =
+        typeof rawTime === "object" && rawTime && "toDate" in rawTime
+          ? (rawTime as any).toDate().getTime()
+          : rawTime
+            ? new Date(String(rawTime)).getTime()
+            : 0;
+      return {
+        content: String(msg.content || ""),
+        time: Number.isFinite(time) ? time : 0,
+      };
+    });
 
   const rawTimeline: TimelineItem[] = [
-    ...activeMessages.filter((msg) => !hiddenMessageIds.has(msg.id)).map((msg) => {
-      const mediaUrl = msg.mediaUrl || msg.media_url || null;
-      const mediaType = String(
-        msg.media_type || msg.mediaType || "",
-      ).toUpperCase();
-      const sharedPost = parseSharedPostPayload(mediaUrl);
-      const sharedStory = parseSharedStoryPayload(mediaUrl);
-      const replyToRaw = msg.reply_to || msg.replyTo || null;
-      return {
-        id: msg.id,
-        kind: "msg" as const,
-        from: (msg.senderId === user?.id ? "me" : "them") as From,
-        text: msg.content,
-        senderId: msg.senderId || msg.sender_id,
-        senderName:
-          msg.senderName ||
-          (msg.senderId === user?.id ? "You" : friendInfo.name),
-        sharedPost,
-        sharedStory,
-        mediaUrl,
-        mediaType,
-        sourceIds: [msg.id],
-        replyTo: replyToRaw
-          ? {
-              id: String(replyToRaw.id || ""),
-              senderId: String(replyToRaw.sender_id || replyToRaw.senderId || ""),
-              senderName: String(
-                replyToRaw.sender_name || replyToRaw.senderName || "Message",
-              ),
-              content: String(replyToRaw.content || ""),
-              mediaType: replyToRaw.media_type || replyToRaw.mediaType || null,
-            }
-          : null,
-        createdAt: msg.timestamp ?? msg.created_at,
-        photoUrls:
-          mediaUrl && mediaType === "PHOTO" && !sharedPost && !sharedStory
-            ? [mediaUrl]
-            : [],
-      };
-    }),
+    ...activeMessages
+      .filter((msg) => !hiddenMessageIds.has(msg.id))
+      .map((msg) => {
+        const mediaUrl = msg.mediaUrl || msg.media_url || null;
+        const mediaType = String(
+          msg.media_type || msg.mediaType || "",
+        ).toUpperCase();
+        const sharedPost = parseSharedPostPayload(mediaUrl);
+        const sharedStory = parseSharedStoryPayload(mediaUrl);
+        const replyToRaw = msg.reply_to || msg.replyTo || null;
+        return {
+          id: msg.id,
+          kind: "msg" as const,
+          from: (msg.senderId === user?.id ? "me" : "them") as From,
+          text: msg.content,
+          senderId: msg.senderId || msg.sender_id,
+          senderName:
+            msg.senderName ||
+            ((msg.senderId || msg.sender_id) === user?.id
+              ? user?.username || user?.displayName || "You"
+              : friendInfo.name),
+          sharedPost,
+          sharedStory,
+          mediaUrl,
+          mediaType,
+          sourceIds: [msg.id],
+          replyTo: replyToRaw
+            ? {
+                id: String(replyToRaw.id || ""),
+                senderId: String(
+                  replyToRaw.sender_id || replyToRaw.senderId || "",
+                ),
+                senderName: String(
+                  replyToRaw.sender_name || replyToRaw.senderName || "Message",
+                ),
+                content: String(replyToRaw.content || ""),
+                mediaType:
+                  replyToRaw.media_type || replyToRaw.mediaType || null,
+              }
+            : null,
+          createdAt: msg.timestamp ?? msg.created_at,
+          photoUrls:
+            mediaUrl && mediaType === "PHOTO" && !sharedPost && !sharedStory
+              ? [mediaUrl]
+              : [],
+        };
+      }),
+    ...optimisticTextMessages
+      .filter(
+        (message) =>
+          message.conversationId === currentConversation?.id &&
+          !arrivedOwnTextMessages.some(
+            (arrived) =>
+              arrived.content === message.text &&
+              arrived.time >= message.createdAt - 5_000 &&
+              arrived.time <= message.createdAt + 60_000,
+          ),
+      )
+      .map(
+        (message): Msg => ({
+          id: message.id,
+          kind: "msg",
+          from: "me",
+          text: message.text,
+          senderId: user?.id ?? "",
+          senderName: "You",
+          sharedPost: null,
+          sharedStory: null,
+          mediaUrl: null,
+          mediaType: "TEXT",
+          photoUrls: [],
+          sourceIds: [message.id],
+          replyTo: message.replyTo,
+          createdAt: message.createdAt,
+          optimistic: !message.failed,
+          failed: !!message.failed,
+        }),
+      ),
     ...optimisticPhotoMessages
       .filter(
         (message) =>
@@ -3291,7 +4035,9 @@ export default function MessagingScreen({
           : timelineEvents.find((e) => e.id === item.id);
       const raw =
         item.kind === "msg"
-          ? (item.createdAt ?? (src as any)?.timestamp ?? (src as any)?.created_at)
+          ? (item.createdAt ??
+            (src as any)?.timestamp ??
+            (src as any)?.created_at)
           : (src as any)?.created_at;
       if (!raw) return Date.now();
       if (typeof raw === "object" && "toDate" in raw)
@@ -3414,19 +4160,20 @@ export default function MessagingScreen({
 
   // ── Input handler ─────────────────────────────────────────────────────────
   function handleInput(val: string) {
+    if (temporaryAccessEndedRef.current) return;
     setInput(val);
     saveLocalDraft(val);
     if (!ghostRef.current) {
       const nowTyping = val.length > 0;
       if (nowTyping !== isTypingRef.current) {
         isTypingRef.current = nowTyping;
-        writeTyping(nowTyping);
         const conv = convRef.current;
         if (conv) setTypingIndicator(conv.id, nowTyping);
       }
     } else if (isTypingRef.current) {
       isTypingRef.current = false;
-      writeTyping(false);
+      const conv = convRef.current;
+      if (conv) setTypingIndicator(conv.id, false);
     }
     if (!ghostRef.current) {
       const conv = convRef.current;
@@ -3472,7 +4219,8 @@ export default function MessagingScreen({
       frozenRef.current ||
       !currentConversation ||
       sendingMessage ||
-      currentMoodBlock
+      currentMoodBlock ||
+      temporaryAccessEnded
     )
       return;
     if (longTimer.current) {
@@ -3480,6 +4228,13 @@ export default function MessagingScreen({
       longTimer.current = null;
     }
     const text = input.trim();
+    const optimisticMessage: OptimisticTextMessage = {
+      id: `optimistic-text-${Date.now()}`,
+      conversationId: currentConversation.id,
+      text,
+      replyTo: replyTarget,
+      createdAt: Date.now(),
+    };
     const replyPayload = replyTarget
       ? {
           id: replyTarget.id,
@@ -3513,9 +4268,10 @@ export default function MessagingScreen({
         clearTimeout(draftThrottleRef.current);
         draftThrottleRef.current = null;
       }
+      setOptimisticTextMessages((current) => [...current, optimisticMessage]);
+      setReplyTarget(null);
       if (isTypingRef.current) {
         isTypingRef.current = false;
-        writeTyping(false);
         setTypingIndicator(currentConversation.id, false);
       }
       setStatus("delivered");
@@ -3526,12 +4282,17 @@ export default function MessagingScreen({
         undefined,
         replyPayload,
       );
-      setReplyTarget(null);
       console.log("[MessagingScreen] Message sent successfully");
-      clearIgnoredTracking(currentConversation.id);
       setTimeout(() => setStatus("seen"), 2200);
     } catch (err) {
       console.error("[MessagingScreen] Failed to send:", err);
+      setOptimisticTextMessages((current) =>
+        current.map((message) =>
+          message.id === optimisticMessage.id
+            ? { ...message, failed: true }
+            : message,
+        ),
+      );
       setInput(text);
       saveLocalDraft(text, currentConversation.id);
     }
@@ -3539,7 +4300,13 @@ export default function MessagingScreen({
 
   async function sendPhotoFiles(files: FileList | null) {
     if (!files?.length) return;
-    if (!currentConversation || !user?.id || frozenRef.current || currentMoodBlock)
+    if (
+      !currentConversation ||
+      !user?.id ||
+      frozenRef.current ||
+      currentMoodBlock ||
+      temporaryAccessEnded
+    )
       return;
 
     const photoFiles = Array.from(files).filter((file) =>
@@ -3598,23 +4365,147 @@ export default function MessagingScreen({
         }
       }),
     ).then(() => {
-      clearIgnoredTracking(conversation.id);
       setTimeout(() => setStatus("seen"), 2200);
       setSendingMedia(false);
     });
   }
 
+  const loadInviteFriends = useCallback(async () => {
+    if (!user?.id) return;
+    setLoadingInviteFriends(true);
+    try {
+      const response = await friendsService.getFriends(user.id);
+      const friends = Array.isArray(response)
+        ? response
+        : response.success
+          ? response.friends || []
+          : [];
+      const unavailableIds = new Set([
+        user.id,
+        ...originalParticipantIds,
+        ...acceptedTemporaryInvites.map((invite) => invite.invitee_id),
+        ...conversationInvites
+          .filter((invite) => invite.status === "pending")
+          .map((invite) => invite.invitee_id),
+      ]);
+      setInviteFriends(
+        friends.filter((friend: any) => {
+          const friendId = friend.userId || friend.user_id || friend.id;
+          return friendId && !unavailableIds.has(friendId);
+        }),
+      );
+    } catch (error) {
+      console.error("Unable to load friends for invite:", error);
+      setInviteFriends([]);
+    } finally {
+      setLoadingInviteFriends(false);
+    }
+  }, [
+    user?.id,
+    originalParticipantIds,
+    acceptedTemporaryInvites,
+    conversationInvites,
+  ]);
+
+  const openInviteModal = () => {
+    setMenuOpen(false);
+    setInviteSearch("");
+    window.setTimeout(() => {
+      setInviteModalOpen(true);
+      void loadInviteFriends();
+    }, 0);
+  };
+
+  const filteredInviteFriends = inviteFriends.filter((friend: any) => {
+    const q = inviteSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [
+      friend.displayName,
+      friend.display_name,
+      friend.nickname,
+      friend.username,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(q));
+  });
+
+  const sendInviteToFriend = async (friend: any) => {
+    if (!currentConversation?.id || !user?.id || sendingInviteId) return;
+    const friendId = friend.userId || friend.user_id || friend.id;
+    if (!friendId) return;
+    const friendName =
+      friend.displayName ||
+      friend.display_name ||
+      friend.nickname ||
+      friend.username ||
+      "Someone";
+    setSendingInviteId(friendId);
+    try {
+      await chatInviteService.sendInvite({
+        conversationId: currentConversation.id,
+        inviterId: user.id,
+        inviterName: user.displayName || user.username || "Someone",
+        inviteeId: friendId,
+        inviteeName: friendName,
+      });
+      setInviteModalOpen(false);
+    } catch (error) {
+      console.error("Unable to send invite:", error);
+      alert(error instanceof Error ? error.message : "Unable to send invite.");
+    } finally {
+      setSendingInviteId(null);
+    }
+  };
+
+  const endTemporaryAccess = async (
+    invite: ChatInvite,
+    action: "removed" | "left",
+  ) => {
+    if (!user?.id) return;
+    try {
+      await chatInviteService.endTemporaryAccess({
+        inviteId: invite.id,
+        actorId: user.id,
+        action,
+      });
+    } catch (error) {
+      console.error("Unable to update temporary access:", error);
+      alert("Unable to update temporary access.");
+    }
+  };
+
   const lastMineId = [...timeline]
     .reverse()
     .find((item): item is Msg => item.kind === "msg" && item.from === "me")?.id;
 
+  const runMenuAction = (fn: () => void) => {
+    try {
+      fn();
+    } catch (error) {
+      console.error("Unable to run chat menu action:", error);
+      alert("Unable to run this chat action.");
+    }
+  };
+
   const menuActions: [string, string, () => void, boolean][] = [
+    ...(isOriginalParticipant
+      ? ([
+          [
+            "Invite friend",
+            "",
+            () => {
+              openInviteModal();
+            },
+            false,
+          ],
+        ] as [string, string, () => void, boolean][])
+      : []),
     [
       "Mood Block",
       "",
       () => {
         setMenuOpen(false);
-        setMoodBlockModalOpen(true);
+        window.setTimeout(() => setMoodBlockModalOpen(true), 0);
       },
       false,
     ],
@@ -3622,9 +4513,18 @@ export default function MessagingScreen({
       frozen ? (canUnfreeze ? "Unfreeze" : "Frozen by them") : "Freeze chat",
       "",
       () => {
-        if (frozen && canUnfreeze) doUnfreeze();
-        else if (!frozen) doFreeze();
         setMenuOpen(false);
+        if (frozen && canUnfreeze) {
+          void doUnfreeze().catch((error) => {
+            console.error("Unable to unfreeze chat:", error);
+            alert("Unable to unfreeze this chat.");
+          });
+        } else if (!frozen) {
+          void doFreeze().catch((error) => {
+            console.error("Unable to freeze chat:", error);
+            alert("Unable to freeze this chat.");
+          });
+        }
       },
       frozen,
     ],
@@ -3669,7 +4569,8 @@ export default function MessagingScreen({
         right: 0,
         display: "flex",
         flexDirection: "column",
-        background: "#000",
+        background:
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.12), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)",
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif",
         color: "#fff",
@@ -3696,6 +4597,10 @@ export default function MessagingScreen({
           0%{opacity:0;transform:translateY(20px)}
           100%{opacity:1;transform:translateY(0)}
         }
+        @keyframes replyCardIn{
+          0%{opacity:0;transform:translateY(10px) scale(0.985)}
+          100%{opacity:1;transform:translateY(0) scale(1)}
+        }
         @keyframes moodBackdropIn{
           0%{opacity:0}
           100%{opacity:1}
@@ -3715,30 +4620,37 @@ export default function MessagingScreen({
         }
         *{box-sizing:border-box}
         input,textarea{outline:none;}
-        input::placeholder,textarea::placeholder{color:#2a2a2a}
+        input::placeholder,textarea::placeholder{color:#64748b}
         ::-webkit-scrollbar{display:none}
       `}</style>
 
       {/* ── HEADER ─────────────────────────────────────────────────────────── */}
       <div
         style={{
+          position: "relative",
+          zIndex: 120,
           flexShrink: 0,
-          background: "#000",
-          padding: "calc(10px + env(safe-area-inset-top, 0px)) 10px 6px",
-          borderRadius: "0 0 18px 18px",
+          background:
+            "radial-gradient(ellipse at 24% -34%, rgba(74,222,128,0.2), transparent 62%), radial-gradient(ellipse at 78% -28%, rgba(14,165,233,0.14), transparent 60%), linear-gradient(180deg, rgba(6,8,6,0.98) 0%, rgba(10,15,10,0.97) 52%, rgba(3,4,3,0.96) 100%)",
+          padding: "calc(14px + var(--safe-area-top)) 14px 12px",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 20px 54px rgba(0,0,0,0.38)",
+          backdropFilter: "blur(20px)",
         }}
       >
-        <div style={{ padding: "4px" }}>
+        <div style={{ padding: 0 }}>
           <div
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              background: "#131313",
-              borderRadius: 50,
-              padding: "10px 12px 10px 16px",
+              background:
+                "radial-gradient(ellipse at 24% -45%, rgba(74,222,128,0.15), transparent 64%), radial-gradient(ellipse at 82% -40%, rgba(14,165,233,0.1), transparent 62%), linear-gradient(180deg, rgba(13,19,14,0.92), rgba(8,13,9,0.96))",
+              borderRadius: 30,
+              padding: "12px",
+              border: "1px solid rgba(255,255,255,0.08)",
               boxShadow:
-                "0 12px 40px rgba(80,80,80,0.25),0 4px 16px rgba(60,60,60,0.2),0 1px 0 rgba(255,255,255,0.06)",
+                "0 24px 70px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.05)",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -3748,15 +4660,23 @@ export default function MessagingScreen({
                   onBack?.();
                 }}
                 style={{
-                  fontSize: 26,
-                  color: "#666",
+                  width: 44,
+                  height: 44,
+                  borderRadius: 20,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.045)",
+                  color: "#94a3b8",
                   cursor: "pointer",
                   lineHeight: 1,
-                  paddingRight: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                   userSelect: "none",
+                  boxShadow:
+                    "0 14px 34px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)",
                 }}
               >
-                {"<"}
+                <ChevronLeft size={20} />
               </span>
               <div style={{ position: "relative" }}>
                 <Avatar
@@ -3776,8 +4696,8 @@ export default function MessagingScreen({
                     width: 12,
                     height: 12,
                     borderRadius: "50%",
-                    background: friendOnline ? "#3df57f" : "#333",
-                    border: "2.5px solid #131313",
+                    background: friendOnline ? "#22c55e" : "#334155",
+                    border: "2.5px solid #0d100d",
                     transition: "background 0.35s ease",
                     boxShadow: friendOnline
                       ? "0 0 6px rgba(61,245,127,0.6)"
@@ -3786,28 +4706,24 @@ export default function MessagingScreen({
                 />
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#fff" }}>
+                <div style={{ fontSize: 16, fontWeight: 850, color: "#fff" }}>
                   {friendInfo.name}
                 </div>
                 <div
                   style={{
                     fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: "0.09em",
-                    color: friendTyping
-                      ? "#3df57f"
-                      : friendOnline
-                        ? "#3df57f"
-                        : "#444",
+                    fontWeight: friendStatusIsLive ? 700 : 500,
+                    letterSpacing: friendStatusIsLive ? "0.09em" : 0,
+                    color: friendStatusIsLive ? "#86efac" : "#94a3b8",
                     marginTop: 2,
                     transition: "color 0.3s ease",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    maxWidth: 180,
                   }}
                 >
-                  {friendTyping
-                    ? "TYPING..."
-                    : friendOnline
-                      ? "ACTIVE NOW"
-                      : "OFFLINE"}
+                  {friendStatusLabel}
                 </div>
               </div>
             </div>
@@ -3818,10 +4734,10 @@ export default function MessagingScreen({
                 style={{
                   width: 44,
                   height: 44,
-                  borderRadius: "50%",
-                  border: "none",
-                  background: "#1e1e1e",
-                  color: "#fff",
+                  borderRadius: 20,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.045)",
+                  color: "#e2e8f0",
                   fontSize: 18,
                   cursor: "pointer",
                   display: "flex",
@@ -3840,7 +4756,7 @@ export default function MessagingScreen({
                     right: 2,
                     width: 8,
                     height: 8,
-                    background: "#3df57f",
+                    background: "#22c55e",
                     borderRadius: "50%",
                     border: "2px solid #000",
                     animation: "pulse 2s infinite",
@@ -3850,35 +4766,45 @@ export default function MessagingScreen({
               {menuOpen && (
                 <>
                   <div
-                    className="app-modal-backdrop"
                     style={{
                       position: "fixed",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      zIndex: 99,
-                    }}
-                    onClick={() => setMenuOpen(false)}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 52,
-                      right: 0,
-                      zIndex: 100,
+                      top: "calc(78px + var(--safe-area-top))",
+                      right: 14,
+                      zIndex: 10000,
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "flex-end",
                       gap: 8,
+                      pointerEvents: "auto",
                     }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {menuActions.map(([label, icon, fn, active], i) => (
                       <button
                         key={i}
+                        type="button"
+                        onPointerUp={(e) => {
+                          if (e.pointerType === "mouse") return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          menuActionPointerHandledRef.current = Date.now();
+                          runMenuAction(fn);
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          fn();
+                          if (
+                            Date.now() - menuActionPointerHandledRef.current <
+                            500
+                          ) {
+                            return;
+                          }
+                          runMenuAction(fn);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          runMenuAction(fn);
                         }}
                         disabled={label === "Frozen by them"}
                         style={{
@@ -3891,14 +4817,14 @@ export default function MessagingScreen({
                             : "1px solid rgba(255,255,255,0.1)",
                           borderRadius: 50,
                           background: active
-                            ? "rgba(61,245,127,0.14)"
-                            : "rgba(18,18,18,0.97)",
+                            ? "rgba(74,222,128,0.14)"
+                            : "rgba(12,16,12,0.97)",
                           backdropFilter: "blur(20px)",
                           color:
                             label === "Frozen by them"
                               ? "#444"
                               : active
-                                ? "#3df57f"
+                                ? "#86efac"
                                 : "#fff",
                           fontSize: 14,
                           fontWeight: 600,
@@ -3906,6 +4832,7 @@ export default function MessagingScreen({
                             label === "Frozen by them"
                               ? "not-allowed"
                               : "pointer",
+                          touchAction: "manipulation",
                           fontFamily: "inherit",
                           letterSpacing: "0.01em",
                           whiteSpace: "nowrap",
@@ -3931,9 +4858,10 @@ export default function MessagingScreen({
           style={{
             flexShrink: 0,
             margin: "8px 14px 0",
-            background: "rgba(139,92,246,0.1)",
+            background:
+              "linear-gradient(180deg, rgba(139,92,246,0.14), rgba(17,13,24,0.92))",
             border: "1px solid rgba(139,92,246,0.2)",
-            borderRadius: 14,
+            borderRadius: 20,
             padding: "9px",
             textAlign: "center",
             color: "#c4b5fd",
@@ -3949,9 +4877,10 @@ export default function MessagingScreen({
           style={{
             flexShrink: 0,
             margin: "8px 14px 0",
-            background: "rgba(59,130,246,0.08)",
+            background:
+              "linear-gradient(180deg, rgba(59,130,246,0.12), rgba(10,16,26,0.92))",
             border: "1px solid rgba(59,130,246,0.3)",
-            borderRadius: 14,
+            borderRadius: 20,
             padding: "10px",
             textAlign: "center",
             color: "#93c5fd",
@@ -3967,12 +4896,94 @@ export default function MessagingScreen({
       )}
 
       {/* ── TIMELINE ───────────────────────────────────────────────────────── */}
+      {currentConversation && enteredTemporaryInvites.length > 0 && (
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            gap: 8,
+            overflowX: "auto",
+            padding: "8px 14px 0",
+          }}
+        >
+          {enteredTemporaryInvites.map((invite) => {
+            const isMe = invite.invitee_id === user?.id;
+            return (
+              <div
+                key={invite.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px 8px 12px",
+                  borderRadius: 999,
+                  background:
+                    "linear-gradient(180deg, rgba(74,222,128,0.14), rgba(12,18,13,0.92))",
+                  border: "1px solid rgba(74,222,128,0.2)",
+                  color: "#d8ffe6",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span>
+                  {isMe
+                    ? "You joined temporarily"
+                    : `${invite.invitee_name} joined`}
+                </span>
+                {(isOriginalParticipant || isMe) && (
+                  <button
+                    type="button"
+                    aria-label={isMe ? "Leave chat" : "Remove friend"}
+                    onClick={() =>
+                      void endTemporaryAccess(invite, isMe ? "left" : "removed")
+                    }
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {isMe ? <LogOut size={13} /> : <UserMinus size={13} />}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {temporaryAccessEnded && (
+        <div
+          style={{
+            flexShrink: 0,
+            margin: "8px 14px 0",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 20,
+            padding: "10px",
+            textAlign: "center",
+            color: "rgba(255,255,255,0.55)",
+            fontSize: 13,
+            fontWeight: 700,
+          }}
+        >
+          Temporary chat access ended
+        </div>
+      )}
+
       <div
         ref={scrollRef}
         style={{
           flex: 1,
           overflowY: "auto",
-          paddingTop: 24,
+          paddingTop: 22,
           paddingBottom: currentMoodBlock ? 172 : 12,
         }}
         onClick={() => setMenuOpen(false)}
@@ -3986,22 +4997,29 @@ export default function MessagingScreen({
               alignItems: "center",
               justifyContent: "center",
               height: "100%",
-              color: "#666",
+              color: "#94a3b8",
               textAlign: "center",
               padding: "20px",
             }}
           >
             <div style={{ fontSize: 24, marginBottom: 16 }}>💬</div>
-            <div style={{ fontSize: 16, marginBottom: 8 }}>
+            <div
+              style={{
+                fontSize: 17,
+                fontWeight: 850,
+                color: "#fff",
+                marginBottom: 8,
+              }}
+            >
               No conversation selected
             </div>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
+            <div style={{ fontSize: 13, opacity: 0.85 }}>
               Select a conversation to start messaging
             </div>
           </div>
         )}
 
-        {currentConversation && (
+        {currentConversation && !temporaryAccessEnded && (
           <>
             <div
               style={{
@@ -4014,10 +5032,14 @@ export default function MessagingScreen({
             >
               <span
                 style={{
-                  color: "#333",
+                  color: "#64748b",
                   fontSize: 11,
                   fontWeight: 700,
                   letterSpacing: "0.12em",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.035)",
+                  padding: "7px 12px",
                 }}
               >
                 TODAY
@@ -4045,7 +5067,9 @@ export default function MessagingScreen({
                     key={item.id}
                     type={item.type}
                     text={item.text}
-                    collapsed={getCollapsed(index)}
+                    collapsed={
+                      item.type === "invite" ? true : getCollapsed(index)
+                    }
                     targetUserId={item.targetUserId}
                     onOpenUserProfile={onOpenUserProfile}
                   />
@@ -4061,6 +5085,7 @@ export default function MessagingScreen({
                   onOpenPhoto={openPhotoViewer}
                   onReply={setReplyFromMessage}
                   onLongPress={setMessageActionTarget}
+                  showSenderName={temporaryGroupModeActive}
                 />
               );
             })}
@@ -4095,8 +5120,9 @@ export default function MessagingScreen({
                     minWidth: 80,
                     padding: "10px 14px",
                     borderRadius: "18px 18px 18px 4px",
-                    background: "rgba(61,245,127,0.06)",
-                    border: "1px solid rgba(61,245,127,0.15)",
+                    background:
+                      "linear-gradient(180deg, rgba(74,222,128,0.1), rgba(12,18,13,0.9))",
+                    border: "1px solid rgba(74,222,128,0.18)",
                     color: "rgba(255,255,255,0.5)",
                     fontSize: 16,
                     lineHeight: 1.4,
@@ -4115,7 +5141,7 @@ export default function MessagingScreen({
                       top: -18,
                       left: 4,
                       fontSize: 10,
-                      color: "#3df57f",
+                      color: "#86efac",
                       fontWeight: 600,
                       letterSpacing: "0.06em",
                       fontStyle: "normal",
@@ -4129,7 +5155,7 @@ export default function MessagingScreen({
                       display: "inline-block",
                       width: 2,
                       height: 16,
-                      background: "#3df57f",
+                      background: "#4ade80",
                       marginLeft: 1,
                       verticalAlign: "middle",
                       animation: "blink 1s step-end infinite",
@@ -4140,6 +5166,23 @@ export default function MessagingScreen({
             )}
           </>
         )}
+        {currentConversation && temporaryAccessEnded && (
+          <div
+            style={{
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "28px 18px",
+              textAlign: "center",
+              color: "rgba(255,255,255,0.42)",
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            This temporary conversation is no longer available.
+          </div>
+        )}
       </div>
 
       {/* ── INPUT ──────────────────────────────────────────────────────────── */}
@@ -4147,22 +5190,27 @@ export default function MessagingScreen({
         style={{
           flexShrink: 0,
           padding: "8px 14px calc(20px + var(--safe-area-bottom))",
-          background: "#000",
-          boxShadow: "inset 0 -8px 0 #000",
+          background:
+            "linear-gradient(180deg, rgba(5,7,5,0.82), rgba(5,7,5,0.98))",
+          borderTop: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 -20px 54px rgba(0,0,0,0.36)",
+          backdropFilter: "blur(20px)",
         }}
       >
         {replyTarget && !currentMoodBlock && !frozen && (
           <div
             style={{
               position: "relative",
-              margin: "0 0 10px 54px",
-              padding: "10px 42px 10px 12px",
-              borderRadius: 16,
+              margin: "0 0 9px 54px",
+              padding: "9px 42px 9px 12px",
+              borderRadius: 18,
               background:
-                "linear-gradient(135deg, rgba(61,245,127,0.12), rgba(255,255,255,0.045))",
-              border: "1px solid rgba(61,245,127,0.2)",
-              boxShadow: "0 12px 30px rgba(0,0,0,0.22)",
+                "linear-gradient(135deg, rgba(13,22,17,0.94), rgba(16,16,16,0.96))",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow:
+                "0 14px 34px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.06)",
               overflow: "hidden",
+              animation: "replyCardIn 0.2s cubic-bezier(0.2, 0.84, 0.24, 1)",
             }}
           >
             <div
@@ -4171,29 +5219,35 @@ export default function MessagingScreen({
                 left: 0,
                 top: 0,
                 bottom: 0,
-                width: 3,
-                background: "#3df57f",
-                boxShadow: "0 0 18px rgba(61,245,127,0.8)",
+                width: 4,
+                background:
+                  "linear-gradient(180deg, #4ade80, rgba(134,239,172,0.74))",
+                boxShadow: "0 0 22px rgba(74,222,128,0.46)",
               }}
             />
             <div
               style={{
-                color: "#86efac",
-                fontSize: 11,
+                color: "#9af5b9",
+                fontSize: 12,
                 fontWeight: 900,
                 marginBottom: 3,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
               }}
             >
               Replying to {replyTarget.senderName}
             </div>
             <div
               style={{
-                color: "rgba(255,255,255,0.82)",
-                fontSize: 13,
-                lineHeight: 1.25,
-                whiteSpace: "nowrap",
+                color: "rgba(255,255,255,0.78)",
+                fontSize: 15,
+                lineHeight: 1.32,
                 overflow: "hidden",
-                textOverflow: "ellipsis",
+                display: "-webkit-box",
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: "vertical",
+                wordBreak: "break-word",
+                overflowWrap: "anywhere",
               }}
             >
               {replyPreviewLabel(replyTarget)}
@@ -4207,15 +5261,16 @@ export default function MessagingScreen({
                 right: 8,
                 top: "50%",
                 transform: "translateY(-50%)",
-                width: 28,
-                height: 28,
+                width: 30,
+                height: 30,
                 borderRadius: "50%",
                 border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(0,0,0,0.35)",
-                color: "#fff",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.86)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                backdropFilter: "blur(10px)",
               }}
             >
               <X size={14} />
@@ -4244,16 +5299,30 @@ export default function MessagingScreen({
               <span style={{ color: "#2a4060" }}>Chat is frozen ❄️</span>
             )}
           </div>
+        ) : temporaryAccessEnded ? (
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 15,
+              padding: "14px 0",
+              color: "rgba(255,255,255,0.35)",
+              fontWeight: 700,
+            }}
+          >
+            Temporary chat ended
+          </div>
         ) : (
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
             <label
               style={{
                 width: 44,
                 height: 44,
-                borderRadius: "50%",
-                border: "none",
-                background: sendingMedia ? "#151515" : "#222",
-                color: "#fff",
+                borderRadius: 20,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: sendingMedia
+                  ? "rgba(255,255,255,0.035)"
+                  : "rgba(255,255,255,0.055)",
+                color: sendingMedia ? "#94a3b8" : "#86efac",
                 fontSize: sendingMedia ? 13 : 24,
                 fontWeight: 300,
                 cursor: sendingMedia ? "default" : "pointer",
@@ -4262,7 +5331,8 @@ export default function MessagingScreen({
                 justifyContent: "center",
                 flexShrink: 0,
                 marginBottom: 2,
-                boxShadow: "0 0 0 1px rgba(255,255,255,0.08)",
+                boxShadow:
+                  "0 14px 34px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)",
                 lineHeight: 1,
                 userSelect: "none",
                 opacity: sendingMedia ? 0.75 : 1,
@@ -4307,12 +5377,14 @@ export default function MessagingScreen({
                 flex: 1,
                 display: "flex",
                 alignItems: "flex-end",
-                background: "#111",
+                background:
+                  "linear-gradient(180deg, rgba(22,26,22,0.98), rgba(13,16,13,0.98))",
                 borderRadius: 24,
                 padding: "11px 14px",
                 gap: 8,
-                border: "1px solid #1e1e1e",
+                border: "1px solid rgba(255,255,255,0.08)",
                 minHeight: 46,
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
               }}
             >
               <textarea
@@ -4337,7 +5409,7 @@ export default function MessagingScreen({
                   color: "#fff",
                   fontSize: 17,
                   lineHeight: 1.4,
-                  caretColor: "#3df57f",
+                  caretColor: "#4ade80",
                   resize: "none",
                   outline: "none",
                   fontFamily: "inherit",
@@ -4357,17 +5429,23 @@ export default function MessagingScreen({
               style={{
                 width: 44,
                 height: 44,
-                borderRadius: "50%",
-                border: "none",
+                borderRadius: 20,
+                border: input.trim()
+                  ? "1px solid rgba(187,247,208,0.28)"
+                  : "1px solid rgba(255,255,255,0.08)",
                 flexShrink: 0,
                 cursor: input.trim() ? "pointer" : "default",
-                background: input.trim() ? "#3df57f" : "#111",
-                boxShadow: "none",
+                background: input.trim()
+                  ? "linear-gradient(135deg,#4ade80,#22c55e)"
+                  : "rgba(255,255,255,0.045)",
+                boxShadow: input.trim()
+                  ? "0 14px 34px rgba(74,222,128,0.22)"
+                  : "inset 0 1px 0 rgba(255,255,255,0.04)",
                 transition: "all 0.2s",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "#000",
+                color: input.trim() ? "#000" : "#64748b",
                 marginBottom: 2,
               }}
             >
@@ -4389,67 +5467,337 @@ export default function MessagingScreen({
         )}
       </div>
 
+      {inviteModalOpen && (
+        <>
+          <div
+            className="app-modal-backdrop"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.72)",
+              backdropFilter: "blur(14px)",
+              zIndex: 210,
+            }}
+            onClick={() => setInviteModalOpen(false)}
+          />
+          <div
+            style={{
+              position: "fixed",
+              left: 12,
+              right: 12,
+              bottom: "calc(12px + var(--safe-area-bottom))",
+              zIndex: 211,
+              maxHeight: "min(76vh, 620px)",
+              background:
+                "radial-gradient(circle at 50% -18%, rgba(74,222,128,0.16), transparent 42%), linear-gradient(180deg, rgba(19,23,19,0.98), rgba(9,11,9,0.99))",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 30,
+              boxShadow:
+                "0 -28px 80px rgba(0,0,0,0.68), inset 0 1px 0 rgba(255,255,255,0.05)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "16px 16px 12px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                borderBottom: "1px solid rgba(255,255,255,0.07)",
+              }}
+            >
+              <div>
+                <div style={{ color: "#fff", fontSize: 18, fontWeight: 900 }}>
+                  Invite friend
+                </div>
+                <div
+                  style={{
+                    color: "rgba(255,255,255,0.42)",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    marginTop: 3,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Temporary access
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close invite friend"
+                onClick={() => setInviteModalOpen(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 16,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.045)",
+                  color: "#94a3b8",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: 14 }}>
+              <div
+                style={{
+                  height: 46,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "0 14px",
+                  borderRadius: 999,
+                  background:
+                    "linear-gradient(180deg, rgba(22,26,22,0.98), rgba(13,16,13,0.98))",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <Search size={17} color="#86efac" />
+                <input
+                  value={inviteSearch}
+                  onChange={(event) => setInviteSearch(event.target.value)}
+                  placeholder="Search friends"
+                  style={{
+                    flex: 1,
+                    background: "transparent",
+                    border: "none",
+                    color: "#fff",
+                    fontSize: 15,
+                    fontFamily: "inherit",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: "0 14px 14px",
+                overflowY: "auto",
+                maxHeight: "calc(min(76vh, 620px) - 128px)",
+              }}
+            >
+              {loadingInviteFriends ? (
+                <div
+                  style={{
+                    padding: "34px 0",
+                    textAlign: "center",
+                    color: "rgba(255,255,255,0.42)",
+                    fontSize: 14,
+                  }}
+                >
+                  Loading friends...
+                </div>
+              ) : filteredInviteFriends.length === 0 ? (
+                <div
+                  style={{
+                    padding: "34px 0",
+                    textAlign: "center",
+                    color: "rgba(255,255,255,0.42)",
+                    fontSize: 14,
+                  }}
+                >
+                  No friends available
+                </div>
+              ) : (
+                filteredInviteFriends.map((friend: any) => {
+                  const friendId = friend.userId || friend.user_id || friend.id;
+                  const name =
+                    friend.displayName ||
+                    friend.display_name ||
+                    friend.nickname ||
+                    friend.username ||
+                    "Someone";
+                  return (
+                    <button
+                      key={friendId}
+                      type="button"
+                      onClick={() => void sendInviteToFriend(friend)}
+                      disabled={sendingInviteId === friendId}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "12px",
+                        border: "1px solid rgba(255,255,255,0.07)",
+                        borderRadius: 22,
+                        background:
+                          "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.025))",
+                        color: "#fff",
+                        marginBottom: 6,
+                        textAlign: "left",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <Avatar
+                        src={friend.avatarUrl || friend.avatar_url || ""}
+                        alt={name}
+                        size="md"
+                        userId={friendId}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 15,
+                            fontWeight: 800,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {name}
+                        </div>
+                        <div
+                          style={{
+                            color: "rgba(255,255,255,0.42)",
+                            fontSize: 13,
+                            marginTop: 2,
+                          }}
+                        >
+                          @
+                          {String(friend.username || "unknown").replace(
+                            /^@/,
+                            "",
+                          )}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: "50%",
+                          background: "linear-gradient(135deg,#4ade80,#22c55e)",
+                          color: "#000",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <UserPlus size={17} />
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
       {/* ── MOOD BLOCK MODAL — sibling of input, not nested inside it ─────── */}
       {moodBlockModalOpen && (
         <>
           <div
             style={{
               position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: "rgba(0,0,0,0.85)",
-              backdropFilter: "blur(20px)",
+              inset: 0,
+              background: "rgba(0,0,0,0.58)",
+              backdropFilter: "blur(12px)",
               zIndex: 200,
               opacity: moodBlockModalVisible ? 1 : 0,
-              transition: "opacity 0.22s ease-out",
+              transition: "opacity 0.2s ease-out",
             }}
             onClick={() => setMoodBlockModalOpen(false)}
           />
           <div
             style={{
               position: "fixed",
-              top: "50%",
-              left: "50%",
-              background: "#1a1a1a",
-              borderRadius: 24,
-              padding: "28px 24px",
+              left: 10,
+              right: 10,
+              bottom: "calc(10px + var(--safe-area-bottom))",
+              background:
+                "linear-gradient(180deg, rgba(22,22,22,0.98), rgba(5,5,5,0.99))",
+              borderRadius: 28,
+              padding: "10px 12px 12px",
               zIndex: 201,
-              width: "92vw",
-              maxWidth: 380,
-              maxHeight: "85vh",
+              maxHeight: "min(78vh, 620px)",
               overflowY: "auto",
-              boxShadow: "0 25px 50px rgba(0,0,0,0.6)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              transformOrigin: "center center",
+              boxShadow:
+                "0 -24px 80px rgba(0,0,0,0.58), inset 0 1px 0 rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.09)",
+              transformOrigin: "bottom center",
               opacity: moodBlockModalVisible ? 1 : 0,
               transform: moodBlockModalVisible
-                ? "translate(-50%, -50%) scale(1)"
-                : "translate(-50%, calc(-50% + 18px)) scale(0.92)",
+                ? "translateY(0) scale(1)"
+                : "translateY(34px) scale(0.98)",
               transition:
-                "opacity 0.24s ease-out, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1)",
+                "opacity 0.2s ease-out, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1)",
             }}
           >
             <div
               style={{
-                fontSize: 20,
-                fontWeight: 700,
-                color: "#fff",
-                textAlign: "center",
-                marginBottom: 24,
-                letterSpacing: "-0.5px",
+                width: 38,
+                height: 4,
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.24)",
+                margin: "0 auto 12px",
+              }}
+            />
+            <div
+              style={{
+                padding: "0 4px 14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
               }}
             >
-              Choose Your Mood
+              <div>
+                <div
+                  style={{
+                    fontSize: 19,
+                    fontWeight: 900,
+                    color: "#fff",
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  Mood Block
+                </div>
+                <div
+                  style={{
+                    marginTop: 3,
+                    color: "rgba(255,255,255,0.42)",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Pick a mood
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close mood block"
+                onClick={() => setMoodBlockModalOpen(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.055)",
+                  color: "rgba(255,255,255,0.86)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={17} />
+              </button>
             </div>
 
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
-                gap: 16,
-                marginBottom: 24,
+                gap: 10,
+                marginBottom: 10,
               }}
             >
               {(
@@ -4475,76 +5823,130 @@ export default function MessagingScreen({
                     label: "Depressed",
                   },
                 ] as const
-              ).map(({ mood, color, label }) => (
-                <button
-                  key={mood}
-                  onClick={() => {
-                    handleMoodBlock(mood);
-                    setMoodBlockModalOpen(false);
-                  }}
-                  style={{
-                    background: `rgba(${color},0.08)`,
-                    border: `1.5px solid rgba(${color},0.25)`,
-                    borderRadius: 20,
-                    padding: "20px 12px",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 10,
-                    minHeight: 110,
-                    WebkitTapHighlightColor: "transparent",
-                  }}
-                  onTouchStart={(e) => {
-                    e.currentTarget.style.background = `rgba(${color},0.15)`;
-                    e.currentTarget.style.transform = "scale(0.96)";
-                  }}
-                  onTouchEnd={(e) => {
-                    e.currentTarget.style.background = `rgba(${color},0.08)`;
-                    e.currentTarget.style.transform = "scale(1)";
-                  }}
-                >
-                  <div style={{ fontSize: 44, lineHeight: 1 }}>
-                    {moodEmoji(mood)}
-                  </div>
-                  <div
+              ).map(({ mood, color, label }) => {
+                const theme = getMoodTheme(mood);
+                return (
+                  <button
+                    key={mood}
+                    onClick={() => {
+                      handleMoodBlock(mood);
+                      setMoodBlockModalOpen(false);
+                    }}
                     style={{
-                      fontSize: 14,
-                      color: `rgb(${color})`,
-                      fontWeight: 600,
-                      letterSpacing: "0.5px",
+                      position: "relative",
+                      overflow: "hidden",
+                      background: `linear-gradient(145deg, rgba(${color},0.12), rgba(255,255,255,0.035))`,
+                      border: `1px solid rgba(${color},0.28)`,
+                      borderRadius: 20,
+                      padding: "14px 13px",
+                      cursor: "pointer",
+                      transition:
+                        "transform 0.18s ease, background 0.18s ease, border-color 0.18s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      minHeight: 82,
+                      textAlign: "left",
+                      WebkitTapHighlightColor: "transparent",
+                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 12px 28px rgba(${color},0.08)`,
+                    }}
+                    onTouchStart={(e) => {
+                      e.currentTarget.style.background = `linear-gradient(145deg, rgba(${color},0.18), rgba(255,255,255,0.055))`;
+                      e.currentTarget.style.transform = "scale(0.975)";
+                    }}
+                    onTouchEnd={(e) => {
+                      e.currentTarget.style.background = `linear-gradient(145deg, rgba(${color},0.12), rgba(255,255,255,0.035))`;
+                      e.currentTarget.style.transform = "scale(1)";
                     }}
                   >
-                    {label}
-                  </div>
-                </button>
-              ))}
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: "-22px -18px auto auto",
+                        width: 72,
+                        height: 72,
+                        borderRadius: "50%",
+                        background: `radial-gradient(circle, ${theme.accentGlow}, transparent 68%)`,
+                        filter: "blur(5px)",
+                        opacity: 0.55,
+                        pointerEvents: "none",
+                      }}
+                    />
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 16,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 30,
+                        lineHeight: 1,
+                        background: `rgba(${color},0.16)`,
+                        border: `1px solid rgba(${color},0.22)`,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {moodEmoji(mood)}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          color: "#fff",
+                          fontWeight: 850,
+                          letterSpacing: 0,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {label}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 5,
+                          color: `rgb(${color})`,
+                          fontSize: 10,
+                          fontWeight: 900,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {theme.label}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             <button
               onClick={() => setMoodBlockModalOpen(false)}
               style={{
                 width: "100%",
-                background: "rgba(51,51,51,0.8)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 16,
-                padding: "18px",
-                color: "#fff",
-                fontSize: 17,
-                fontWeight: 600,
+                background: "rgba(255,255,255,0.055)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 18,
+                padding: "15px",
+                color: "rgba(255,255,255,0.78)",
+                fontSize: 15,
+                fontWeight: 800,
                 cursor: "pointer",
                 transition: "all 0.15s ease",
-                minHeight: 56,
+                minHeight: 50,
                 WebkitTapHighlightColor: "transparent",
-                letterSpacing: "0.3px",
+                letterSpacing: 0,
               }}
               onTouchStart={(e) => {
-                e.currentTarget.style.background = "rgba(68,68,68,0.9)";
+                e.currentTarget.style.background = "rgba(255,255,255,0.085)";
                 e.currentTarget.style.transform = "scale(0.98)";
               }}
               onTouchEnd={(e) => {
-                e.currentTarget.style.background = "rgba(51,51,51,0.8)";
+                e.currentTarget.style.background = "rgba(255,255,255,0.055)";
                 e.currentTarget.style.transform = "scale(1)";
               }}
             >
@@ -4848,7 +6250,8 @@ export default function MessagingScreen({
                 padding: "0 18px",
                 border: "none",
                 borderBottom:
-                  messageActionTarget.from === "me" && !messageActionTarget.optimistic
+                  messageActionTarget.from === "me" &&
+                  !messageActionTarget.optimistic
                     ? "1px solid rgba(255,255,255,0.06)"
                     : "none",
                 background: "transparent",
@@ -4860,25 +6263,28 @@ export default function MessagingScreen({
             >
               Delete for me
             </button>
-            {messageActionTarget.from === "me" && !messageActionTarget.optimistic && (
-              <button
-                type="button"
-                onClick={() => void deleteMessageForEveryone(messageActionTarget)}
-                style={{
-                  width: "100%",
-                  minHeight: 54,
-                  padding: "0 18px",
-                  border: "none",
-                  background: "transparent",
-                  color: "#ff8a8a",
-                  fontSize: 16,
-                  fontWeight: 800,
-                  textAlign: "left",
-                }}
-              >
-                Delete for everyone
-              </button>
-            )}
+            {messageActionTarget.from === "me" &&
+              !messageActionTarget.optimistic && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void deleteMessageForEveryone(messageActionTarget)
+                  }
+                  style={{
+                    width: "100%",
+                    minHeight: 54,
+                    padding: "0 18px",
+                    border: "none",
+                    background: "transparent",
+                    color: "#ff8a8a",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    textAlign: "left",
+                  }}
+                >
+                  Delete for everyone
+                </button>
+              )}
             <div style={{ padding: "8px" }}>
               <button
                 type="button"

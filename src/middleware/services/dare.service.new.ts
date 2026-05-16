@@ -17,6 +17,7 @@ import {
   AlertRepository,
 } from "@/backend/repositories/AlertRepository";
 import { AlertEntity } from "@/backend/domain/entities/Alert";
+import { AlertService } from "./alert.service.new";
 import { UserRepository } from "@/backend/repositories/UserRepository";
 import { friendsService } from "./friends.service";
 import { ghostModeService } from "./ghost-mode.service";
@@ -55,6 +56,7 @@ class DareService {
   private friendshipRepository: IFriendshipRepository;
   private feedRepository: IFeedRepository;
   private alertRepository: IAlertRepository;
+  private challengeAlertService: AlertService;
   private userRepository: UserRepository;
 
   // Helper method to truncate content to prevent large alerts
@@ -75,6 +77,7 @@ class DareService {
       friendshipRepository || new FriendshipRepository();
     this.feedRepository = feedRepository || new FeedRepository();
     this.alertRepository = alertRepository || new AlertRepository();
+    this.challengeAlertService = new AlertService(new AlertRepository());
     this.userRepository = new UserRepository();
   }
 
@@ -153,6 +156,14 @@ class DareService {
       });
 
       await this.alertRepository.createAlert(alert);
+
+      await this.challengeAlertService.createFriendChallengeActivityAlerts({
+        challengeKind: "dare",
+        challengeId: dareEntity.id,
+        challengerId: authenticatedUserId,
+        receiverId: request.receiverId,
+        prompt: sanitizedDescription,
+      });
 
       await this.feedRepository.createFeedEvent({
         userId: authenticatedUserId,
@@ -306,6 +317,7 @@ class DareService {
     userId: string,
     mediaUrl: string,
     mediaType: "TEXT" | "PHOTO" | "VIDEO",
+    thumbnailUrl?: string,
   ): Promise<DareResponse> {
     try {
       const dareResponse = await this.getDareById(dareId);
@@ -334,6 +346,7 @@ class DareService {
         dareId,
         mediaUrl,
         mediaType,
+        thumbnailUrl,
       );
       const updatedDareEntity = DareEntity.create(updatedDareData);
 
@@ -449,6 +462,15 @@ class DareService {
 
         // Activate ghost mode for the receiver if the dare was completed as REAL
         if (isReal) {
+          await this.challengeAlertService.createFriendChallengeActivityAlerts({
+            challengeKind: "dare",
+            challengeId: dareId,
+            challengerId: dare.challengerId,
+            receiverId: dare.receiverId,
+            prompt: dare.description,
+            activityType: "completed",
+          });
+
           try {
             await ghostModeService.activateGhostMode({
               userId: dare.receiverId,
@@ -523,6 +545,15 @@ class DareService {
             receiverId: dare.receiverId,
             result: "REAL",
           },
+        });
+
+        await this.challengeAlertService.createFriendChallengeActivityAlerts({
+          challengeKind: "dare",
+          challengeId: dareId,
+          challengerId: dare.challengerId,
+          receiverId: dare.receiverId,
+          prompt: dare.description,
+          activityType: "completed",
         });
 
         let challengerName = dare.challengerId;

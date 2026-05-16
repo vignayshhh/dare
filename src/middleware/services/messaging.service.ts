@@ -1,4 +1,4 @@
-import { db, realtimeDb } from "@/backend/lib/firebase";
+import { auth, db, realtimeDb } from "@/backend/lib/firebase";
 import {
   doc,
   getDoc,
@@ -16,8 +16,18 @@ import {
   Unsubscribe,
   Timestamp,
   increment,
+  documentId,
 } from "firebase/firestore";
-import { ref, onValue, get, set, onDisconnect, push } from "firebase/database";
+import {
+  ref,
+  onValue,
+  get,
+  set,
+  onDisconnect,
+  push,
+  serverTimestamp as rtdbServerTimestamp,
+} from "firebase/database";
+import { onAuthStateChanged } from "firebase/auth";
 import { friendsService } from "./friends.service";
 import { ghostModeService } from "./ghost-mode.service";
 import {
@@ -59,6 +69,7 @@ export interface Conversation {
   unread_count_by_user?: Record<string, number>;
   cleared_at?: string | null;
   cleared_at_by_user?: Record<string, string | null>;
+  temporary_participant_ids?: string[];
 }
 
 export interface MessageEvent {
@@ -76,8 +87,10 @@ export interface MessageEvent {
     | "opened_noreply"
     | "long_unsent"
     | "mention"
-    | "ignored";
+    | "ignored"
+    | "invite";
   data?: any;
+  participants?: string[];
   created_at: string;
 }
 
@@ -89,6 +102,74 @@ export interface TypingIndicator {
   is_online?: boolean;
   typing_speed?: "slow" | "normal" | "fast" | "furious";
   last_seen: string;
+}
+
+export interface UserPresenceStatus {
+  userId: string;
+  isOnline: boolean;
+  lastSeen: string | number | null;
+  timezone: string;
+  typingConversationId?: string | null;
+  typingSpeed?: string;
+}
+
+function getClientTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function presenceTimeToMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === "number") return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "string") {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toMillis" in value &&
+    typeof (value as { toMillis?: () => number }).toMillis === "function"
+  ) {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: () => Date }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate().getTime();
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "seconds" in value &&
+    typeof (value as { seconds?: number }).seconds === "number"
+  ) {
+    return (value as { seconds: number }).seconds * 1000;
+  }
+  return null;
+}
+
+function isRecentPresenceTime(value: unknown, windowMs = 90000): boolean {
+  const millis = presenceTimeToMillis(value);
+  return millis !== null && Date.now() - millis >= 0 && Date.now() - millis <= windowMs;
+}
+
+const MESSAGING_DEBUG = true;
+
+function messagingDebug(label: string, details: Record<string, unknown> = {}) {
+  if (!MESSAGING_DEBUG) return;
+  console.log(`[MessagingDebug] ${label}`, {
+    at: new Date().toISOString(),
+    authUid: auth.currentUser?.uid ?? null,
+    ...details,
+  });
 }
 
 export interface CreateMessageRequest {
@@ -160,6 +241,66 @@ class MessagingService {
   // In-memory profile cache to avoid repeated Firestore reads for the same
   // user. Entries expire after 5 minutes.
   private profileCache = new Map<string, any>();
+  private onlineStatusWriteVersion = new Map<string, number>();
+
+  private async waitForRealtimeAuth(
+    userId: string,
+    timeoutMs = 10000,
+  ): Promise<boolean> {
+    if (!auth) return false;
+    if (auth.currentUser?.uid === userId) return true;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let unsubscribe: (() => void) | null = null;
+      const finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (unsubscribe) unsubscribe();
+        clearTimeout(timeout);
+        resolve(ready);
+      };
+      const timeout = setTimeout(() => finish(false), timeoutMs);
+
+      try {
+        // IMPORTANT: only resolve when auth becomes the expected user. Resolving
+        // on the initial null fire (which happens on page reload before Firebase
+        // Auth has restored the cached session) would cause presence/typing
+        // writes to be silently skipped, leaving the user appearing offline.
+        unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          if (firebaseUser?.uid === userId) {
+            finish(true);
+          }
+        });
+      } catch {
+        finish(false);
+      }
+    });
+  }
+
+  private async waitForAnyRealtimeAuth(timeoutMs = 10000): Promise<boolean> {
+    if (!auth) return false;
+    if (auth.currentUser) return true;
+    return new Promise((resolve) => {
+      let settled = false;
+      let unsubscribe: (() => void) | null = null;
+      const finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (unsubscribe) unsubscribe();
+        clearTimeout(timeout);
+        resolve(ready);
+      };
+      const timeout = setTimeout(() => finish(false), timeoutMs);
+      try {
+        unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          if (firebaseUser) finish(true);
+        });
+      } catch {
+        finish(false);
+      }
+    });
+  }
 
   private async isGhostModeActive(userId: string): Promise<boolean> {
     try {
@@ -186,6 +327,36 @@ class MessagingService {
       setTimeout(() => this.profileCache.delete(userId), 5 * 60 * 1000);
     }
     return profile;
+  }
+
+  private getOriginalParticipantIds(
+    conversationData: Partial<Conversation> | null,
+  ): string[] {
+    if (!conversationData) return [];
+    return [conversationData.user1_id, conversationData.user2_id].filter(
+      (id): id is string => !!id,
+    );
+  }
+
+  private getAllConversationParticipantIds(
+    conversationData: Partial<Conversation> | null,
+  ): string[] {
+    return [
+      ...this.getOriginalParticipantIds(conversationData),
+      ...(conversationData?.temporary_participant_ids || []).filter(Boolean),
+    ].filter((id, index, self) => self.indexOf(id) === index);
+  }
+
+  private async getActiveParticipantIdsForConversation(
+    conversationId: string,
+  ): Promise<string[]> {
+    const conversationSnap = await getDoc(
+      doc(db, "conversations", conversationId),
+    );
+    const conversationData = conversationSnap.exists()
+      ? (conversationSnap.data() as Conversation)
+      : null;
+    return this.getAllConversationParticipantIds(conversationData);
   }
 
   // ── Conversations ──────────────────────────────────────────────────────────
@@ -298,11 +469,14 @@ class MessagingService {
         this.getConversationUnreadCount(conversation, userId),
       ]);
       const effectiveClearedAt =
-        conversation.cleared_at_by_user?.[userId] ?? conversation.cleared_at ?? null;
+        conversation.cleared_at_by_user?.[userId] ??
+        conversation.cleared_at ??
+        null;
       const lastMessageVisible =
         !effectiveClearedAt ||
         !lastMessage ||
-        this.toMillis(lastMessage.created_at) > this.toMillis(effectiveClearedAt);
+        this.toMillis(lastMessage.created_at) >
+          this.toMillis(effectiveClearedAt);
 
       let typingStatus = null;
       try {
@@ -314,6 +488,7 @@ class MessagingService {
       return {
         ...conversation,
         cleared_at: effectiveClearedAt,
+        temporary_participant_ids: conversation.temporary_participant_ids || [],
         other_user: {
           id: otherUser.id,
           user_id: otherUser.user_id || otherUser.id,
@@ -393,14 +568,8 @@ class MessagingService {
 
       // Stamp participants so Firestore rules can gate message reads on
       // `auth.uid in resource.data.participants` without a cross-doc get().
-      const participants: string[] = [];
-      if (conversationData?.user1_id)
-        participants.push(conversationData.user1_id);
-      if (
-        conversationData?.user2_id &&
-        conversationData.user2_id !== conversationData.user1_id
-      )
-        participants.push(conversationData.user2_id);
+      const participants =
+        this.getAllConversationParticipantIds(conversationData);
 
       const messageRef = doc(collection(db, "messages"));
       const data = {
@@ -445,6 +614,7 @@ class MessagingService {
     mediaType?: "TEXT" | "PHOTO" | "VIDEO",
     recipientId?: string,
     replyTo?: Message["reply_to"],
+    participantIds?: string[],
   ): Promise<MessageWithSender> {
     try {
       // SECURITY: Validate message content client-side before sending to Firestore
@@ -457,11 +627,12 @@ class MessagingService {
       // recipientId passed by the caller avoids a getDoc(conversation) on every
       // send. Fall back to fetching the conversation only when not provided.
       let resolvedRecipientId = recipientId;
+      let conversationData: Conversation | null = null;
       if (!resolvedRecipientId) {
         const conversationSnap = await getDoc(
           doc(db, "conversations", conversationId),
         );
-        const conversationData = conversationSnap.exists()
+        conversationData = conversationSnap.exists()
           ? (conversationSnap.data() as Conversation)
           : null;
         resolvedRecipientId =
@@ -470,11 +641,26 @@ class MessagingService {
             : conversationData?.user1_id;
       }
 
-      // Compute participants for rule-based DM privacy. Dedup in case of
-      // self-conversations (shouldn't happen but be safe).
-      const participants: string[] = [senderId];
-      if (resolvedRecipientId && resolvedRecipientId !== senderId)
-        participants.push(resolvedRecipientId);
+      let participants =
+        participantIds?.filter(Boolean) ||
+        (conversationData
+          ? this.getAllConversationParticipantIds(conversationData)
+          : []);
+
+      if (participants.length === 0) {
+        const conversationSnap = await getDoc(
+          doc(db, "conversations", conversationId),
+        );
+        conversationData = conversationSnap.exists()
+          ? (conversationSnap.data() as Conversation)
+          : null;
+        participants = this.getAllConversationParticipantIds(conversationData);
+      }
+
+      if (!participants.includes(senderId)) participants.push(senderId);
+      participants = participants.filter(
+        (id, index, self) => id && self.indexOf(id) === index,
+      );
 
       const messageRef = doc(collection(db, "messages"));
       const data: any = {
@@ -500,10 +686,12 @@ class MessagingService {
           last_message_content: content,
           [`unread_count_by_user.${senderId}`]: 0,
         };
-        if (resolvedRecipientId) {
-          conversationUpdates[`unread_count_by_user.${resolvedRecipientId}`] =
-            increment(1);
-        }
+        participants
+          .filter((participantId) => participantId !== senderId)
+          .forEach((participantId) => {
+            conversationUpdates[`unread_count_by_user.${participantId}`] =
+              increment(1);
+          });
         await updateDoc(
           doc(db, "conversations", conversationId),
           conversationUpdates,
@@ -536,7 +724,7 @@ class MessagingService {
         conversation_id: conversationId,
         user_id: senderId,
         event_type: "message_sent",
-        data: { message_id: messageRef.id },
+        data: { message_id: messageRef.id, participants },
       });
 
       return message;
@@ -559,15 +747,20 @@ class MessagingService {
     conversationId: string,
     beforeCreatedAt: any,
     messageLimit = 50,
+    visibleToUserId?: string,
   ): Promise<MessageWithSender[]> {
     try {
-      const q = query(
-        collection(db, "messages"),
+      const constraints: any[] = [
         where("conversation_id", "==", conversationId),
         where("created_at", "<", beforeCreatedAt),
-        orderBy("created_at", "desc"),
-        limit(messageLimit),
-      );
+      ];
+      if (visibleToUserId) {
+        constraints.push(
+          where("participants", "array-contains", visibleToUserId),
+        );
+      }
+      constraints.push(orderBy("created_at", "desc"), limit(messageLimit));
+      const q = query(collection(db, "messages"), ...constraints);
       const snap = await getDocs(q);
       const rawMessages = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as Message)
@@ -665,16 +858,19 @@ class MessagingService {
     conversationId: string,
     callback: (messages: MessageWithSender[]) => void,
     messageLimit = 50,
+    visibleToUserId?: string,
   ): Unsubscribe {
     // Fetch the latest messageLimit messages (DESC) so reads are bounded by
     // messageLimit, not conversation length. Reversed to present oldest-first.
     // For history beyond the limit use getOlderMessages().
-    const q = query(
-      collection(db, "messages"),
-      where("conversation_id", "==", conversationId),
-      orderBy("created_at", "desc"),
-      limit(messageLimit),
-    );
+    const constraints: any[] = [where("conversation_id", "==", conversationId)];
+    if (visibleToUserId) {
+      constraints.push(
+        where("participants", "array-contains", visibleToUserId),
+      );
+    }
+    constraints.push(orderBy("created_at", "desc"), limit(messageLimit));
+    const q = query(collection(db, "messages"), ...constraints);
 
     return onSnapshot(
       q,
@@ -725,6 +921,13 @@ class MessagingService {
         callback(messages);
       },
       (error) => {
+        if (error?.code === "permission-denied") {
+          console.warn(
+            "subscribeToMessages closed because conversation access ended",
+          );
+          callback([]);
+          return;
+        }
         console.error("❌ subscribeToMessages snapshot error:", error);
       },
     );
@@ -861,13 +1064,18 @@ class MessagingService {
           id,
           user1_id: data.user1_id,
           user2_id: data.user2_id,
+          temporary_participant_ids: Array.isArray(
+            data.temporary_participant_ids,
+          )
+            ? data.temporary_participant_ids
+            : [],
           created_at:
             data.created_at?.toDate?.().toISOString() ?? data.created_at ?? "",
           updated_at:
             data.updated_at?.toDate?.().toISOString() ?? data.updated_at ?? "",
           last_message_at: lastMessageVisible ? lastMessageAt : "",
           last_message_content: lastMessageVisible
-            ? data.last_message_content ?? ""
+            ? (data.last_message_content ?? "")
             : "",
           cleared_at: effectiveClearedAt,
           other_user: {
@@ -913,21 +1121,51 @@ class MessagingService {
       callback(deduped);
     };
 
-    const unsub1 = onSnapshot(q1, (snap) => {
-      q1Docs.clear();
-      snap.docs.forEach((d) => q1Docs.set(d.id, d.data()));
+    const handleConversationSnapshotError = (
+      source: "user1" | "user2",
+      error: any,
+    ) => {
+      if (error?.code === "permission-denied") {
+        console.warn(
+          `[messaging] Conversation ${source} listener denied; waiting for auth/rules to settle.`,
+        );
+      } else {
+        console.error(`❌ subscribeToConversations ${source} error:`, error);
+      }
+      if (source === "user1") {
+        q1Docs.clear();
+        q1Ready = true;
+      } else {
+        q2Docs.clear();
+        q2Ready = true;
+      }
       rebuildAllDocs();
-      q1Ready = true;
       scheduleProcess();
-    });
+    };
 
-    const unsub2 = onSnapshot(q2, (snap) => {
-      q2Docs.clear();
-      snap.docs.forEach((d) => q2Docs.set(d.id, d.data()));
-      rebuildAllDocs();
-      q2Ready = true;
-      scheduleProcess();
-    });
+    const unsub1 = onSnapshot(
+      q1,
+      (snap) => {
+        q1Docs.clear();
+        snap.docs.forEach((d) => q1Docs.set(d.id, d.data()));
+        rebuildAllDocs();
+        q1Ready = true;
+        scheduleProcess();
+      },
+      (error) => handleConversationSnapshotError("user1", error),
+    );
+
+    const unsub2 = onSnapshot(
+      q2,
+      (snap) => {
+        q2Docs.clear();
+        snap.docs.forEach((d) => q2Docs.set(d.id, d.data()));
+        rebuildAllDocs();
+        q2Ready = true;
+        scheduleProcess();
+      },
+      (error) => handleConversationSnapshotError("user2", error),
+    );
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -944,16 +1182,57 @@ class MessagingService {
     isTyping: boolean,
     typingSpeed?: "slow" | "normal" | "fast" | "furious",
   ): void {
+    messagingDebug("setTypingIndicator:called", {
+      conversationId,
+      userId,
+      isTyping,
+      typingSpeed: typingSpeed || "normal",
+    });
     void (async () => {
       try {
+        const hasRealtimeAuth = await this.waitForRealtimeAuth(userId);
+        messagingDebug("setTypingIndicator:authResult", {
+          conversationId,
+          userId,
+          isTyping,
+          hasRealtimeAuth,
+        });
+        if (!hasRealtimeAuth) {
+          console.warn(
+            "[messaging] Skipping typing RTDB write until Firebase Auth is ready.",
+          );
+          return;
+        }
         const typingRef = ref(realtimeDb, `typing/${conversationId}/${userId}`);
         const ghostModeActive = await this.isGhostModeActive(userId);
+        messagingDebug("setTypingIndicator:ghostModeResult", {
+          conversationId,
+          userId,
+          isTyping,
+          ghostModeActive,
+        });
 
         if (ghostModeActive) {
           await set(typingRef, {
             is_typing: false,
             typing_speed: "normal",
             last_seen: new Date().toISOString(),
+          });
+          messagingDebug("setTypingIndicator:rtdbWriteGhostComplete", {
+            path: `typing/${conversationId}/${userId}`,
+          });
+          await setDoc(
+            doc(db, "presence", userId),
+            {
+              typing_in_conversation_id: null,
+              typing_speed: "normal",
+              last_seen: serverTimestamp(),
+              updated_at: serverTimestamp(),
+            },
+            { merge: true },
+          );
+          messagingDebug("setTypingIndicator:presenceWriteGhostComplete", {
+            path: `presence/${userId}`,
           });
           return;
         }
@@ -963,14 +1242,43 @@ class MessagingService {
           typing_speed: typingSpeed || "normal",
           last_seen: new Date().toISOString(),
         });
+        messagingDebug("setTypingIndicator:rtdbWriteComplete", {
+          path: `typing/${conversationId}/${userId}`,
+          isTyping,
+          typingSpeed: typingSpeed || "normal",
+        });
+        await setDoc(
+          doc(db, "presence", userId),
+          {
+            typing_in_conversation_id: isTyping ? conversationId : null,
+            typing_speed: isTyping ? typingSpeed || "normal" : "normal",
+            last_seen: serverTimestamp(),
+            updated_at: serverTimestamp(),
+          },
+          { merge: true },
+        );
+        messagingDebug("setTypingIndicator:presenceWriteComplete", {
+          path: `presence/${userId}`,
+          typingConversationId: isTyping ? conversationId : null,
+          typingSpeed: isTyping ? typingSpeed || "normal" : "normal",
+        });
         if (isTyping) {
           await onDisconnect(typingRef).set({
             is_typing: false,
             typing_speed: "normal",
             last_seen: new Date().toISOString(),
           });
+          messagingDebug("setTypingIndicator:onDisconnectRegistered", {
+            path: `typing/${conversationId}/${userId}`,
+          });
         }
       } catch (error) {
+        messagingDebug("setTypingIndicator:error", {
+          conversationId,
+          userId,
+          isTyping,
+          error,
+        });
         console.error("❌ setTypingIndicator:", error);
       }
     })();
@@ -986,7 +1294,12 @@ class MessagingService {
     void (async () => {
       try {
         const path = `drafts/${conversationId}/${userId}`;
-        console.log("[draft service] Writing to RTDB path:", path, "text:", text);
+        console.log(
+          "[draft service] Writing to RTDB path:",
+          path,
+          "text:",
+          text,
+        );
         const draftRef = ref(realtimeDb, path);
         const ghostModeActive = await this.isGhostModeActive(userId);
 
@@ -1132,25 +1445,28 @@ class MessagingService {
     return () => unsubscribes.forEach((u) => u());
   }
 
-  subscribeToConversationsTyping(
-    conversationIds: string[],
-    currentUserId: string,
-    callback: (typingByConvId: Map<string, boolean>) => void,
+  subscribeToUsersPresenceStatus(
+    userIds: string[],
+    callback: (statuses: UserPresenceStatus[]) => void,
   ): Unsubscribe {
-    if (conversationIds.length === 0) return () => {};
-    const typingMap = new Map<string, boolean>();
+    if (userIds.length === 0) return () => {};
+    const statusByUserId = new Map<string, UserPresenceStatus>();
     const unsubscribes: Array<() => void> = [];
 
-    conversationIds.forEach((convId) => {
-      const typingRef = ref(realtimeDb, `typing/${convId}`);
-      const unsub = onValue(typingRef, (snap) => {
+    userIds.forEach((uid) => {
+      const statusRef = ref(realtimeDb, `online_status/${uid}`);
+      const unsub = onValue(statusRef, (snap) => {
         const data = snap.val() || {};
-        const otherTyping = Object.entries(data).some(
-          ([uid, val]) =>
-            uid !== currentUserId && (val as any)?.is_typing === true,
-        );
-        typingMap.set(convId, otherTyping);
-        callback(new Map(typingMap));
+        statusByUserId.set(uid, {
+          userId: uid,
+          isOnline: data?.is_online === true,
+          lastSeen: data?.last_seen ?? null,
+          timezone:
+            typeof data?.timezone === "string" && data.timezone
+              ? data.timezone
+              : "",
+        });
+        callback(Array.from(statusByUserId.values()));
       });
       unsubscribes.push(unsub);
     });
@@ -1158,22 +1474,433 @@ class MessagingService {
     return () => unsubscribes.forEach((u) => u());
   }
 
-  setOnlineStatus(userId: string, isOnline: boolean): void {
-    try {
-      const statusRef = ref(realtimeDb, `online_status/${userId}`);
-      set(statusRef, {
-        is_online: isOnline,
-        last_seen: new Date().toISOString(),
-      });
-      if (isOnline) {
-        onDisconnect(statusRef).set({
-          is_online: false,
-          last_seen: new Date().toISOString(),
+  subscribeToUsersLivePresenceStatus(
+    userIds: string[],
+    callback: (statuses: UserPresenceStatus[]) => void,
+  ): Unsubscribe {
+    const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+    if (uniqueUserIds.length === 0) return () => {};
+
+    const rtdbStatusByUserId = new Map<string, UserPresenceStatus>();
+    const firestoreStatusByUserId = new Map<string, UserPresenceStatus>();
+    const unsubscribes: Array<() => void> = [];
+    let cancelled = false;
+
+    const emit = () => {
+      const mergedStatuses = uniqueUserIds.map((userId) => {
+          const firestoreStatus = firestoreStatusByUserId.get(userId);
+          const rtdbStatus = rtdbStatusByUserId.get(userId);
+          return {
+            userId,
+            isOnline:
+              firestoreStatus?.isOnline === true ||
+              rtdbStatus?.isOnline === true,
+            lastSeen: rtdbStatus?.lastSeen ?? firestoreStatus?.lastSeen ?? null,
+            timezone: rtdbStatus?.timezone || firestoreStatus?.timezone || "",
+            typingConversationId: firestoreStatus?.typingConversationId ?? null,
+            typingSpeed: firestoreStatus?.typingSpeed,
+          };
         });
+      messagingDebug("presence:emitMergedStatuses", {
+        requestedUserIds: uniqueUserIds,
+        rtdbStatusByUserId: Object.fromEntries(rtdbStatusByUserId),
+        firestoreStatusByUserId: Object.fromEntries(firestoreStatusByUserId),
+        mergedStatuses,
+      });
+      callback(mergedStatuses);
+    };
+
+    const attachListeners = () => {
+      if (cancelled) return;
+      messagingDebug("presence:attachListeners", {
+        uniqueUserIds,
+      });
+
+      uniqueUserIds.forEach((uid) => {
+        const statusRef = ref(realtimeDb, `online_status/${uid}`);
+        messagingDebug("presence:rtdbListenerAttaching", {
+          uid,
+          path: `online_status/${uid}`,
+        });
+        const unsub = onValue(
+          statusRef,
+          (snap) => {
+            const data = snap.val() || {};
+            const interpretedStatus = {
+              userId: uid,
+              isOnline:
+                data?.is_online === true ||
+                (data?.is_online !== false &&
+                  isRecentPresenceTime(data?.last_seen)),
+              lastSeen: data?.last_seen ?? null,
+              timezone:
+                typeof data?.timezone === "string" && data.timezone
+                  ? data.timezone
+                  : "",
+            };
+            messagingDebug("presence:rtdbSnapshot", {
+              uid,
+              exists: snap.exists(),
+              raw: data,
+              interpretedStatus,
+            });
+            rtdbStatusByUserId.set(uid, interpretedStatus);
+            emit();
+          },
+          (error) => {
+            messagingDebug("presence:rtdbSnapshotError", {
+              uid,
+              error,
+            });
+            console.error(
+              "[messaging] RTDB presence subscription failed:",
+              error,
+            );
+            rtdbStatusByUserId.set(uid, {
+              userId: uid,
+              isOnline: false,
+              lastSeen: null,
+              timezone: "",
+            });
+            emit();
+          },
+        );
+        unsubscribes.push(unsub);
+      });
+
+      for (let index = 0; index < uniqueUserIds.length; index += 10) {
+        const chunk = uniqueUserIds.slice(index, index + 10);
+        const presenceQuery = query(
+          collection(db, "presence"),
+          where(documentId(), "in", chunk),
+        );
+        messagingDebug("presence:firestoreListenerAttaching", {
+          chunk,
+          path: "presence",
+        });
+        const unsub = onSnapshot(
+          presenceQuery,
+          (snapshot) => {
+            messagingDebug("presence:firestoreSnapshotReceived", {
+              chunk,
+              docCount: snapshot.docs.length,
+              fromCache: snapshot.metadata.fromCache,
+              hasPendingWrites: snapshot.metadata.hasPendingWrites,
+              docs: snapshot.docs.map((presenceDoc) => ({
+                id: presenceDoc.id,
+                raw: presenceDoc.data(),
+              })),
+            });
+            chunk.forEach((uid) => {
+              if (
+                !snapshot.docs.some((presenceDoc) => presenceDoc.id === uid)
+              ) {
+                messagingDebug("presence:firestoreMissingDoc", {
+                  uid,
+                  chunk,
+                });
+                firestoreStatusByUserId.set(uid, {
+                  userId: uid,
+                  isOnline: false,
+                  lastSeen: null,
+                  timezone: "",
+                  typingConversationId: null,
+                });
+              }
+            });
+            snapshot.docs.forEach((presenceDoc) => {
+              const data = presenceDoc.data();
+              const interpretedStatus = {
+                userId: presenceDoc.id,
+                isOnline:
+                  data?.is_online === true ||
+                  (data?.is_online !== false &&
+                    isRecentPresenceTime(data?.last_seen)),
+                lastSeen: data?.last_seen ?? null,
+                timezone:
+                  typeof data?.timezone === "string" && data.timezone
+                    ? data.timezone
+                    : "",
+                typingConversationId:
+                  typeof data?.typing_in_conversation_id === "string"
+                    ? data.typing_in_conversation_id
+                    : null,
+                typingSpeed:
+                  typeof data?.typing_speed === "string"
+                    ? data.typing_speed
+                    : undefined,
+              };
+              messagingDebug("presence:firestoreDocInterpreted", {
+                uid: presenceDoc.id,
+                raw: data,
+                interpretedStatus,
+              });
+              firestoreStatusByUserId.set(presenceDoc.id, interpretedStatus);
+            });
+            emit();
+          },
+          (error) => {
+            messagingDebug("presence:firestoreSnapshotError", {
+              chunk,
+              error,
+            });
+            console.error(
+              "[messaging] Firestore presence subscription failed:",
+              error,
+            );
+            emit();
+          },
+        );
+        unsubscribes.push(unsub);
       }
-    } catch (error) {
-      console.error("❌ setOnlineStatus:", error);
-    }
+    };
+
+    console.log(
+      "🔍 [MessagingService DEBUG] subscribeToUsersLivePresenceStatus called:",
+      {
+        uniqueUserIds,
+        waitingForAuth: true,
+      },
+    );
+
+    messagingDebug("presence:subscribeCalled", {
+      uniqueUserIds,
+      waitingForAuth: true,
+    });
+
+    void this.waitForAnyRealtimeAuth().then((ready) => {
+      messagingDebug("presence:authWaitResult", {
+        uniqueUserIds,
+        ready,
+      });
+      console.log("🔍 [MessagingService] Auth ready for presence:", ready);
+      if (!ready) {
+        console.warn(
+          "[messaging] Skipping presence subscription — Firebase Auth not ready.",
+        );
+        return;
+      }
+      console.log(
+        "🔍 [MessagingService] Attaching RTDB presence listeners for:",
+        uniqueUserIds,
+      );
+      attachListeners();
+    });
+
+    return () => {
+      cancelled = true;
+      messagingDebug("presence:cleanup", {
+        uniqueUserIds,
+        unsubscribeCount: unsubscribes.length,
+      });
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }
+
+  subscribeToConversationsTyping(
+    conversationIds: string[],
+    currentUserId: string,
+    callback: (typingByConvId: Map<string, string[]>) => void,
+  ): Unsubscribe {
+    if (conversationIds.length === 0) return () => {};
+    const typingMap = new Map<string, string[]>();
+    const unsubscribes: Array<() => void> = [];
+    let cancelled = false;
+    messagingDebug("typingList:subscribeCalled", {
+      conversationIds,
+      currentUserId,
+      waitingForAuth: true,
+    });
+
+    const attachListeners = () => {
+      if (cancelled) return;
+      messagingDebug("typingList:attachListeners", {
+        conversationIds,
+        currentUserId,
+      });
+      conversationIds.forEach((convId) => {
+        const typingRef = ref(realtimeDb, `typing/${convId}`);
+        messagingDebug("typingList:rtdbListenerAttaching", {
+          convId,
+          path: `typing/${convId}`,
+          currentUserId,
+        });
+        const unsub = onValue(
+          typingRef,
+          (snap) => {
+            const data = snap.val() || {};
+            const typingUserIds = Object.entries(data)
+              .filter(
+                ([uid, val]) =>
+                  uid !== currentUserId && (val as any)?.is_typing === true,
+              )
+              .map(([uid]) => uid);
+            typingMap.set(convId, typingUserIds);
+            messagingDebug("typingList:rtdbSnapshot", {
+              convId,
+              exists: snap.exists(),
+              raw: data,
+              currentUserId,
+              typingUserIds,
+              typingMap: Object.fromEntries(typingMap),
+            });
+            callback(new Map(typingMap));
+          },
+          (error) => {
+            messagingDebug("typingList:rtdbSnapshotError", {
+              convId,
+              currentUserId,
+              error,
+            });
+            console.error(
+              "[messaging] RTDB typing subscription failed:",
+              error,
+            );
+          },
+        );
+        unsubscribes.push(unsub);
+      });
+    };
+
+    console.log(
+      "🔍 [MessagingService DEBUG] subscribeToConversationsTyping called:",
+      {
+        conversationIds,
+        currentUserId,
+        waitingForAuth: true,
+      },
+    );
+
+    void this.waitForAnyRealtimeAuth().then((ready) => {
+      console.log("🔍 [MessagingService DEBUG] Auth wait result for typing:", {
+        ready,
+        conversationIds,
+      });
+      messagingDebug("typingList:authWaitResult", {
+        conversationIds,
+        currentUserId,
+        ready,
+      });
+      if (!ready) {
+        console.warn(
+          "[messaging] Skipping conversations typing subscription — Firebase Auth not ready.",
+        );
+        return;
+      }
+      console.log(
+        "🔍 [MessagingService DEBUG] Attaching RTDB typing listeners for:",
+        conversationIds,
+      );
+      attachListeners();
+    });
+
+    return () => {
+      cancelled = true;
+      messagingDebug("typingList:cleanup", {
+        conversationIds,
+        currentUserId,
+        unsubscribeCount: unsubscribes.length,
+      });
+      unsubscribes.forEach((u) => u());
+    };
+  }
+
+  setOnlineStatus(userId: string, isOnline: boolean): void {
+    const writeVersion = (this.onlineStatusWriteVersion.get(userId) ?? 0) + 1;
+    this.onlineStatusWriteVersion.set(userId, writeVersion);
+    messagingDebug("setOnlineStatus:called", {
+      userId,
+      isOnline,
+      writeVersion,
+    });
+
+    void (async () => {
+      try {
+        const hasRealtimeAuth = await this.waitForRealtimeAuth(userId);
+        messagingDebug("setOnlineStatus:authResult", {
+          userId,
+          isOnline,
+          writeVersion,
+          hasRealtimeAuth,
+        });
+        if (this.onlineStatusWriteVersion.get(userId) !== writeVersion) {
+          messagingDebug("setOnlineStatus:staleWriteSkipped", {
+            userId,
+            isOnline,
+            writeVersion,
+            latestWriteVersion: this.onlineStatusWriteVersion.get(userId),
+          });
+          return;
+        }
+        if (!hasRealtimeAuth) {
+          console.warn(
+            "[messaging] Skipping online RTDB write until Firebase Auth is ready.",
+          );
+          return;
+        }
+        const statusRef = ref(realtimeDb, `online_status/${userId}`);
+        const timezone = getClientTimeZone();
+        messagingDebug("setOnlineStatus:rtdbWriteStart", {
+          path: `online_status/${userId}`,
+          userId,
+          isOnline,
+          timezone,
+        });
+        await set(statusRef, {
+          is_online: isOnline,
+          last_seen: rtdbServerTimestamp(),
+          timezone,
+        });
+        messagingDebug("setOnlineStatus:rtdbWriteComplete", {
+          path: `online_status/${userId}`,
+          userId,
+          isOnline,
+          timezone,
+        });
+        messagingDebug("setOnlineStatus:firestoreWriteStart", {
+          path: `presence/${userId}`,
+          userId,
+          isOnline,
+          timezone,
+        });
+        await setDoc(
+          doc(db, "presence", userId),
+          {
+            user_id: userId,
+            is_online: isOnline,
+            last_seen: serverTimestamp(),
+            timezone,
+            updated_at: serverTimestamp(),
+          },
+          { merge: true },
+        );
+        messagingDebug("setOnlineStatus:firestoreWriteComplete", {
+          path: `presence/${userId}`,
+          userId,
+          isOnline,
+          timezone,
+        });
+        if (isOnline) {
+          await onDisconnect(statusRef).set({
+            is_online: false,
+            last_seen: rtdbServerTimestamp(),
+            timezone,
+          });
+          messagingDebug("setOnlineStatus:onDisconnectRegistered", {
+            path: `online_status/${userId}`,
+            userId,
+          });
+        }
+      } catch (error) {
+        messagingDebug("setOnlineStatus:error", {
+          userId,
+          isOnline,
+          writeVersion,
+          error,
+        });
+        console.error("❌ setOnlineStatus:", error);
+      }
+    })();
   }
 
   // ── Typing subscription (listen for other user typing in a conversation) ──
@@ -1189,27 +1916,84 @@ class MessagingService {
       }>,
     ) => void,
   ): () => void {
-    const typingRef = ref(realtimeDb, `typing/${conversationId}`);
-    const unsub = onValue(typingRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      const typingUsers: Array<{
-        user_id: string;
-        is_typing: boolean;
-        typing_speed?: string;
-      }> = [];
-      for (const uid in data) {
-        if (uid === currentUserId) continue; // Skip self
-        if (data[uid]?.is_typing) {
-          typingUsers.push({
-            user_id: uid,
-            is_typing: true,
-            typing_speed: data[uid]?.typing_speed,
-          });
+    let cancelled = false;
+    let detach: (() => void) | null = null;
+
+    console.log(
+      "🔍 [MessagingService DEBUG] subscribeToTypingIndicators called:",
+      {
+        conversationId,
+        currentUserId,
+        waitingForAuth: true,
+      },
+    );
+
+    void this.waitForAnyRealtimeAuth().then((ready) => {
+      console.log(
+        "🔍 [MessagingService DEBUG] Auth wait result for typing indicators:",
+        {
+          ready,
+          conversationId,
+        },
+      );
+      if (cancelled || !ready) {
+        if (!ready) {
+          console.warn(
+            "[messaging] Skipping typing indicators subscription — Firebase Auth not ready.",
+          );
         }
+        return;
       }
-      callback(typingUsers);
+      console.log(
+        "🔍 [MessagingService DEBUG] Attaching RTDB typing indicator listener for:",
+        conversationId,
+      );
+      const typingRef = ref(realtimeDb, `typing/${conversationId}`);
+      detach = onValue(
+        typingRef,
+        (snapshot) => {
+          const data = snapshot.val() || {};
+          console.log(
+            "🔍 [MessagingService DEBUG] Typing indicator RTDB data:",
+            {
+              conversationId,
+              data,
+            },
+          );
+          const typingUsers: Array<{
+            user_id: string;
+            is_typing: boolean;
+            typing_speed?: string;
+          }> = [];
+          for (const uid in data) {
+            if (uid === currentUserId) continue; // Skip self
+            if (data[uid]?.is_typing) {
+              typingUsers.push({
+                user_id: uid,
+                is_typing: true,
+                typing_speed: data[uid]?.typing_speed,
+              });
+            }
+          }
+          console.log("🔍 [MessagingService DEBUG] Processed typing users:", {
+            conversationId,
+            typingUsers,
+          });
+          callback(typingUsers);
+        },
+        (error) => {
+          console.error(
+            "[messaging] RTDB typing indicators subscription failed:",
+            error,
+          );
+        },
+      );
     });
-    return unsub;
+
+    return () => {
+      cancelled = true;
+      if (detach) detach();
+    };
   }
 
   // ── Freeze / Unfreeze chat ─────────────────────────────────────────────────
@@ -1489,6 +2273,7 @@ class MessagingService {
         data: {
           user_name: targetUserName,
           ignored_user_name: ignoredUserName,
+          ignored_direction: "they_ignored_me",
         },
         created_at: new Date().toISOString(),
       };
@@ -1504,17 +2289,20 @@ class MessagingService {
   subscribeToEvents(
     conversationId: string,
     callback: (events: MessageEvent[]) => void,
+    visibleToUserId?: string,
   ): Unsubscribe {
     console.log(
       "[@mention service] Subscribing to events for conversation:",
       conversationId,
     );
-    const q = query(
-      collection(db, "message_events"),
-      where("conversation_id", "==", conversationId),
-      orderBy("created_at", "desc"),
-      limit(50), // Keep last 50 events
-    );
+    const constraints: any[] = [where("conversation_id", "==", conversationId)];
+    if (visibleToUserId) {
+      constraints.push(
+        where("participants", "array-contains", visibleToUserId),
+      );
+    }
+    constraints.push(orderBy("created_at", "desc"), limit(50));
+    const q = query(collection(db, "message_events"), ...constraints);
 
     return onSnapshot(
       q,
@@ -1542,6 +2330,13 @@ class MessagingService {
         callback(events);
       },
       (error) => {
+        if (error?.code === "permission-denied") {
+          console.warn(
+            "subscribeToEvents closed because conversation access ended",
+          );
+          callback([]);
+          return;
+        }
         console.error("❌ subscribeToEvents snapshot error:", error);
       },
     );
@@ -1694,6 +2489,9 @@ class MessagingService {
       this.normalizeCacheTimestamp(data.last_message_at),
       data.last_message_content || "",
       this.normalizeCacheTimestamp(effectiveClearedAt),
+      Array.isArray(data.temporary_participant_ids)
+        ? data.temporary_participant_ids.join(",")
+        : "",
       typeof unreadCount === "number" ? unreadCount : "fallback",
     ].join("|");
   }
@@ -1751,16 +2549,39 @@ class MessagingService {
   ): Promise<MessageEvent> {
     try {
       const eventRef = doc(collection(db, "message_events"));
+      const providedParticipants = Array.isArray(eventData.data?.participants)
+        ? eventData.data.participants
+        : [];
+      const participants =
+        providedParticipants.length > 0
+          ? providedParticipants
+          : await this.getActiveParticipantIdsForConversation(
+              eventData.conversation_id,
+            );
+      const eventPayload = {
+        ...eventData,
+        participants: participants.filter(
+          (id: string, index: number, self: string[]) =>
+            !!id && self.indexOf(id) === index,
+        ),
+        data: eventData.data
+          ? Object.fromEntries(
+              Object.entries(eventData.data).filter(
+                ([key]) => key !== "participants",
+              ),
+            )
+          : eventData.data,
+      };
       // Use server timestamp for more accurate timing
       const data = {
-        ...eventData,
+        ...eventPayload,
         created_at: serverTimestamp(),
       };
       await setDoc(eventRef, data);
 
       // Return with proper timestamp format
       const created_at = new Date().toISOString(); // Fallback for immediate return
-      return { id: eventRef.id, ...eventData, created_at } as MessageEvent;
+      return { id: eventRef.id, ...eventPayload, created_at } as MessageEvent;
     } catch (error) {
       console.error("❌ createMessageEvent:", error);
       throw error;

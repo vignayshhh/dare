@@ -29,6 +29,10 @@ export interface UserProfile {
   ghost_mode_expires_at: string | null;
   created_at: string;
   updated_at: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  email?: string | null;
+  hasCompletedProfileCreation?: boolean;
 }
 
 export interface CreateProfileRequest {
@@ -50,6 +54,78 @@ class UserService {
   private readonly profileCacheTtlMs = 15 * 60 * 1000;
   private allUsersCache: { data: UserProfile[]; expiresAt: number } | null =
     null;
+
+  private getProfileTimestamp(value: unknown): number {
+    if (!value) return 0;
+
+    if (typeof value === "string" || typeof value === "number") {
+      const time = new Date(value).getTime();
+      return Number.isFinite(time) ? time : 0;
+    }
+
+    if (typeof value === "object") {
+      const timestamp = value as {
+        toDate?: () => Date;
+        seconds?: number;
+        nanoseconds?: number;
+      };
+
+      if (typeof timestamp.toDate === "function") {
+        const time = timestamp.toDate().getTime();
+        return Number.isFinite(time) ? time : 0;
+      }
+
+      if (typeof timestamp.seconds === "number") {
+        return (
+          timestamp.seconds * 1000 +
+          Math.floor((timestamp.nanoseconds || 0) / 1000000)
+        );
+      }
+    }
+
+    return 0;
+  }
+
+  private getCreatedTime(profile: Partial<UserProfile>): number {
+    return this.getProfileTimestamp(profile.created_at ?? profile.createdAt);
+  }
+
+  private isKnownMockProfile(profile: Partial<UserProfile>): boolean {
+    const profileId = String(profile.user_id || profile.id || "").toLowerCase();
+    const username = String(profile.username || "").toLowerCase();
+    const email = String(profile.email || "").toLowerCase();
+
+    return (
+      profileId === "guest-demo-user" ||
+      username === "project_guest" ||
+      email.endsWith("@demo.local")
+    );
+  }
+
+  private isDiscoverableProfile(profile: Partial<UserProfile>): boolean {
+    const username = String(profile.username || "").trim();
+
+    if (!username) return false;
+    if (profile.visibility === "PRIVATE") return false;
+    if (profile.hasCompletedProfileCreation === false) return false;
+    if (this.isKnownMockProfile(profile)) return false;
+
+    return true;
+  }
+
+  private dedupeProfiles(profiles: UserProfile[]): UserProfile[] {
+    const seen = new Set<string>();
+
+    return profiles.filter((profile) => {
+      const key = profile.user_id || profile.id;
+      if (!key || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }
 
   async getProfile(userId: string): Promise<UserProfile | null> {
     try {
@@ -215,22 +291,14 @@ class UserService {
         `🔍 Real-time search for "${searchQuery}" - Total users in DB: ${allUsers.length}`,
       );
 
-      // More aggressive filtering for real-time search
       const filteredUsers = allUsers.filter((user: UserProfile) => {
-        // Search in username and display_name with partial matching
         const usernameMatch = user.username?.toLowerCase().includes(searchTerm);
         const displayNameMatch = user.display_name
           ?.toLowerCase()
           .includes(searchTerm);
-
-        // Show public profiles OR users with undefined visibility (real users)
-        const isPublic =
-          user.visibility === "PUBLIC" || user.visibility === undefined;
-
-        return (usernameMatch || displayNameMatch) && isPublic;
+        return (usernameMatch || displayNameMatch) && this.isDiscoverableProfile(user);
       });
 
-      // Sort by relevance - exact matches first, then partial, then real users
       const sortedUsers = filteredUsers.sort((a, b) => {
         const aUsername = a.username?.toLowerCase() || "";
         const bUsername = b.username?.toLowerCase() || "";
@@ -253,19 +321,9 @@ class UserService {
         if (aDisplayNameStarts && !bDisplayNameStarts) return -1;
         if (!aDisplayNameStarts && bDisplayNameStarts) return 1;
 
-        // Prioritize users with real display names over undefined
-        const aHasDisplayName = a.display_name && a.display_name !== undefined;
-        const bHasDisplayName = b.display_name && b.display_name !== undefined;
-        if (aHasDisplayName && !bHasDisplayName) return -1;
-        if (!aHasDisplayName && bHasDisplayName) return 1;
+        const createdTimeDiff = this.getCreatedTime(b) - this.getCreatedTime(a);
+        if (createdTimeDiff !== 0) return createdTimeDiff;
 
-        // Prioritize users with proper user_id over undefined
-        const aHasUserId = a.user_id && a.user_id !== undefined;
-        const bHasUserId = b.user_id && b.user_id !== undefined;
-        if (aHasUserId && !bHasUserId) return -1;
-        if (!aHasUserId && bHasUserId) return 1;
-
-        // Alphabetical order as final tiebreaker
         return aUsername.localeCompare(bUsername);
       });
 
@@ -273,18 +331,7 @@ class UserService {
         `🔍 Real-time search for "${searchQuery}" - Filtered users: ${sortedUsers.length}`,
       );
 
-      // Remove duplicates based on user_id and id
-      const uniqueUsers = sortedUsers.reduce((acc: UserProfile[], user) => {
-        const exists = acc.some(
-          (existingUser) =>
-            existingUser.user_id === user.user_id ||
-            existingUser.id === user.id,
-        );
-        if (!exists) {
-          acc.push(user);
-        }
-        return acc;
-      }, []);
+      const uniqueUsers = this.dedupeProfiles(sortedUsers);
 
       console.log(
         `🔍 Real-time search for "${searchQuery}" - Unique users: ${uniqueUsers.length}`,
@@ -316,9 +363,15 @@ class UserService {
         ...doc.data(),
       })) as UserProfile[];
 
-      // Filter for public profiles OR users with undefined visibility (real users)
-      const publicUsers = allUsers.filter(
-        (user) => user.visibility === "PUBLIC" || user.visibility === undefined,
+      const publicUsers = this.dedupeProfiles(
+        allUsers
+          .filter((user) => this.isDiscoverableProfile(user))
+          .sort((a, b) => {
+            const createdTimeDiff = this.getCreatedTime(b) - this.getCreatedTime(a);
+            if (createdTimeDiff !== 0) return createdTimeDiff;
+
+            return (a.username || "").localeCompare(b.username || "");
+          }),
       );
 
       console.log(

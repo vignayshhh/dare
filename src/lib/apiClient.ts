@@ -65,6 +65,12 @@ export interface ApiFetchOptions extends RequestInit {
    * Default false (throws on 4xx/5xx).
    */
   raw?: boolean;
+  /**
+   * Send a page-level Turnstile token with this request. Most in-app actions
+   * do not need it; keeping this opt-in prevents stale challenge tokens from
+   * turning normal authenticated writes into production-only 401s.
+   */
+  turnstile?: boolean;
 }
 
 export async function apiFetch<T = unknown>(
@@ -76,7 +82,7 @@ export async function apiFetch<T = unknown>(
   // Window.turnstile widget stashes the latest response on window; pick
   // it up if present. Ignored server-side when TURNSTILE_SECRET_KEY unset.
   const turnstile =
-    typeof window !== "undefined"
+    opts.turnstile && typeof window !== "undefined"
       ? (window as unknown as { __turnstileToken?: string }).__turnstileToken
       : undefined;
 

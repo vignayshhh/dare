@@ -36,18 +36,6 @@ export class TruthEntity {
     answeredAt?: string;
     reviewedAt?: string;
   }): TruthEntity {
-    console.log("TruthEntity.create called with:", {
-      id: data.id,
-      challengerId: data.challengerId,
-      receiverId: data.receiverId,
-      question: data.question,
-      state: data.state,
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
-      createdAtType: typeof data.createdAt,
-      updatedAtType: typeof data.updatedAt,
-    });
-
     return new TruthEntity(
       data.id,
       data.challengerId,

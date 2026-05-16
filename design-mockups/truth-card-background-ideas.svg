@@ -1,0 +1,173 @@
+<svg width="1800" height="1380" viewBox="0 0 1800 1380" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#000" flood-opacity="0.46"/>
+    </filter>
+    <filter id="softGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#08110c"/>
+      <stop offset="1" stop-color="#020403"/>
+    </linearGradient>
+    <radialGradient id="emeraldFog" cx="50%" cy="0%" r="78%">
+      <stop stop-color="#4ade803a"/>
+      <stop offset="0.42" stop-color="#1f8f5a14"/>
+      <stop offset="1" stop-color="#02040300"/>
+    </radialGradient>
+    <radialGradient id="cyanShadow" cx="88%" cy="14%" r="68%">
+      <stop stop-color="#38bdf838"/>
+      <stop offset="0.48" stop-color="#38bdf80e"/>
+      <stop offset="1" stop-color="#02040300"/>
+    </radialGradient>
+    <radialGradient id="roseSecret" cx="14%" cy="16%" r="72%">
+      <stop stop-color="#fb71852a"/>
+      <stop offset="0.48" stop-color="#fb71850c"/>
+      <stop offset="1" stop-color="#02040300"/>
+    </radialGradient>
+    <style>
+      .title { font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 46px; font-weight: 950; fill: #fff; letter-spacing: -1px; }
+      .subtitle { font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 22px; font-weight: 650; fill: #94a3b8; }
+      .label { font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 21px; font-weight: 950; fill: #d7ffe6; letter-spacing: 1.7px; }
+      .small { font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 17px; font-weight: 750; fill: #94a3b8; }
+      .question { font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 27px; font-weight: 900; fill: #fff; letter-spacing: -0.4px; }
+      .answer { font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 18px; font-weight: 760; fill: #dcefe4; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1380" fill="url(#page)"/>
+  <text x="80" y="76" class="title">Truth Card Background Concepts</text>
+  <text x="80" y="115" class="subtitle">Same Truth card structure, different background color logic for mobile variety.</text>
+
+  <!-- Reusable card dimensions: 360 x 500 -->
+
+  <!-- 1 Emerald Fog -->
+  <g transform="translate(80 180)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#06100b" stroke="#ffffff18"/>
+    <rect width="360" height="500" rx="36" fill="url(#emeraldFog)"/>
+    <circle cx="300" cy="420" r="120" fill="#4ade8014" filter="url(#softGlow)"/>
+    <path d="M32 0H328" stroke="url(#emeraldFog)" stroke-width="4"/>
+    <text x="180" y="52" text-anchor="middle" class="label">EMERALD FOG</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#15221aee" stroke="#ffffff14"/>
+    <text x="56" y="151" class="small" fill="#86efac">QUESTION</text>
+    <text x="56" y="196" class="question">What did you</text>
+    <text x="56" y="231" class="question">almost say?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#0b1a10e8" stroke="#4ade8028"/>
+    <text x="96" y="320" class="answer">I still care more</text>
+    <text x="96" y="348" class="answer">than I admit.</text>
+    <text x="34" y="445" class="small">Best for intimate confessions.</text>
+  </g>
+
+  <!-- 2 Midnight Teal -->
+  <g transform="translate(520 180)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#04090a" stroke="#ffffff18"/>
+    <rect width="360" height="500" rx="36" fill="url(#cyanShadow)"/>
+    <circle cx="60" cy="430" r="130" fill="#4ade800f" filter="url(#softGlow)"/>
+    <text x="180" y="52" text-anchor="middle" class="label">MIDNIGHT TEAL</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#0d1d1cee" stroke="#38bdf824"/>
+    <text x="56" y="151" class="small" fill="#7dd3fc">QUESTION</text>
+    <text x="56" y="196" class="question">Was that story</text>
+    <text x="56" y="231" class="question">actually real?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#071312ea" stroke="#4ade8020"/>
+    <text x="96" y="320" class="answer">Real, but I left out</text>
+    <text x="96" y="348" class="answer">the worst part.</text>
+    <text x="34" y="445" class="small">Cool, suspicious, premium.</text>
+  </g>
+
+  <!-- 3 Rose Secret -->
+  <g transform="translate(960 180)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#080607" stroke="#ffffff18"/>
+    <rect width="360" height="500" rx="36" fill="url(#roseSecret)"/>
+    <circle cx="304" cy="410" r="125" fill="#4ade800f" filter="url(#softGlow)"/>
+    <text x="180" y="52" text-anchor="middle" class="label">ROSE SECRET</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#1b1215ee" stroke="#fb71852b"/>
+    <text x="56" y="151" class="small" fill="#fda4af">QUESTION</text>
+    <text x="56" y="196" class="question">Who do you miss</text>
+    <text x="56" y="231" class="question">but never text?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#0d120dea" stroke="#4ade8020"/>
+    <text x="96" y="320" class="answer">The person who</text>
+    <text x="96" y="348" class="answer">knows already.</text>
+    <text x="34" y="445" class="small">For spicy/romantic prompts.</text>
+  </g>
+
+  <!-- 4 Truth Heat Split -->
+  <g transform="translate(1400 180)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#050806" stroke="#ffffff18"/>
+    <rect width="360" height="500" rx="36" fill="url(#emeraldFog)"/>
+    <path d="M360 0C260 120 255 285 360 500H205C142 390 132 190 205 0H360Z" fill="#38bdf817"/>
+    <path d="M0 0C106 155 96 345 0 500H148C210 365 222 160 148 0H0Z" fill="#4ade8016"/>
+    <text x="180" y="52" text-anchor="middle" class="label">TRUTH HEAT</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#142019ee" stroke="#ffffff14"/>
+    <text x="56" y="151" class="small" fill="#86efac">72% TRUTH</text>
+    <text x="56" y="196" class="question">Did you make</text>
+    <text x="56" y="231" class="question">the first move?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#0a1810e8" stroke="#4ade8028"/>
+    <text x="96" y="320" class="answer">Yes. Twice.</text>
+    <rect x="34" y="416" width="292" height="10" rx="5" fill="#ffffff18"/>
+    <rect x="34" y="416" width="210" height="10" rx="5" fill="#4ade80"/>
+  </g>
+
+  <!-- 5 Time Mood Night -->
+  <g transform="translate(80 780)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#050713" stroke="#ffffff18"/>
+    <circle cx="70" cy="80" r="130" fill="#38bdf817" filter="url(#softGlow)"/>
+    <circle cx="300" cy="430" r="120" fill="#4ade8011" filter="url(#softGlow)"/>
+    <text x="180" y="52" text-anchor="middle" class="label">LATE NIGHT</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#101727ee" stroke="#38bdf824"/>
+    <text x="56" y="151" class="small" fill="#93c5fd">1:42 AM</text>
+    <text x="56" y="196" class="question">What keeps you</text>
+    <text x="56" y="231" class="question">awake?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#07120ee8" stroke="#4ade8024"/>
+    <text x="96" y="320" class="answer">The messages I</text>
+    <text x="96" y="348" class="answer">never sent.</text>
+    <text x="34" y="445" class="small">Color varies by post time.</text>
+  </g>
+
+  <!-- 6 Relationship Aura -->
+  <g transform="translate(520 780)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#050806" stroke="#ffffff18"/>
+    <circle cx="180" cy="245" r="188" fill="#4ade8013" filter="url(#softGlow)"/>
+    <circle cx="260" cy="150" r="105" fill="#38bdf812" filter="url(#softGlow)"/>
+    <text x="180" y="52" text-anchor="middle" class="label">RELATIONSHIP AURA</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#14221aee" stroke="#4ade8022"/>
+    <text x="56" y="151" class="small" fill="#86efac">CLOSE FRIEND</text>
+    <text x="56" y="196" class="question">Why did you trust</text>
+    <text x="56" y="231" class="question">me first?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#0c1611e8" stroke="#38bdf820"/>
+    <text x="96" y="320" class="answer">Because you noticed</text>
+    <text x="96" y="348" class="answer">without asking.</text>
+    <text x="34" y="445" class="small">Aura changes by pair history.</text>
+  </g>
+
+  <!-- 7 Ink Wash Seed -->
+  <g transform="translate(960 780)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#06100b" stroke="#ffffff18"/>
+    <path d="M-20 122C84 18 178 170 284 72C396 -32 430 82 392 188C336 340 480 386 318 520H-20V122Z" fill="#4ade800f"/>
+    <path d="M30 498C134 322 118 238 238 260C362 282 322 116 392 90V500L30 498Z" fill="#38bdf80d"/>
+    <path d="M0 0H360V500H0V0Z" fill="url(#emeraldFog)" opacity="0.55"/>
+    <text x="180" y="52" text-anchor="middle" class="label">INK WASH SEED</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#101a13e8" stroke="#ffffff14"/>
+    <text x="56" y="151" class="small" fill="#86efac">POST ID PATTERN</text>
+    <text x="56" y="196" class="question">What are you</text>
+    <text x="56" y="231" class="question">avoiding?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#09130fea" stroke="#4ade8022"/>
+    <text x="96" y="320" class="answer">The obvious answer.</text>
+    <text x="34" y="445" class="small">Unique, deterministic CSS feel.</text>
+  </g>
+
+  <!-- 8 Reveal Spotlight -->
+  <g transform="translate(1400 780)" filter="url(#shadow)">
+    <rect width="360" height="500" rx="36" fill="#030504" stroke="#ffffff18"/>
+    <circle cx="180" cy="194" r="150" fill="#4ade801e" filter="url(#softGlow)"/>
+    <circle cx="290" cy="370" r="115" fill="#38bdf811" filter="url(#softGlow)"/>
+    <text x="180" y="52" text-anchor="middle" class="label">REVEAL SPOTLIGHT</text>
+    <rect x="34" y="108" width="292" height="132" rx="25" fill="#15221aee" stroke="#4ade8024"/>
+    <text x="56" y="151" class="small" fill="#86efac">QUESTION SPOTLIGHT</text>
+    <text x="56" y="196" class="question">What changed</text>
+    <text x="56" y="231" class="question">your mind?</text>
+    <rect x="72" y="276" width="254" height="102" rx="24" fill="#091411e8" stroke="#38bdf822"/>
+    <text x="96" y="320" class="answer">One sentence from</text>
+    <text x="96" y="348" class="answer">someone I trust.</text>
+    <text x="34" y="445" class="small">Spotlight position varies.</text>
+  </g>
+</svg>

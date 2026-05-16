@@ -213,15 +213,19 @@ export class UserRepository implements IUserRepository {
   private mapToUserProfile(data: any, docId: string): UserProfile {
     // Use docId as fallback for userId since Firestore doc ID IS the auth UID
     const userId = data.user_id || docId;
+    const username = data.username || data.handle || `user_${userId.slice(-6)}`;
+    const displayName =
+      data.display_name || data.displayName || data.nickname || username;
+    const avatarUrl = data.avatar_url || data.avatarUrl || data.avatar || null;
 
     return {
       id: userId,
       userId: userId,
-      username: data.username,
-      nickname: data.display_name || data.nickname,
-      displayName: data.display_name,
+      username,
+      nickname: data.nickname || displayName,
+      displayName,
       bio: data.bio,
-      avatarUrl: data.avatar_url || data.avatar, // Check both fields
+      avatarUrl,
       visibility: data.visibility,
       is18Plus: data.is_18_plus,
       consentAccepted: data.consent_accepted,

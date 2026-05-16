@@ -92,6 +92,9 @@ export function buildSharedStoryPayload(
   previewUrl?: string,
 ): SharedStoryPayload | null {
   if (!story.id || !story.author?.id || !story.media?.type) return null;
+  const originalMediaUrl = story.media.url || "";
+  const canEmbedOriginalMedia =
+    originalMediaUrl && !originalMediaUrl.startsWith("data:");
 
   return {
     storyId: story.id,
@@ -104,7 +107,7 @@ export function buildSharedStoryPayload(
     expiresAt: story.expiresAt,
     media: {
       type: story.media.type,
-      url: previewUrl || "",
+      url: canEmbedOriginalMedia ? originalMediaUrl : previewUrl || "",
       thumbnail: previewUrl || "",
     },
     caption: story.caption,

@@ -8,9 +8,9 @@ import {
   Image,
   Mic,
   Camera as CameraIcon,
-  ShieldCheck,
-  Sparkles,
   Zap,
+  CheckCircle,
+  X,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { useAuthStore } from "@/stores/useAuthStore-v2";
@@ -37,6 +37,7 @@ interface DareCompletionScreenProps {
   onSubmit: (proof: {
     type: "image" | "video" | "audio";
     url: string;
+    thumbnail?: string;
   }) => void | Promise<void>;
   skipValidation?: boolean;
   initialTimeRemaining?: number;
@@ -68,6 +69,10 @@ export function DareCompletionScreen({
   const [previewType, setPreviewType] = useState<
     "image" | "video" | "audio" | null
   >(null);
+  const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState<string | null>(
+    null,
+  );
+  const [thumbnailBlob, setThumbnailBlob] = useState<Blob | null>(null);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isUploadingProof, setIsUploadingProof] = useState(false);
 
@@ -138,13 +143,26 @@ export function DareCompletionScreen({
     setIsPreviewMode(false);
   }, []);
 
+  const clearThumbnail = useCallback(() => {
+    setThumbnailPreviewUrl((currentUrl) => {
+      if (currentUrl && currentUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(currentUrl);
+      }
+      return null;
+    });
+    setThumbnailBlob(null);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (previewUrl && previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
+      if (thumbnailPreviewUrl && thumbnailPreviewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(thumbnailPreviewUrl);
+      }
     };
-  }, [previewUrl]);
+  }, [previewUrl, thumbnailPreviewUrl]);
 
   useEffect(() => {
     // Check if dare is already expired from localStorage
@@ -389,6 +407,39 @@ export function DareCompletionScreen({
     }
   };
 
+  const handleSelectThumbnail = () => {
+    try {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.multiple = false;
+
+      input.onchange = async (event) => {
+        const file = (event.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+
+        const validation = await validateMediaSelection(
+          file,
+          "dare-proof",
+          "image",
+        );
+        if (!validation.valid) {
+          alert(validation.error);
+          return;
+        }
+
+        clearThumbnail();
+        setThumbnailPreviewUrl(URL.createObjectURL(file));
+        setThumbnailBlob(file);
+      };
+
+      input.click();
+    } catch (error) {
+      console.error("Error opening thumbnail picker:", error);
+      alert("Unable to open thumbnail picker.");
+    }
+  };
+
   const handleSubmitProof = async () => {
     if (
       !previewUrl ||
@@ -421,6 +472,20 @@ export function DareCompletionScreen({
 
       console.log("[DareCompletion] Upload successful:", uploadedProof);
 
+      let uploadedThumbnailUrl: string | undefined;
+      if (thumbnailBlob) {
+        const uploadedThumbnail = await uploadOptimizedMedia({
+          source: thumbnailBlob,
+          userId: user.id,
+          context: "dare-proof",
+          mediaKind: "image",
+          fileName: `dare-thumbnail-${challenge.id}.jpg`,
+        });
+        uploadedThumbnailUrl = uploadedThumbnail.url;
+      } else if (previewType === "image") {
+        uploadedThumbnailUrl = uploadedProof.url;
+      }
+
       const actionType =
         previewType === "video"
           ? "video"
@@ -429,7 +494,11 @@ export function DareCompletionScreen({
             : "photo";
       setSubmittedAction(actionType);
 
-      await onSubmit({ type: previewType, url: uploadedProof.url });
+      await onSubmit({
+        type: previewType,
+        url: uploadedProof.url,
+        thumbnail: uploadedThumbnailUrl,
+      });
     } catch (error) {
       console.error("[DareCompletion] Failed to submit dare:", error);
       setIsSubmitted(false);
@@ -449,10 +518,9 @@ export function DareCompletionScreen({
       label: isRecording ? "Recording..." : "Record Video",
       hint: "10 second one-take capture",
       onClick: handleRecordVideo,
-      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
-      border: "border-[#4ade80]/25",
-      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
-      iconBg: "bg-[#4ade80]/15",
+      accent: "#facc15",
+      background:
+        "linear-gradient(135deg, rgba(250,204,21,0.16), rgba(255,255,255,0.035))",
     },
     {
       id: "photo",
@@ -460,10 +528,9 @@ export function DareCompletionScreen({
       label: isCapturing ? "Capturing..." : "Take Photo",
       hint: "Snap proof right now",
       onClick: handleTakePhoto,
-      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
-      border: "border-[#4ade80]/25",
-      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
-      iconBg: "bg-[#4ade80]/15",
+      accent: "#4ade80",
+      background:
+        "linear-gradient(135deg, rgba(74,222,128,0.16), rgba(255,255,255,0.035))",
     },
     {
       id: "voice",
@@ -471,10 +538,19 @@ export function DareCompletionScreen({
       label: isRecording ? "Recording..." : "Record Voice",
       hint: "Short audio proof",
       onClick: handleRecordVoice,
-      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
-      border: "border-[#4ade80]/25",
-      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
-      iconBg: "bg-[#4ade80]/15",
+      accent: "#60a5fa",
+      background:
+        "linear-gradient(135deg, rgba(96,165,250,0.15), rgba(255,255,255,0.035))",
+    },
+    {
+      id: "thumbnail",
+      icon: Image,
+      label: thumbnailBlob ? "Thumbnail Selected" : "Select Thumbnail",
+      hint: thumbnailBlob ? "Cover image ready for Pic Mode" : "Choose the cover image",
+      onClick: handleSelectThumbnail,
+      accent: "#38bdf8",
+      background:
+        "linear-gradient(135deg, rgba(56,189,248,0.14), rgba(255,255,255,0.035))",
     },
     {
       id: "gallery",
@@ -482,16 +558,15 @@ export function DareCompletionScreen({
       label: "Choose from Gallery",
       hint: "Upload saved media",
       onClick: handleChooseFromGallery,
-      accent: "from-[#4ade80]/30 via-[#4ade80]/5 to-transparent",
-      border: "border-[#4ade80]/25",
-      glow: "shadow-[0_0_30px_rgba(74,222,128,0.15)]",
-      iconBg: "bg-[#4ade80]/15",
+      accent: "#c084fc",
+      background:
+        "linear-gradient(135deg, rgba(192,132,252,0.14), rgba(255,255,255,0.035))",
     },
   ];
 
   if (!isValidState || isExpired) {
     return (
-      <div className="screen-container flex items-center justify-center">
+      <div className="screen-container flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_-12%,rgba(74,222,128,0.18),transparent_34%),radial-gradient(circle_at_12%_18%,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#060806_0%,#0a0f0a_48%,#030403_100%)]">
         <div className="text-center">
           <div className="mb-2 text-lg font-semibold text-red-500">
             Dare Expired
@@ -511,38 +586,54 @@ export function DareCompletionScreen({
   }
 
   return (
-    <div className="screen-container bg-[radial-gradient(circle_at_top,#16291d_0%,#0c120d_38%,#070907_100%)]">
-      <div className="nav-header">
-        <div className="flex items-center justify-between px-4 pb-4 pt-5">
-          <button
-            onClick={onBack}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white transition-all hover:border-[#4ade80]/30 hover:bg-white/10"
-          >
-            <ArrowLeft size={24} />
-          </button>
-          <div className="text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3a7]">
-              Dare Proof
-            </p>
-            <h1 className="text-lg font-bold text-white">Complete the Dare</h1>
+    <div
+      className="screen-container flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden"
+      style={{
+        background:
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.14), transparent 30%), radial-gradient(circle at 90% 72%, rgba(20,184,166,0.1), transparent 28%), linear-gradient(180deg, #060806 0%, #08110e 46%, #030403 100%)",
+      }}
+    >
+      <div
+        className="px-4"
+        style={{ paddingTop: "calc(var(--safe-area-top) + 10px)" }}
+      >
+        <div className="flex items-center justify-between gap-3 pb-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              onClick={onBack}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_16px_38px_rgba(0,0,0,0.3)] transition-colors hover:border-[#79d99a]/30 hover:text-white"
+              aria-label="Back"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div className="min-w-0">
+              <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-[#79d99a]/20 bg-[#79d99a]/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[#a8f0bf]">
+                <Zap size={13} />
+                Dare Proof
+              </div>
+              <h1 className="text-[26px] font-black leading-none tracking-tight text-white">
+                Complete the Dare
+              </h1>
+            </div>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-2 text-[#86efac] shadow-[0_0_24px_rgba(74,222,128,0.12)]">
+          <div className="flex shrink-0 items-center gap-2 rounded-[18px] border border-[#79d99a]/22 bg-[#79d99a]/10 px-3 py-2.5 text-[#a8f0bf] shadow-[0_16px_38px_rgba(0,0,0,0.3)]">
             <Clock size={16} />
-            <span className="text-sm font-semibold">
+            <span className="text-sm font-black">
               {formatTime(timeRemaining)}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-20 pt-4">
-        <div className="mx-auto max-w-2xl space-y-4">
-          <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,24,21,0.98),rgba(12,15,13,0.98))] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.4)]">
-            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.45),transparent)]" />
-            <div className="pointer-events-none absolute -right-6 top-0 h-28 w-28 rounded-full bg-[#4ade80]/10 blur-3xl" />
+      <div className="min-h-0 flex-1 overflow-hidden px-4 pb-[calc(var(--safe-area-bottom)+10px)] pt-2">
+        <div className="mx-auto flex h-full max-w-2xl flex-col gap-3">
+          <div className="relative isolate shrink-0 overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(13,39,39,0.96)_0%,rgba(8,27,29,0.99)_48%,rgba(4,14,16,0.99)_100%)] p-3.5 shadow-[0_24px_64px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(255,255,255,0.055)]">
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(121,217,154,0.62),transparent)]" />
+            <div className="pointer-events-none absolute -right-6 top-0 h-28 w-28 rounded-full bg-[#79d99a]/10 blur-3xl" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-[radial-gradient(circle_at_top,rgba(121,217,154,0.08),transparent_70%)] opacity-80" />
 
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+            <div className="relative mb-3 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
                 <div className="relative">
                   <Avatar
                     src={resolvedChallenger.avatar}
@@ -550,36 +641,37 @@ export function DareCompletionScreen({
                     size="md"
                     userId={challenge.challengerId}
                     username={resolvedChallenger.username}
+                    className="ring-1 ring-white/10 shadow-[0_14px_30px_rgba(0,0,0,0.28)]"
                   />
-                  <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-[#0d1510] bg-[#4ade80] text-black shadow-[0_0_18px_rgba(74,222,128,0.45)]">
+                  <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-[#06100a] bg-[#79d99a] text-[#041006] shadow-[0_0_18px_rgba(121,217,154,0.28)]">
                     <Zap size={9} />
                   </div>
                 </div>
-                <div>
-                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7dd3a7]">
-                    Dare from
+                <div className="min-w-0">
+                  <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
+                    Challenger
                   </p>
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="truncate text-[15px] font-bold leading-tight text-white">
                     {resolvedChallenger.name}
                   </h3>
-                  <p className="text-xs text-[#91a091]">
-                    {resolvedChallenger.username}
+                  <p className="truncate text-xs font-semibold text-[#94a3b8]">
+                    @{resolvedChallenger.username.replace(/^@/, "")}
                   </p>
                 </div>
               </div>
-              <div className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#86efac]">
+              <div className="shrink-0 rounded-full border border-[#79d99a]/22 bg-[#79d99a]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-[#a8f0bf]">
                 Accepted
               </div>
             </div>
 
-            <div className="rounded-[20px] border border-[#4ade80]/14 bg-[linear-gradient(180deg,rgba(26,31,28,0.98),rgba(18,21,19,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-              <div className="mb-2.5 flex items-center gap-2 text-[#86efac]">
-                <div className="h-1 w-8 rounded-full bg-[#4ade80]" />
-                <span className="text-[10px] font-semibold uppercase tracking-[0.14em]">
-                  Mission
+            <div className="relative rounded-[22px] border border-white/8 bg-white/[0.045] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="mb-2 flex items-center gap-2 text-[#a8f0bf]">
+                <div className="h-1 w-14 rounded-full bg-[#79d99a]/85" />
+                <span className="text-[10px] font-black uppercase tracking-[0.14em]">
+                  Dared you to
                 </span>
               </div>
-              <p className="text-base font-semibold leading-relaxed text-white">
+              <p className="line-clamp-3 text-[14px] font-bold leading-snug text-white">
                 {challenge.action}
               </p>
             </div>
@@ -587,70 +679,111 @@ export function DareCompletionScreen({
 
           {!isSubmitted ? (
             !isPreviewMode ? (
-              <div className="grid gap-2.5 grid-cols-2">
-                {actionCards.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={item.onClick}
-                      disabled={isRecording || isCapturing}
-                      className={`group relative overflow-hidden rounded-[24px] border ${item.border} bg-[linear-gradient(145deg,rgba(25,26,24,0.98),rgba(15,16,14,0.98))] p-5 text-left ${item.glow} transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02] hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:scale-100`}
-                    >
-                      <div
-                        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${item.accent} opacity-100 transition-opacity duration-300 group-hover:opacity-100`}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-                      <div className="relative">
-                        <div
-                          className={`mb-3 flex h-12 w-12 items-center justify-center rounded-2xl ${item.iconBg} border border-white/20 text-white shadow-[0_8px_16px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-sm`}
-                        >
-                          <Icon size={20} />
+              <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
+                <div className="grid min-h-0 flex-1 grid-cols-2 gap-2.5">
+                  {actionCards.map((item) => {
+                    const Icon = item.icon;
+                    const isThumbnailCard = item.id === "thumbnail";
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={item.onClick}
+                        disabled={isRecording || isCapturing}
+                        className="group relative overflow-hidden rounded-[22px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-3 text-left shadow-[0_12px_28px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.045)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#79d99a]/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                      >
+                        {isThumbnailCard && thumbnailBlob && (
+                          <div className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[#38bdf8] text-[#031018] shadow-[0_0_18px_rgba(56,189,248,0.35)]">
+                            <CheckCircle size={14} />
+                          </div>
+                        )}
+                        <div className="relative flex h-full min-h-[92px] flex-col justify-between">
+                          <div
+                            className="mb-3 flex h-10 w-10 items-center justify-center rounded-[16px] border transition-transform duration-200 group-hover:scale-105"
+                            style={{
+                              color: item.accent,
+                              background: `${item.accent}14`,
+                              borderColor: `${item.accent}28`,
+                              boxShadow: `0 0 24px ${item.accent}18`,
+                            }}
+                          >
+                            <Icon size={21} strokeWidth={2.4} />
+                          </div>
+                          <div>
+                            <h3 className="text-[13px] font-extrabold leading-tight tracking-tight text-white">
+                              {item.label}
+                            </h3>
+                            <p className="mt-1 line-clamp-2 text-[11px] font-medium leading-snug text-[#94a3b8]">
+                              {item.hint}
+                            </p>
+                          </div>
                         </div>
-                        <h3 className="text-sm font-bold text-white tracking-wide">
-                          {item.label}
-                        </h3>
-                        <p className="mt-1 text-xs text-white/70 font-medium">
-                          {item.hint}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {thumbnailPreviewUrl && (
+                  <div className="relative shrink-0 overflow-hidden rounded-[20px] border border-[#38bdf8]/18 bg-[#06121a]/80 p-2.5 shadow-[0_14px_32px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                    <div className="flex items-center gap-2.5">
+                      <img
+                        src={thumbnailPreviewUrl}
+                        alt="Selected thumbnail"
+                        className="h-14 w-14 shrink-0 rounded-[16px] object-cover"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 inline-flex rounded-full border border-[#38bdf8]/20 bg-[#38bdf8]/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-[#7dd3fc]">
+                          Pic Mode Cover
+                        </div>
+                        <p className="line-clamp-1 text-xs font-bold leading-snug text-white">
+                          This image will lead the dare card carousel.
                         </p>
                       </div>
-                    </button>
-                  );
-                })}
+                      <button
+                        onClick={clearThumbnail}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/70 transition-colors hover:text-white"
+                        aria-label="Remove selected thumbnail"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,21,19,0.98),rgba(11,14,12,0.98))] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
-                <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.34),transparent)]" />
-                <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(13,39,39,0.96)_0%,rgba(8,27,29,0.99)_48%,rgba(4,14,16,0.99)_100%)] p-3.5 shadow-[0_24px_64px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.05)]">
+                <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(121,217,154,0.48),transparent)]" />
+                <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-base font-bold text-white">Preview</h3>
-                    <p className="mt-0.5 text-xs text-[#8f968f]">
+                    <h3 className="text-base font-black tracking-tight text-white">
+                      Preview
+                    </h3>
+                    <p className="mt-0.5 text-xs font-semibold text-[#94a3b8]">
                       Review your proof before you send it.
                     </p>
                   </div>
-                  <div className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86efac]">
+                  <div className="rounded-full border border-[#79d99a]/22 bg-[#79d99a]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#a8f0bf]">
                     {previewType}
                   </div>
                 </div>
 
-                <div className="mb-4 overflow-hidden rounded-[20px] border border-white/8 bg-black/30">
+                <div className="mb-3 min-h-0 flex-1 overflow-hidden rounded-[22px] border border-white/8 bg-black/35">
                   {previewType === "image" && (
                     <img
                       src={previewUrl || ""}
                       alt="Preview"
-                      className="w-full rounded-[20px]"
+                      className="h-full w-full object-contain"
                     />
                   )}
                   {previewType === "video" && (
                     <video
                       src={previewUrl || ""}
                       controls
-                      className="w-full rounded-[20px]"
+                      className="h-full w-full object-contain"
                     />
                   )}
                   {previewType === "audio" && (
-                    <div className="bg-[linear-gradient(180deg,rgba(20,24,21,0.98),rgba(12,15,13,0.98))] p-4 text-center">
-                      <Mic size={36} className="mx-auto mb-3 text-[#86efac]" />
+                    <div className="flex h-full flex-col justify-center bg-[linear-gradient(180deg,rgba(23,24,22,0.98),rgba(16,18,16,0.98))] p-5 text-center">
+                      <Mic size={34} className="mx-auto mb-3 text-[#a8f0bf]" />
                       <audio
                         src={previewUrl || ""}
                         controls
@@ -663,17 +796,59 @@ export function DareCompletionScreen({
                   )}
                 </div>
 
-                <div className="flex gap-2.5">
+                <div className="mb-3 shrink-0 rounded-[22px] border border-white/8 bg-white/[0.035] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#7dd3fc]">
+                        Select a Thumbnail
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-[#94a3b8]">
+                        Sets the first carousel image in Pic Mode.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleSelectThumbnail}
+                      className="shrink-0 rounded-full border border-[#38bdf8]/20 bg-[#38bdf8]/10 px-3 py-2 text-xs font-black text-[#7dd3fc] transition-colors hover:bg-[#38bdf8]/15"
+                    >
+                      {thumbnailBlob ? "Change" : "Select"}
+                    </button>
+                  </div>
+                  {thumbnailPreviewUrl ? (
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={thumbnailPreviewUrl}
+                        alt="Selected thumbnail"
+                        className="h-14 w-14 rounded-[16px] object-cover"
+                      />
+                      <p className="min-w-0 flex-1 text-xs font-semibold leading-snug text-white">
+                        Thumbnail selected for the cover card.
+                      </p>
+                      <button
+                        onClick={clearThumbnail}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/70 transition-colors hover:text-white"
+                        aria-label="Remove selected thumbnail"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-[18px] border border-dashed border-white/10 bg-black/20 px-3 py-3 text-center text-[11px] font-semibold text-white/45">
+                      No custom thumbnail selected. Photo proof will use itself as the cover.
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 gap-2.5">
                   <button
                     onClick={clearPreview}
-                    className="flex-1 rounded-[18px] border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-white/[0.08]"
+                    className="flex-1 rounded-full border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-bold text-white transition-all hover:bg-white/[0.08]"
                   >
                     Retake
                   </button>
                   <button
                     onClick={handleSubmitProof}
                     disabled={isSubmitted || isUploadingProof}
-                    className="flex-1 rounded-[18px] bg-[linear-gradient(135deg,#4ade80_0%,#22c55e_100%)] px-4 py-3 text-sm font-bold text-black shadow-[0_12px_24px_rgba(74,222,128,0.2)] transition-all hover:-translate-y-1 hover:shadow-[0_16px_28px_rgba(74,222,128,0.24)] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="flex-1 rounded-full bg-[linear-gradient(135deg,#79d99a_0%,#35b96f_100%)] px-4 py-3 text-sm font-black text-[#041006] shadow-[0_14px_30px_rgba(53,185,111,0.22)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_38px_rgba(53,185,111,0.26)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isUploadingProof || isSubmitted
                       ? "Submitting..."
@@ -683,25 +858,25 @@ export function DareCompletionScreen({
               </div>
             )
           ) : (
-            <div className="relative overflow-hidden rounded-[24px] border border-[#4ade80]/16 bg-[linear-gradient(180deg,rgba(18,24,19,0.98),rgba(11,15,11,0.98))] p-5 text-center shadow-[0_20px_45px_rgba(0,0,0,0.35)]">
-              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.42),transparent)]" />
-              <div className="pointer-events-none absolute left-1/2 top-5 h-28 w-28 -translate-x-1/2 rounded-full bg-[#4ade80]/10 blur-3xl" />
+            <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-[28px] border border-[#79d99a]/16 bg-[linear-gradient(180deg,rgba(13,39,39,0.96)_0%,rgba(8,27,29,0.99)_48%,rgba(4,14,16,0.99)_100%)] p-5 text-center shadow-[0_24px_64px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(121,217,154,0.52),transparent)]" />
+              <div className="pointer-events-none absolute left-1/2 top-5 h-28 w-28 -translate-x-1/2 rounded-full bg-[#79d99a]/10 blur-3xl" />
 
-              <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-[#4ade80]/25 bg-[#4ade80]/12 shadow-[0_0_28px_rgba(74,222,128,0.16)]">
+              <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-[#79d99a]/25 bg-[#79d99a]/12 shadow-[0_0_28px_rgba(121,217,154,0.16)]">
                 {submittedAction === "video" && (
-                  <Camera size={26} className="text-[#86efac]" />
+                  <Camera size={26} className="text-[#a8f0bf]" />
                 )}
                 {submittedAction === "photo" && (
-                  <CameraIcon size={26} className="text-[#86efac]" />
+                  <CameraIcon size={26} className="text-[#a8f0bf]" />
                 )}
                 {submittedAction === "voice" && (
-                  <Mic size={26} className="text-[#86efac]" />
+                  <Mic size={26} className="text-[#a8f0bf]" />
                 )}
                 {submittedAction === "gallery" && (
-                  <Image size={26} className="text-[#86efac]" />
+                  <Image size={26} className="text-[#a8f0bf]" />
                 )}
                 {!submittedAction && (
-                  <Camera size={26} className="text-[#86efac]" />
+                  <Camera size={26} className="text-[#a8f0bf]" />
                 )}
               </div>
               <h3 className="mb-1.5 text-lg font-bold text-white">

@@ -75,6 +75,11 @@ export async function verifyTurnstile(
     if (required && STRICT) return { ok: false, reason: "missing turnstile token" };
     return { ok: true };
   }
+  // For endpoints where Turnstile is optional, a stale page-level token should
+  // not break authenticated app actions such as liking a post. Required
+  // endpoints still verify and fail closed below.
+  if (!required) return { ok: true };
+
   try {
     const body = new URLSearchParams();
     body.set("secret", TURNSTILE_SECRET);

@@ -130,6 +130,14 @@ class TruthService {
         request.challengerId,
       );
 
+      await this.alertService.createFriendChallengeActivityAlerts({
+        challengeKind: "truth",
+        challengeId: truthEntity.id,
+        challengerId: request.challengerId,
+        receiverId: request.receiverId,
+        prompt: request.question,
+      });
+
       console.log("Alert created successfully for truth:", truthEntity.id);
 
       await this.feedRepository.createFeedEvent({

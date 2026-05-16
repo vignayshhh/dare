@@ -14,8 +14,8 @@ import {
   Star,
   ArrowLeft,
   BellRing,
-  ChevronRight,
   Sparkles,
+  Users,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { useAlertStore } from "../../stores/useAlertStore";
@@ -100,6 +100,8 @@ export function AlertsScreen({
   onBack,
   onNavigateToDares,
   onNavigateToFeed,
+  onNavigateToChallengeTimeline,
+  onNavigateToFriendCompletedDare,
 }: {
   onBack: () => void;
   onNavigateToDares: (request?: {
@@ -108,8 +110,14 @@ export function AlertsScreen({
     highlightTruthId?: string;
   }) => void;
   onNavigateToFeed: () => void;
+  onNavigateToChallengeTimeline: (alert: AlertEntity) => void;
+  onNavigateToFriendCompletedDare: (alert: AlertEntity) => void;
 }) {
   const [activeTab, setActiveTab] = useState<"social" | "sus">("social");
+  const [alertMode, setAlertMode] = useState<"main" | "dare">("main");
+  const [dareAlertTab, setDareAlertTab] = useState<"personal" | "friends">(
+    "personal",
+  );
   const [friendshipStatuses, setFriendshipStatuses] = useState<
     Map<string, "accepted" | "rejected">
   >(new Map());
@@ -118,6 +126,8 @@ export function AlertsScreen({
   const { user: currentUser } = useAuthStore();
   const checkedFriendshipActorsRef = useRef<Set<string>>(new Set());
   const inFlightFriendshipActorsRef = useRef<Set<string>>(new Set());
+  const knownAlertIdsRef = useRef<Set<string>>(new Set());
+  const hasHydratedAlertsRef = useRef(false);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -130,12 +140,30 @@ export function AlertsScreen({
   useEffect(() => {
     checkedFriendshipActorsRef.current.clear();
     inFlightFriendshipActorsRef.current.clear();
-  }, [currentUser?.id]);
+  }, [currentUser?.id, subscribeToAlerts]);
 
   // Handle navigation to dares screen
   const handleAlertClick = async (alert: AlertEntity) => {
-    // Mark as read first
-    await markAsRead(alert.id);
+    // Mark as read first. Temporary mock entries are display-only.
+    if (!alert.id.startsWith("mock-")) {
+      await markAsRead(alert.id);
+    }
+
+    if (
+      alert.type === "DARE_FRIEND_ACTIVITY" ||
+      alert.type === "TRUTH_FRIEND_ACTIVITY"
+    ) {
+      if (
+        alert.type === "DARE_FRIEND_ACTIVITY" &&
+        alert.metadata?.activityType === "completed"
+      ) {
+        onNavigateToFriendCompletedDare(alert);
+        return;
+      }
+
+      onNavigateToChallengeTimeline(alert);
+      return;
+    }
 
     // Navigate based on alert type
     if (alert.type === "DARE_COMPLETED") {
@@ -254,7 +282,7 @@ export function AlertsScreen({
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, subscribeToAlerts]);
 
   // Check friendship status for friend request alerts to ensure persistence
   useEffect(() => {
@@ -383,8 +411,109 @@ export function AlertsScreen({
     return { today, yesterday };
   };
 
-  // Filter alerts by type
-  const socialAlerts = alerts.filter((alert) => alert.isSocialAlert());
+  const isFriendChallengeAlert = (alert: AlertEntity) =>
+    alert.type === "DARE_FRIEND_ACTIVITY" ||
+    alert.type === "TRUTH_FRIEND_ACTIVITY";
+
+  const isPersonalDareAlert = (alert: AlertEntity) =>
+    !isFriendChallengeAlert(alert) &&
+    (alert.type.startsWith("DARE_") || alert.type.startsWith("TRUTH_"));
+
+  // Filter alerts by type. Personal dare/truth workflow cards are displayed
+  // under the D organizer only; alert creation and click behavior stay unchanged.
+  const personalDareAlerts = alerts.filter(
+    (alert) => alert.isSocialAlert() && isPersonalDareAlert(alert),
+  );
+  const friendChallengeAlerts = alerts.filter(
+    (alert) => alert.isSocialAlert() && isFriendChallengeAlert(alert),
+  );
+  const mockFriendChallengeAlerts = [
+    AlertEntity.create({
+      id: "mock-friend-dare-activity-1",
+      userId: currentUser?.id || "mock-current-user",
+      type: "DARE_FRIEND_ACTIVITY",
+      entityId: "mock-friend-dare-1",
+      actorId: "mock-ria",
+      message: "Ria dared Kabir to send a voice note without deleting it",
+      metadata: {
+        mock: true,
+        challengeKind: "dare",
+        challengerId: "mock-ria",
+        challengerName: "Ria",
+        challengerUsername: "ria",
+        receiverId: "mock-kabir",
+        receiverName: "Kabir",
+        receiverUsername: "kabir",
+        prompt: "Send a voice note saying the thing you have been avoiding.",
+        mockState: "PROOF_SUBMITTED",
+        mockCreatedAt: new Date(clockTick - 1000 * 60 * 42).toISOString(),
+        mockAcceptedAt: new Date(clockTick - 1000 * 60 * 31).toISOString(),
+        mockProofSubmittedAt: new Date(clockTick - 1000 * 60 * 8).toISOString(),
+      },
+      isRead: false,
+      createdAt: new Date(clockTick - 1000 * 60 * 42).toISOString(),
+      updatedAt: new Date(clockTick - 1000 * 60 * 8).toISOString(),
+    }),
+    AlertEntity.create({
+      id: "mock-friend-truth-activity-1",
+      userId: currentUser?.id || "mock-current-user",
+      type: "TRUTH_FRIEND_ACTIVITY",
+      entityId: "mock-friend-truth-1",
+      actorId: "mock-meera",
+      message: "Meera asked Aarav a truth about who knows them best",
+      metadata: {
+        mock: true,
+        challengeKind: "truth",
+        challengerId: "mock-meera",
+        challengerName: "Meera",
+        challengerUsername: "meera",
+        receiverId: "mock-aarav",
+        receiverName: "Aarav",
+        receiverUsername: "aarav",
+        prompt: "Who in your life understands the version of you nobody else sees?",
+        mockState: "ANSWERED",
+        mockCreatedAt: new Date(clockTick - 1000 * 60 * 78).toISOString(),
+        mockAnsweredAt: new Date(clockTick - 1000 * 60 * 19).toISOString(),
+      },
+      isRead: true,
+      createdAt: new Date(clockTick - 1000 * 60 * 78).toISOString(),
+      updatedAt: new Date(clockTick - 1000 * 60 * 19).toISOString(),
+    }),
+    AlertEntity.create({
+      id: "mock-friend-dare-activity-2",
+      userId: currentUser?.id || "mock-current-user",
+      type: "DARE_FRIEND_ACTIVITY",
+      entityId: "mock-friend-dare-2",
+      actorId: "mock-isha",
+      message: "Isha dared Dev to post an unfiltered throwback",
+      metadata: {
+        mock: true,
+        challengeKind: "dare",
+        challengerId: "mock-isha",
+        challengerName: "Isha",
+        challengerUsername: "isha",
+        receiverId: "mock-dev",
+        receiverName: "Dev",
+        receiverUsername: "dev",
+        prompt: "Post an old photo and tell the real story behind it.",
+        mockState: "SENT",
+        mockCreatedAt: new Date(clockTick - 1000 * 60 * 11).toISOString(),
+      },
+      isRead: false,
+      createdAt: new Date(clockTick - 1000 * 60 * 11).toISOString(),
+      updatedAt: new Date(clockTick - 1000 * 60 * 11).toISOString(),
+    }),
+  ];
+  const friendChallengeAlertsForDisplay =
+    friendChallengeAlerts.length > 0
+      ? friendChallengeAlerts
+      : mockFriendChallengeAlerts;
+  const socialAlerts = alerts.filter(
+    (alert) =>
+      alert.isSocialAlert() &&
+      !isPersonalDareAlert(alert) &&
+      !isFriendChallengeAlert(alert),
+  );
   const susAlerts = alerts.filter((alert) => alert.isSusAlert());
 
   // ── Aggregate POST_LIKED alerts by postId (Instagram-style) ──
@@ -558,6 +687,10 @@ export function AlertsScreen({
   const { today: socialToday, yesterday: socialYesterday } = groupAlertsByTime(
     deduplicateAlerts(aggregatedSocialAlerts),
   );
+  const { today: personalDareToday, yesterday: personalDareYesterday } =
+    groupAlertsByTime(deduplicateAlerts(personalDareAlerts));
+  const { today: friendChallengeToday, yesterday: friendChallengeYesterday } =
+    groupAlertsByTime(deduplicateAlerts(friendChallengeAlertsForDisplay));
   const liveViewerMap = new Map(
     liveViewers.map((viewer) => [viewer.userId, viewer.username]),
   );
@@ -631,13 +764,97 @@ export function AlertsScreen({
       );
   });
 
+  const getRepeatedLikeActorKey = (alert: AlertEntity) => {
+    if (alert.type !== "SUS_REPEATED_LIKES" || !alert.actorId) {
+      return null;
+    }
+
+    const username = String(alert.metadata?.actorUsername || "")
+      .replace(/^@/, "")
+      .trim()
+      .toLowerCase();
+
+    if (!username) return null;
+
+    return `${alert.actorId}:${username}`;
+  };
+
+  const mergeRepeatedLikeSusAlerts = (alertsList: AlertEntity[]) => {
+    const mergedByActor = new Map<string, AlertEntity[]>();
+    const passthroughAlerts: AlertEntity[] = [];
+
+    alertsList.forEach((alert) => {
+      const mergeKey = getRepeatedLikeActorKey(alert);
+      if (!mergeKey) {
+        passthroughAlerts.push(alert);
+        return;
+      }
+
+      const existing = mergedByActor.get(mergeKey) ?? [];
+      existing.push(alert);
+      mergedByActor.set(mergeKey, existing);
+    });
+
+    const mergedRepeatedLikeAlerts = [...mergedByActor.values()].map(
+      (group) => {
+        const sortedGroup = [...group].sort(
+          (a, b) =>
+            new Date(getAlertActivityTime(b)).getTime() -
+            new Date(getAlertActivityTime(a)).getTime(),
+        );
+        const highestTapAlert = [...group].sort(
+          (a, b) =>
+            Number(b.metadata?.tapCount || 0) -
+              Number(a.metadata?.tapCount || 0) ||
+            new Date(getAlertActivityTime(b)).getTime() -
+              new Date(getAlertActivityTime(a)).getTime(),
+        )[0];
+        const latestAlert = sortedGroup[0] ?? highestTapAlert;
+
+        if (!latestAlert || !highestTapAlert) {
+          return group[0];
+        }
+
+        const tapCount = Math.max(
+          ...group.map((item) => Number(item.metadata?.tapCount || 0)),
+        );
+        const actorUsername = String(
+          latestAlert.metadata?.actorUsername ||
+            highestTapAlert.metadata?.actorUsername ||
+            "someone",
+        ).replace(/^@/, "");
+
+        return AlertEntity.create({
+          id: latestAlert.id,
+          userId: latestAlert.userId,
+          type: latestAlert.type,
+          entityId: latestAlert.entityId,
+          actorId: latestAlert.actorId,
+          message: `@${actorUsername} liked your post ${tapCount} times`,
+          metadata: {
+            ...latestAlert.metadata,
+            tapCount,
+          },
+          isRead: group.every((item) => item.isRead),
+          createdAt: getAlertActivityTime(latestAlert),
+          updatedAt: latestAlert.updatedAt,
+        });
+      },
+    );
+
+    return [...passthroughAlerts, ...mergedRepeatedLikeAlerts];
+  };
+
+  const repeatedLikeMergedSusAlerts =
+    mergeRepeatedLikeSusAlerts(liveAwareSusAlerts);
+
   const mergedSusAlerts = deduplicateAlerts(
-    liveAwareSusAlerts.filter((alert) => {
+    repeatedLikeMergedSusAlerts.filter((alert) => {
       if (alert.type !== "SUS_PROFILE_VIEWING" || !alert.actorId) {
         return true;
       }
 
-      const latestForActor = liveAwareSusAlerts
+      const latestForActor = repeatedLikeMergedSusAlerts
         .filter(
           (candidate) =>
             candidate.type === "SUS_PROFILE_VIEWING" &&
@@ -690,9 +907,42 @@ export function AlertsScreen({
     groupAlertsByTime(susAlertsForDisplay);
 
   const currentAlerts =
-    activeTab === "social"
-      ? deduplicateAlerts(aggregatedSocialAlerts)
-      : susAlertsForDisplay;
+    alertMode === "dare"
+      ? dareAlertTab === "personal"
+        ? deduplicateAlerts(personalDareAlerts)
+        : deduplicateAlerts(friendChallengeAlertsForDisplay)
+      : activeTab === "social"
+        ? deduplicateAlerts(aggregatedSocialAlerts)
+        : susAlertsForDisplay;
+
+  const isRealUnreadAlert = (alert: AlertEntity) =>
+    !alert.id.startsWith("mock-") && !alert.isRead;
+  const dareUnreadCount = [...personalDareAlerts, ...friendChallengeAlerts].filter(
+    isRealUnreadAlert,
+  ).length;
+  const mainUnreadCount = deduplicateAlerts([
+    ...aggregatedSocialAlerts,
+    ...susAlerts,
+  ]).filter(isRealUnreadAlert).length;
+  const currentUnreadCount = currentAlerts.filter(isRealUnreadAlert).length;
+  const currentLaneLabel =
+    alertMode === "dare"
+      ? dareAlertTab === "personal"
+        ? "Dare queue"
+        : "Friends queue"
+      : activeTab === "sus"
+        ? "Sus watch"
+        : "Social notifications";
+  const currentLaneCaption =
+    alertMode === "dare"
+      ? dareAlertTab === "personal"
+        ? "Dares and truth updates"
+        : "Friend challenge updates"
+      : activeTab === "sus"
+        ? "Private activity signals"
+        : "Posts, comments, and requests";
+  const isSusLane = alertMode === "main" && activeTab === "sus";
+
   // Helper method to get time ago
   const getTimeAgo = (createdAt: string): string => {
     const alertTime = new Date(createdAt);
@@ -707,6 +957,55 @@ export function AlertsScreen({
     if (diffInHours < 24) return `${diffInHours}h ago`;
     return `${diffInDays}d ago`;
   };
+
+  useEffect(() => {
+    const realAlerts = alerts.filter((alert) => !alert.id.startsWith("mock-"));
+    const currentIds = new Set(realAlerts.map((alert) => alert.id));
+
+    if (!hasHydratedAlertsRef.current) {
+      knownAlertIdsRef.current = currentIds;
+      hasHydratedAlertsRef.current = true;
+      return;
+    }
+
+    const newlyArrivedAlerts = realAlerts.filter(
+      (alert) => !knownAlertIdsRef.current.has(alert.id),
+    );
+    knownAlertIdsRef.current = currentIds;
+
+    if (newlyArrivedAlerts.length === 0) return;
+
+    const latestAlert = [...newlyArrivedAlerts].sort(
+      (a, b) =>
+        new Date(b.createdAt || b.updatedAt).getTime() -
+        new Date(a.createdAt || a.updatedAt).getTime(),
+    )[0];
+
+    if (!latestAlert) return;
+
+    if (isPersonalDareAlert(latestAlert)) {
+      setAlertMode("dare");
+      setDareAlertTab("personal");
+      return;
+    }
+
+    if (isFriendChallengeAlert(latestAlert)) {
+      setAlertMode("dare");
+      setDareAlertTab("friends");
+      return;
+    }
+
+    if (latestAlert.isSusAlert()) {
+      setAlertMode("main");
+      setActiveTab("sus");
+      return;
+    }
+
+    if (latestAlert.isSocialAlert()) {
+      setAlertMode("main");
+      setActiveTab("social");
+    }
+  }, [alerts]);
 
   // Get actor info from metadata (resolve from profileDataStore + avatarStore)
   const alertUserProfiles = useProfileDataStore((s) => s.userProfiles);
@@ -902,6 +1201,7 @@ export function AlertsScreen({
           label: "Dare Received",
           accentBarClass: "bg-[#f59e0b]",
           pillClass: "border-[#f59e0b]/30 bg-[#f59e0b]/12 text-[#fbbf24]",
+          iconWrapClass: "border-[#f59e0b]/24 bg-[#f59e0b]/12 text-[#fbbf24]",
           glowClass: "bg-[#f59e0b]/14",
           railClass: "from-[#f59e0b]/0 via-[#f59e0b]/80 to-[#f59e0b]/0",
           icon: <Target size={12} />,
@@ -911,6 +1211,7 @@ export function AlertsScreen({
           label: "Dare Accepted",
           accentBarClass: "bg-[#4ade80]",
           pillClass: "border-[#4ade80]/30 bg-[#4ade80]/12 text-[#86efac]",
+          iconWrapClass: "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#86efac]",
           glowClass: "bg-[#4ade80]/14",
           railClass: "from-[#4ade80]/0 via-[#4ade80]/80 to-[#4ade80]/0",
           icon: <CheckCircle size={12} />,
@@ -920,6 +1221,7 @@ export function AlertsScreen({
           label: "Dare Refused",
           accentBarClass: "bg-red-400",
           pillClass: "border-red-500/25 bg-red-500/12 text-red-300",
+          iconWrapClass: "border-red-500/24 bg-red-500/12 text-red-300",
           glowClass: "bg-red-500/14",
           railClass: "from-red-500/0 via-red-500/80 to-red-500/0",
           icon: <XCircle size={12} />,
@@ -929,15 +1231,30 @@ export function AlertsScreen({
           label: "Dare Completed",
           accentBarClass: "bg-[#fcd34d]",
           pillClass: "border-[#f59e0b]/25 bg-[#f59e0b]/10 text-[#fcd34d]",
+          iconWrapClass: "border-[#f59e0b]/24 bg-[#f59e0b]/12 text-[#fcd34d]",
           glowClass: "bg-[#f59e0b]/14",
           railClass: "from-[#f59e0b]/0 via-[#f59e0b]/80 to-[#f59e0b]/0",
           icon: <Target size={12} />,
+        };
+      case "DARE_FRIEND_ACTIVITY":
+        return {
+          label:
+            alert.metadata?.activityType === "completed"
+              ? "Friend Completed"
+              : "Friends Dare",
+          accentBarClass: "bg-[#4ade80]",
+          pillClass: "border-[#4ade80]/25 bg-[#4ade80]/10 text-[#86efac]",
+          iconWrapClass: "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#86efac]",
+          glowClass: "bg-[#4ade80]/14",
+          railClass: "from-[#4ade80]/0 via-[#4ade80]/80 to-[#4ade80]/0",
+          icon: <Users size={12} />,
         };
       case "TRUTH_RECEIVED":
         return {
           label: "Truth Question",
           accentBarClass: "bg-sky-400",
           pillClass: "border-sky-500/25 bg-sky-500/10 text-sky-300",
+          iconWrapClass: "border-sky-500/24 bg-sky-500/12 text-sky-300",
           glowClass: "bg-sky-500/14",
           railClass: "from-sky-500/0 via-sky-500/80 to-sky-500/0",
           icon: <MessageCircle size={12} />,
@@ -947,33 +1264,72 @@ export function AlertsScreen({
           label: "Truth Answered",
           accentBarClass: "bg-[#4ade80]",
           pillClass: "border-[#4ade80]/30 bg-[#4ade80]/12 text-[#86efac]",
+          iconWrapClass: "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#86efac]",
           glowClass: "bg-[#4ade80]/14",
           railClass: "from-[#4ade80]/0 via-[#4ade80]/80 to-[#4ade80]/0",
           icon: <CheckCircle size={12} />,
+        };
+      case "TRUTH_FRIEND_ACTIVITY":
+        return {
+          label: "Friends Truth",
+          accentBarClass: "bg-sky-400",
+          pillClass: "border-sky-500/25 bg-sky-500/10 text-sky-300",
+          iconWrapClass: "border-sky-500/24 bg-sky-500/12 text-sky-300",
+          glowClass: "bg-sky-500/14",
+          railClass: "from-sky-500/0 via-sky-500/80 to-sky-500/0",
+          icon: <Users size={12} />,
         };
       case "COMMENT_RECEIVED":
         return {
           label: "New Comment",
           accentBarClass: "bg-sky-400",
           pillClass: "border-sky-500/25 bg-sky-500/10 text-sky-300",
+          iconWrapClass: "border-sky-500/24 bg-sky-500/12 text-sky-300",
           glowClass: "bg-sky-500/14",
           railClass: "from-sky-500/0 via-sky-500/80 to-sky-500/0",
-          icon: <MessageSquare size={12} />,
+          icon: <MessageCircle size={12} />,
         };
       case "COMMENT_REPLY":
         return {
           label: "Comment Reply",
           accentBarClass: "bg-violet-400",
           pillClass: "border-violet-500/25 bg-violet-500/10 text-violet-300",
+          iconWrapClass: "border-violet-500/24 bg-violet-500/12 text-violet-300",
           glowClass: "bg-violet-500/14",
           railClass: "from-violet-500/0 via-violet-500/80 to-violet-500/0",
           icon: <MessageSquare size={12} />,
         };
+      case "STORY_REACTION": {
+        const isHateReaction =
+          alert.metadata?.reactionType === "hate" ||
+          String(alert.message || "").toLowerCase().includes("hated your story");
+
+        return {
+          label: isHateReaction ? "Story Hated" : "Story Liked",
+          accentBarClass: isHateReaction ? "bg-red-400" : "bg-[#4ade80]",
+          pillClass: isHateReaction
+            ? "border-red-500/25 bg-red-500/12 text-red-300"
+            : "border-[#4ade80]/25 bg-[#4ade80]/10 text-[#86efac]",
+          iconWrapClass: isHateReaction
+            ? "border-red-500/24 bg-red-500/12 text-red-300"
+            : "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#86efac]",
+          glowClass: isHateReaction ? "bg-red-500/14" : "bg-[#4ade80]/14",
+          railClass: isHateReaction
+            ? "from-red-500/0 via-red-500/80 to-red-500/0"
+            : "from-[#4ade80]/0 via-[#4ade80]/80 to-[#4ade80]/0",
+          icon: isHateReaction ? (
+            <XCircle size={12} />
+          ) : (
+            <Heart size={12} fill="currentColor" />
+          ),
+        };
+      }
       case "POST_LIKED":
         return {
           label: "Post Liked",
           accentBarClass: "bg-pink-400",
           pillClass: "border-pink-500/25 bg-pink-500/10 text-pink-300",
+          iconWrapClass: "border-pink-500/24 bg-pink-500/12 text-pink-300",
           glowClass: "bg-pink-500/14",
           railClass: "from-pink-500/0 via-pink-500/80 to-pink-500/0",
           icon: <Heart size={12} fill="currentColor" />,
@@ -983,15 +1339,17 @@ export function AlertsScreen({
           label: "Friend Request",
           accentBarClass: "bg-[#4ade80]",
           pillClass: "border-[#4ade80]/25 bg-[#4ade80]/10 text-[#86efac]",
+          iconWrapClass: "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#86efac]",
           glowClass: "bg-[#4ade80]/14",
           railClass: "from-[#4ade80]/0 via-[#4ade80]/80 to-[#4ade80]/0",
-          icon: <Star size={12} />,
+          icon: <Users size={12} />,
         };
       default:
         return {
           label: "Alert",
           accentBarClass: "bg-[#4ade80]",
           pillClass: "border-white/10 bg-white/[0.05] text-white",
+          iconWrapClass: "border-[#4ade80]/20 bg-[#4ade80]/10 text-[#86efac]",
           glowClass: "bg-[#4ade80]/10",
           railClass: "from-[#4ade80]/0 via-[#4ade80]/60 to-[#4ade80]/0",
           icon: <BellRing size={12} />,
@@ -1023,9 +1381,9 @@ export function AlertsScreen({
             };
 
     return (
-      <div className="mb-3 flex items-center gap-3">
+      <div className="alerts-section-header mb-3 flex items-center gap-3">
         <div
-          className={`flex h-8 w-8 items-center justify-center rounded-2xl border ${toneClasses.iconWrap}`}
+          className={`flex h-9 w-9 items-center justify-center rounded-[16px] border shadow-[0_14px_34px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.04)] ${toneClasses.iconWrap}`}
         >
           {tone === "danger" ? (
             <AlertTriangle size={14} />
@@ -1054,9 +1412,10 @@ export function AlertsScreen({
       return alert.message;
     }
 
-    const highlightPhrase = alert.message.includes("hated your story")
+    const normalizedMessage = alert.message.toLowerCase();
+    const highlightPhrase = normalizedMessage.includes("hated your story")
       ? "hated your story"
-      : alert.message.includes("liked your story")
+      : normalizedMessage.includes("liked your story")
         ? "liked your story"
         : null;
 
@@ -1064,19 +1423,26 @@ export function AlertsScreen({
       return alert.message;
     }
 
-    const [before, after] = alert.message.split(highlightPhrase);
+    const matchIndex = normalizedMessage.indexOf(highlightPhrase);
+    const before = alert.message.slice(0, matchIndex);
+    const highlightedText = alert.message.slice(
+      matchIndex,
+      matchIndex + highlightPhrase.length,
+    );
+    const after = alert.message.slice(matchIndex + highlightPhrase.length);
+    const isHateReaction = highlightPhrase === "hated your story";
 
     return (
       <>
         {before}
         <span
-          className={
-            highlightPhrase === "hated your story"
-              ? "font-semibold text-red-200 drop-shadow-[0_0_10px_rgba(239,68,68,0.18)]"
-              : "font-semibold text-[#bbf7d0] drop-shadow-[0_0_10px_rgba(74,222,128,0.18)]"
-          }
+          className={`mx-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black uppercase tracking-[0.08em] ${
+            isHateReaction
+              ? "border-red-500/24 bg-red-500/12 text-red-200 shadow-[0_0_16px_rgba(239,68,68,0.12)]"
+              : "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#bbf7d0] shadow-[0_0_16px_rgba(74,222,128,0.12)]"
+          }`}
         >
-          {highlightPhrase}
+          {highlightedText}
         </span>
         {after}
       </>
@@ -1092,7 +1458,9 @@ export function AlertsScreen({
       alert.type === "DARE_COMPLETED" ||
       alert.type === "DARE_REFUSED" ||
       alert.type === "TRUTH_RECEIVED" ||
-      alert.type === "TRUTH_ANSWERED";
+      alert.type === "TRUTH_ANSWERED" ||
+      alert.type === "DARE_FRIEND_ACTIVITY" ||
+      alert.type === "TRUTH_FRIEND_ACTIVITY";
 
     const isClickable =
       isDareOrTruth ||
@@ -1104,14 +1472,11 @@ export function AlertsScreen({
     return (
       <div
         key={`${alert.id}-${alert.createdAt}`}
-        className={`group relative isolate overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(22,26,22,0.98),rgba(14,16,14,0.98))] p-4 shadow-[0_18px_44px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl transition-all duration-300 ${isClickable ? "cursor-pointer hover:-translate-y-0.5 hover:border-[#4ade80]/20 hover:shadow-[0_24px_54px_rgba(0,0,0,0.5),0_0_32px_rgba(74,222,128,0.12)]" : ""}`}
+        className={`alerts-card group relative isolate overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,24,18,0.98),rgba(7,10,8,0.98))] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl transition-all duration-300 ${isClickable ? "cursor-pointer hover:-translate-y-0.5 hover:border-[#4ade80]/24 hover:shadow-[0_28px_76px_rgba(0,0,0,0.54),0_0_28px_rgba(74,222,128,0.1)]" : ""}`}
         onClick={() => isClickable && handleAlertClick(alert)}
       >
         <div
-          className={`pointer-events-none absolute inset-x-7 top-0 h-px bg-[linear-gradient(90deg,var(--tw-gradient-stops))] ${meta.railClass}`}
-        />
-        <div
-          className={`pointer-events-none absolute right-0 top-0 h-24 w-24 rounded-full blur-3xl ${meta.glowClass}`}
+          className={`pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,var(--tw-gradient-stops))] ${meta.railClass}`}
         />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_70%)] opacity-60" />
         <div className="flex items-start space-x-3">
@@ -1119,46 +1484,50 @@ export function AlertsScreen({
             <Avatar
               src={actorInfo.avatar}
               alt={actorInfo.name}
-              size="md"
+              size="sm"
               userId={actorInfo.userId}
               username={actorInfo.username}
               disableGhostMode
             />
-            <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-black/40 bg-[#101310] text-white shadow-[0_6px_18px_rgba(0,0,0,0.28)]">
+            <div
+              className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full shadow-[0_8px_22px_rgba(0,0,0,0.34)] [&_svg]:h-3 [&_svg]:w-3 ${meta.iconWrapClass}`}
+            >
               {meta.icon}
             </div>
             {alert.metadata.isLive && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-[#4ade80] rounded-full border-2 border-black animate-pulse" />
+              <div className="absolute -top-1 -right-1 h-3.5 w-3.5 animate-pulse rounded-full border-2 border-black bg-[#4ade80]" />
             )}
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="mb-2 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <span className="block truncate text-[15px] font-bold tracking-tight text-[#6ee7b7]">
+                <span className="block truncate text-[13px] font-bold tracking-tight text-[#6ee7b7]">
                   {actorInfo.username
                     ? `@${actorInfo.username.replace(/^@/, "")}`
                     : actorInfo.name}
                 </span>
               </div>
-              <span className="shrink-0 pt-1 text-[11px] font-medium text-[#64748b]">
+              <span className="shrink-0 pt-0.5 text-[10px] font-medium text-[#64748b]">
                 {getTimeAgo(getAlertActivityTime(alert))}
               </span>
             </div>
 
-            <p className="mb-3 text-[14px] leading-relaxed text-[#e2e8f0]">
+            <p className="mb-2.5 text-[13px] leading-snug text-[#e2e8f0]">
               {renderSocialAlertMessage(alert)}
             </p>
 
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              {alert.type !== "STORY_REACTION" && (
-                <div
-                  className={`inline-flex items-center rounded-full border font-bold uppercase tracking-[0.16em] ${isCompactChallengeCapsule ? "gap-1 px-2.5 py-0.5 text-[10px]" : "gap-1.5 px-3 py-1 text-[11px]"} ${meta.pillClass}`}
-                >
-                  {meta.icon}
-                  <span>{meta.label}</span>
-                </div>
-              )}
+            <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+              <div
+                className={`inline-flex items-center rounded-full border font-bold uppercase tracking-[0.16em] ${
+                  isCompactChallengeCapsule || alert.type === "STORY_REACTION"
+                    ? "gap-1 px-2.5 py-0.5 text-[10px]"
+                    : "gap-1.5 px-3 py-1 text-[11px]"
+                } ${meta.pillClass}`}
+              >
+                {meta.icon}
+                <span>{meta.label}</span>
+              </div>
               {alert.metadata.isLive && alert.metadata.liveDuration && (
                 <div className="inline-flex items-center gap-1.5 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1 text-[11px] font-semibold text-[#86efac]">
                   <div className="h-1.5 w-1.5 rounded-full bg-[#4ade80] animate-pulse" />
@@ -1234,11 +1603,11 @@ export function AlertsScreen({
             {(alert.type === "COMMENT_RECEIVED" ||
               alert.type === "COMMENT_REPLY") &&
               alert.metadata.commentText && (
-                <div className="mt-2 rounded-[20px] border border-white/6 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+                <div className="mt-2 rounded-[18px] border border-white/6 bg-[linear-gradient(180deg,rgba(28,28,28,0.98),rgba(22,22,22,0.98))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
                   <div
-                    className={`mb-2 h-1 w-14 rounded-full ${meta.accentBarClass}`}
+                    className={`mb-2 h-1 w-12 rounded-full ${meta.accentBarClass}`}
                   />
-                  <p className="text-[#e2e8f0] text-sm leading-relaxed">
+                  <p className="text-[13px] leading-snug text-[#e2e8f0]">
                     {alert.metadata.commentText}
                   </p>
                 </div>
@@ -1252,7 +1621,7 @@ export function AlertsScreen({
               </div>
             )}
             {alert.type === "POST_LIKED" && (
-              <div className="mt-3 flex items-center gap-3 rounded-[22px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-3.5 py-3">
+              <div className="mt-2.5 flex items-center gap-2.5 rounded-[20px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-3 py-2.5">
                 {/* Stacked avatars of likers */}
                 {alert.metadata.allLikers &&
                   alert.metadata.allLikers.length > 1 && (
@@ -1278,16 +1647,16 @@ export function AlertsScreen({
                     </div>
                   )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#94a3b8]">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#94a3b8]">
                     Engagement
                   </p>
-                  <p className="truncate text-sm text-white">
+                  <p className="truncate text-[13px] text-white">
                     {alert.metadata.allLikers?.length || 1} people reacted to
                     your post
                   </p>
                 </div>
                 {alert.metadata.postThumbnail && (
-                  <div className="ml-auto h-11 w-11 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-[#161a16] shadow-[0_10px_22px_rgba(0,0,0,0.24)]">
+                  <div className="ml-auto h-10 w-10 shrink-0 overflow-hidden rounded-[14px] border border-white/10 bg-[#161a16] shadow-[0_10px_22px_rgba(0,0,0,0.22)]">
                     <img
                       src={alert.metadata.postThumbnail}
                       alt="Post"
@@ -1308,13 +1677,10 @@ export function AlertsScreen({
             )}
 
             {alert.type === "FRIEND_REQUEST" && (
-              <div className="mt-4 flex gap-2.5">
+              <div className="mt-3 flex gap-2">
                 {friendshipStatuses.get(alert.id) === "accepted" ? (
-                  <div className="flex-1 rounded-2xl border border-[#4ade80]/25 bg-[#4ade80]/10 py-3 text-center text-sm font-semibold text-transparent">
-                    <span className="text-[#86efac]">
-                      Friend Request Accepted
-                    </span>
-                    ✓ Friend Request Accepted
+                  <div className="flex-1 rounded-2xl border border-[#4ade80]/25 bg-[#4ade80]/10 py-2.5 text-center text-xs font-semibold text-[#86efac]">
+                    Friend Request Accepted
                   </div>
                 ) : (
                   <>
@@ -1322,7 +1688,7 @@ export function AlertsScreen({
                       onClick={() =>
                         handleAcceptFriendRequest(alert.id, alert.entityId)
                       }
-                      className="flex-1 rounded-2xl bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-4 py-3 text-sm font-semibold text-black shadow-[0_12px_28px_rgba(74,222,128,0.24)] transition-all hover:brightness-105"
+                      className="flex-1 rounded-2xl bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-3 py-2.5 text-xs font-semibold text-black shadow-[0_12px_28px_rgba(74,222,128,0.22)] transition-all hover:brightness-105"
                     >
                       Accept
                     </button>
@@ -1330,7 +1696,7 @@ export function AlertsScreen({
                       onClick={() =>
                         handleRejectFriendRequest(alert.id, alert.entityId)
                       }
-                      className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300 transition-colors hover:bg-red-500/14"
+                      className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs font-semibold text-red-300 transition-colors hover:bg-red-500/14"
                     >
                       Reject
                     </button>
@@ -1381,7 +1747,7 @@ export function AlertsScreen({
     return (
       <div
         key={`${alert.id}-${alert.createdAt}`}
-        className={`group relative isolate overflow-hidden rounded-[28px] border p-4 shadow-[0_18px_44px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl transition-all duration-300 ${bgAccent} ${isLiveProfileView ? "border-red-500/18 bg-[linear-gradient(135deg,rgba(127,29,29,0.22),rgba(25,14,14,0.98)_42%,rgba(14,15,14,0.98)_100%)] hover:shadow-[0_24px_54px_rgba(0,0,0,0.5),0_0_34px_rgba(239,68,68,0.14)] ring-1 ring-red-500/28" : "border-white/8 bg-[linear-gradient(180deg,rgba(22,24,22,0.98),rgba(14,16,14,0.98))] hover:-translate-y-0.5 hover:shadow-[0_24px_54px_rgba(0,0,0,0.5)]"} ${!alert.isRead ? "ring-1 ring-red-500/20" : ""}`}
+        className={`alerts-card group relative isolate overflow-hidden rounded-[30px] border p-4 shadow-[0_24px_70px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl transition-all duration-300 ${bgAccent} ${isLiveProfileView ? "border-red-500/18 bg-[linear-gradient(135deg,rgba(127,29,29,0.2),rgba(18,24,18,0.98)_48%,rgba(7,10,8,0.98)_100%)] hover:shadow-[0_28px_76px_rgba(0,0,0,0.54),0_0_28px_rgba(239,68,68,0.1)] ring-1 ring-red-500/24" : "border-white/8 bg-[linear-gradient(180deg,rgba(18,24,18,0.98),rgba(7,10,8,0.98))] hover:-translate-y-0.5 hover:shadow-[0_28px_76px_rgba(0,0,0,0.54)]"} ${!alert.isRead ? "ring-1 ring-[#4ade80]/18" : ""}`}
         onClick={() => {
           if (!alert.id.startsWith("live-profile-")) {
             void handleAlertClick(alert);
@@ -1389,7 +1755,7 @@ export function AlertsScreen({
         }}
       >
         <div
-          className={`pointer-events-none absolute inset-x-7 top-0 h-px bg-[linear-gradient(90deg,var(--tw-gradient-stops))] ${accentColor === "text-pink-400" ? "from-pink-500/0 via-pink-500/80 to-pink-500/0" : accentColor === "text-amber-400" ? "from-amber-500/0 via-amber-500/80 to-amber-500/0" : accentColor === "text-purple-400" ? "from-purple-500/0 via-purple-500/80 to-purple-500/0" : accentColor === "text-yellow-300" ? "from-yellow-400/0 via-yellow-400/80 to-yellow-400/0" : "from-red-500/0 via-red-500/80 to-red-500/0"}`}
+          className={`pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,var(--tw-gradient-stops))] ${accentColor === "text-pink-400" ? "from-pink-500/0 via-pink-500/75 to-pink-500/0" : accentColor === "text-amber-400" ? "from-amber-500/0 via-amber-500/75 to-amber-500/0" : accentColor === "text-purple-400" ? "from-purple-500/0 via-purple-500/75 to-purple-500/0" : accentColor === "text-yellow-300" ? "from-[#4ade80]/0 via-[#4ade80]/76 to-[#4ade80]/0" : "from-red-500/0 via-red-500/75 to-red-500/0"}`}
         />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_70%)] opacity-60" />
         <div className="flex items-start space-x-3">
@@ -1398,39 +1764,39 @@ export function AlertsScreen({
             <Avatar
               src={actorInfo.avatar}
               alt={actorInfo.name}
-              size="md"
+              size="sm"
               userId={actorInfo.userId}
               username={actorInfo.username}
               disableGhostMode
             />
-            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-[#111] rounded-full flex items-center justify-center border border-[#2a2a2a]">
+            <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white/8 bg-[#070907] shadow-[0_8px_22px_rgba(0,0,0,0.34)] [&_svg]:h-3 [&_svg]:w-3">
               {icon}
             </div>
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="mb-2 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <span
-                  className={`block truncate text-[14px] font-bold ${accentColor}`}
+                  className={`block truncate text-[13px] font-bold ${accentColor}`}
                 >
                   @{actorInfo.username}
                 </span>
               </div>
-              <span className="shrink-0 pt-1 text-[11px] font-medium text-[#64748b]">
+              <span className="shrink-0 pt-0.5 text-[10px] font-medium text-[#64748b]">
                 {getTimeAgo(getAlertActivityTime(alert))}
               </span>
             </div>
 
             {/* Message */}
-            <p className="mb-3 text-[#e2e8f0] text-sm leading-relaxed">
+            <p className="mb-2.5 text-[13px] leading-snug text-[#e2e8f0]">
               {alert.message}
             </p>
 
             {isLiveProfileView && (
-              <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1">
+              <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1">
                 <Eye size={12} className="text-red-300" />
-                <span className="text-xs font-semibold text-red-200">
+                <span className="text-[11px] font-semibold text-red-200">
                   Watching right now
                 </span>
               </div>
@@ -1441,8 +1807,8 @@ export function AlertsScreen({
               alert.type === "SUS_PHOTO_VIEWS" ||
               alert.type === "SUS_CLOSE_FRIEND_ACTIVITY") &&
               (meta.postThumbnail || meta.storyThumbnail) && (
-                <div className="mt-3 flex items-center space-x-3 rounded-[22px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-3">
-                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-[#181818]">
+                <div className="mt-2.5 flex items-center space-x-2.5 rounded-[20px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-2.5">
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-[14px] border border-white/10 bg-[#181818]">
                     <img
                       src={meta.postThumbnail || meta.storyThumbnail}
                       alt={meta.storyThumbnail ? "Story" : "Post"}
@@ -1453,7 +1819,7 @@ export function AlertsScreen({
                     />
                   </div>
                   {meta.postContent && (
-                    <p className="flex-1 truncate text-xs text-[#94a3b8]">
+                    <p className="flex-1 truncate text-[11px] text-[#94a3b8]">
                       {meta.postContent.slice(0, 60)}
                       {meta.postContent.length > 60 ? "..." : ""}
                     </p>
@@ -1463,10 +1829,10 @@ export function AlertsScreen({
 
             {/* Tap count badge for repeated likes */}
             {alert.type === "SUS_REPEATED_LIKES" && meta.tapCount && (
-              <div className="mt-2 flex items-center space-x-2">
-                <div className="flex items-center space-x-1.5 rounded-full border border-pink-500/20 bg-pink-500/10 px-3 py-1.5">
+              <div className="mt-1.5 flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5 rounded-full border border-pink-500/20 bg-pink-500/10 px-2.5 py-1">
                   <Heart size={12} className="text-pink-400" fill="#f472b6" />
-                  <span className="text-pink-400 text-xs font-bold">
+                  <span className="text-[11px] font-bold text-pink-400">
                     {meta.tapCount}x
                   </span>
                 </div>
@@ -1475,10 +1841,10 @@ export function AlertsScreen({
 
             {/* View count for photo views */}
             {alert.type === "SUS_PHOTO_VIEWS" && meta.viewCount && (
-              <div className="mt-2 flex items-center space-x-2">
-                <div className="flex items-center space-x-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1.5">
+              <div className="mt-1.5 flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1">
                   <Eye size={12} className="text-amber-400" />
-                  <span className="text-amber-400 text-xs font-bold">
+                  <span className="text-[11px] font-bold text-amber-400">
                     {meta.viewCount} views
                   </span>
                 </div>
@@ -1487,35 +1853,35 @@ export function AlertsScreen({
 
             {/* @mention talking — show both usernames who were chatting */}
             {alert.type === "SUS_MENTION_TALKING" && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {meta.actorUsername && (
-                  <div className="flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-3 py-1.5">
-                    <span className="text-purple-300 text-xs font-bold">
+                  <div className="flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1">
+                    <span className="text-[11px] font-bold text-purple-300">
                       @{meta.actorUsername}
                     </span>
                   </div>
                 )}
                 {meta.otherUsername && (
-                  <div className="flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-3 py-1.5">
-                    <span className="text-purple-300 text-xs font-bold">
+                  <div className="flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1">
+                    <span className="text-[11px] font-bold text-purple-300">
                       @{meta.otherUsername}
                     </span>
                   </div>
                 )}
                 {meta.time && (
-                  <div className="flex items-center space-x-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                  <div className="flex items-center space-x-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
                     <MessageSquare size={12} className="text-purple-400" />
-                    <span className="text-[#94a3b8] text-xs">{meta.time}</span>
+                    <span className="text-[11px] text-[#94a3b8]">{meta.time}</span>
                   </div>
                 )}
               </div>
             )}
 
             {alert.type === "SUS_CLOSE_FRIEND_ACTIVITY" && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {meta.interactionType && (
-                  <div className="rounded-full border border-yellow-400/20 bg-yellow-400/10 px-3 py-1.5">
-                    <span className="text-xs font-bold text-yellow-200">
+                  <div className="rounded-full border border-yellow-400/20 bg-yellow-400/10 px-2.5 py-1">
+                    <span className="text-[11px] font-bold text-yellow-200">
                       {meta.interactionType === "commented"
                         ? "Comment"
                         : meta.interactionType === "repeated_like"
@@ -1527,7 +1893,7 @@ export function AlertsScreen({
                   </div>
                 )}
                 {meta.interactionType === "dedicated_story" && (
-                  <div className="flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5">
+                  <div className="flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2.5 py-1">
                     {meta.targetAvatar && (
                       <img
                         src={meta.targetAvatar}
@@ -1535,14 +1901,14 @@ export function AlertsScreen({
                         className="h-5 w-5 rounded-full object-cover"
                       />
                     )}
-                    <span className="text-xs font-bold text-[#bbf7d0]">
+                    <span className="text-[11px] font-bold text-[#bbf7d0]">
                       To @{meta.targetUsername || "someone"}
                     </span>
                   </div>
                 )}
                 {meta.commentText && (
-                  <div className="w-full rounded-[20px] border border-white/6 bg-[linear-gradient(180deg,rgba(27,24,18,0.94),rgba(19,16,12,0.98))] p-3.5">
-                    <p className="text-sm leading-relaxed text-[#e2e8f0]">
+                  <div className="w-full rounded-[18px] border border-white/6 bg-[linear-gradient(180deg,rgba(27,24,18,0.94),rgba(19,16,12,0.98))] p-3">
+                    <p className="text-[13px] leading-snug text-[#e2e8f0]">
                       {meta.commentText}
                     </p>
                   </div>
@@ -1561,69 +1927,292 @@ export function AlertsScreen({
   };
 
   return (
-    <div className="screen-container flex flex-col bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.12)_0%,rgba(11,16,11,0.96)_24%,#050605_100%)]">
+    <div className="screen-container alerts-screen flex flex-col bg-[radial-gradient(circle_at_50%_-12%,rgba(74,222,128,0.18),transparent_34%),radial-gradient(circle_at_12%_18%,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#060806_0%,#0a0f0a_48%,#030403_100%)]">
+      <style>{`
+        .alerts-screen {
+          font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        @keyframes alertsFloatIn {
+          from { opacity: 0; transform: translateY(14px) scale(0.985); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes alertsSweep {
+          from { transform: translateX(-120%); }
+          to { transform: translateX(120%); }
+        }
+        @keyframes alertsSignalSweep {
+          0% { transform: translateX(-125%); }
+          42% { transform: translateX(125%); }
+          100% { transform: translateX(125%); }
+        }
+        @keyframes alertsSignalPulse {
+          0%, 100% { opacity: 0.56; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.08); }
+        }
+        .alerts-card {
+          animation: alertsFloatIn 0.46s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .alerts-signal-card {
+          animation: alertsFloatIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .alerts-signal-card::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.105), transparent);
+          animation: alertsSignalSweep 6.8s ease-in-out infinite;
+          pointer-events: none;
+        }
+        .alerts-signal-dot {
+          animation: alertsSignalPulse 2.2s ease-in-out infinite;
+        }
+        .alerts-card::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.055), transparent);
+          opacity: 0;
+          transform: translateX(-120%);
+          pointer-events: none;
+        }
+        .alerts-card:hover::after {
+          animation: alertsSweep 1.4s ease-in-out;
+          opacity: 1;
+        }
+        .alerts-section-header {
+          animation: alertsFloatIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+      `}</style>
       {/* Header */}
-      <div className="safe-area-top sticky top-0 z-10 border-b border-white/8 bg-[linear-gradient(180deg,rgba(3,6,4,0.96)_0%,rgba(0,0,0,0.94)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+      <div className="safe-area-top sticky top-0 z-10 overflow-hidden border-b border-white/8 bg-[radial-gradient(circle_at_50%_-40%,rgba(74,222,128,0.18),transparent_58%),linear-gradient(180deg,rgba(10,15,11,0.98)_0%,rgba(4,7,5,0.94)_100%)] shadow-[0_20px_54px_rgba(0,0,0,0.38)] backdrop-blur-xl">
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(74,222,128,0))]" />
         <div className="px-4 pb-4 pt-5">
-          <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <button
               onClick={onBack}
-              className="z-10 flex h-11 w-11 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.04] text-transparent shadow-[0_10px_24px_rgba(0,0,0,0.22)] transition-colors hover:text-transparent"
+              className="z-10 flex h-12 w-12 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_18px_44px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
+              aria-label="Back"
             >
-              <ArrowLeft size={18} className="absolute text-[#94a3b8]" />×
+              <ArrowLeft size={21} />
             </button>
-            <div className="min-w-0 flex-1 pt-1">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <h1 className="text-[28px] font-black leading-none tracking-[-0.04em] text-white">
+                <h1 className="text-[32px] font-black leading-none tracking-tight text-white">
                   Alerts
                 </h1>
-                <Sparkles size={15} className="text-[#4ade80]" />
               </div>
             </div>
-            <div className="h-11 w-11 shrink-0" aria-hidden="true" />
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAlertMode("dare");
+                  setDareAlertTab("personal");
+                }}
+                className={`relative flex h-14 w-14 items-center justify-center rounded-[22px] border text-xl font-black shadow-[0_18px_44px_rgba(0,0,0,0.32)] transition-colors ${
+                  alertMode === "dare"
+                    ? "border-[#4ade80]/28 bg-[#4ade80]/12 text-[#86efac]"
+                    : "border-white/8 bg-white/[0.04] text-[#94a3b8] hover:border-[#4ade80]/24 hover:text-white"
+                }`}
+                aria-label="Open dare alert organizer"
+              >
+                D
+                {dareUnreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full border border-black bg-[#4ade80] px-1 text-[10px] font-black leading-none text-black shadow-[0_0_16px_rgba(74,222,128,0.42)]">
+                    {dareUnreadCount > 9 ? "9+" : dareUnreadCount}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAlertMode("main")}
+                className={`relative flex h-14 w-14 items-center justify-center rounded-[22px] border shadow-[0_18px_44px_rgba(0,0,0,0.32)] transition-colors ${
+                  alertMode === "main"
+                    ? "border-[#4ade80]/24 bg-white/[0.04] text-[#4ade80]"
+                    : "border-white/8 bg-white/[0.04] text-[#94a3b8] hover:border-[#4ade80]/24 hover:text-white"
+                }`}
+                aria-label="Open main alerts"
+              >
+                <BellRing size={24} />
+                {mainUnreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full border border-black bg-[#4ade80] px-1 text-[10px] font-black leading-none text-black shadow-[0_0_16px_rgba(74,222,128,0.42)]">
+                    {mainUnreadCount > 9 ? "9+" : mainUnreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Tab Toggle */}
         <div className="px-4 pb-4">
-          <div className="flex rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(24,29,24,0.98),rgba(17,21,17,0.98))] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <button
-              onClick={() => setActiveTab("social")}
-              className={`flex-1 rounded-full px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
-                activeTab === "social"
-                  ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-black shadow-[0_10px_28px_rgba(74,222,128,0.32)]"
-                  : "text-[#64748b] hover:text-white"
-              }`}
-            >
-              Social
-            </button>
-            <button
-              onClick={() => setActiveTab("sus")}
-              className={`relative flex-1 rounded-full px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
-                activeTab === "sus"
-                  ? "bg-[linear-gradient(135deg,#ef4444,#b91c1c)] text-white shadow-[0_10px_28px_rgba(239,68,68,0.26)]"
-                  : "text-[#64748b] hover:text-white"
-              }`}
-            >
-              Sus Activity
-              {susAlerts.filter((a) => !a.isRead).length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center border border-black">
-                  {susAlerts.filter((a) => !a.isRead).length}
-                </span>
-              )}
-            </button>
+          <div className="flex rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.94),rgba(10,14,10,0.98))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.05)]">
+            {alertMode === "main" ? (
+              <>
+                <button
+                  onClick={() => setActiveTab("social")}
+                  className={`flex-1 rounded-full px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
+                    activeTab === "social"
+                      ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-black shadow-[0_10px_28px_rgba(74,222,128,0.32)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  Social
+                </button>
+                <button
+                  onClick={() => setActiveTab("sus")}
+                  className={`relative flex-1 rounded-full px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
+                    activeTab === "sus"
+                      ? "bg-[linear-gradient(135deg,#ef4444,#b91c1c)] text-white shadow-[0_10px_28px_rgba(239,68,68,0.26)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  Sus Activity
+                  {susAlerts.filter((a) => !a.isRead).length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center border border-black">
+                      {susAlerts.filter((a) => !a.isRead).length}
+                    </span>
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setDareAlertTab("personal")}
+                  className={`flex-1 rounded-full px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
+                    dareAlertTab === "personal"
+                      ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-black shadow-[0_10px_28px_rgba(74,222,128,0.32)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  Personal
+                </button>
+                <button
+                  onClick={() => setDareAlertTab("friends")}
+                  className={`flex-1 rounded-full px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
+                    dareAlertTab === "friends"
+                      ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-black shadow-[0_10px_28px_rgba(74,222,128,0.32)]"
+                      : "text-[#64748b] hover:text-white"
+                  }`}
+                >
+                  Friends
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 pb-[calc(var(--safe-area-bottom)+2rem)] pt-5">
-        {activeTab === "social" ? (
+      <div className="flex-1 overflow-y-auto px-4 pb-[calc(var(--safe-area-bottom)+2rem)] pt-4">
+        <div
+          className={`alerts-signal-card relative mb-4 overflow-hidden rounded-[28px] border px-4 py-3.5 shadow-[0_18px_44px_rgba(0,0,0,0.34),0_0_28px_rgba(74,222,128,0.08),inset_0_1px_0_rgba(255,255,255,0.05)] ${
+            isSusLane
+              ? "border-red-500/18 bg-[radial-gradient(circle_at_18%_-18%,rgba(239,68,68,0.16),transparent_34%),radial-gradient(circle_at_92%_16%,rgba(74,222,128,0.1),transparent_32%),linear-gradient(180deg,rgba(28,18,18,0.98),rgba(9,8,8,0.98))]"
+              : "border-[#4ade80]/22 bg-[radial-gradient(circle_at_18%_-18%,rgba(74,222,128,0.16),transparent_34%),radial-gradient(circle_at_92%_16%,rgba(14,165,233,0.12),transparent_32%),linear-gradient(180deg,rgba(22,28,23,0.98),rgba(8,12,9,0.98))]"
+          }`}
+        >
+          <div
+            className={`pointer-events-none absolute inset-x-8 top-0 z-[1] h-px ${
+              isSusLane
+                ? "bg-[linear-gradient(90deg,rgba(239,68,68,0),rgba(239,68,68,0.72),rgba(74,222,128,0.4),rgba(239,68,68,0))]"
+                : "bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.82),rgba(14,165,233,0.42),rgba(74,222,128,0))]"
+            }`}
+          />
+          <div className="relative z-[1] flex items-center gap-3">
+            <div
+              className={`flex h-[54px] w-[54px] shrink-0 items-center justify-center rounded-[22px] border shadow-[0_14px_34px_rgba(74,222,128,0.1)] ${
+                isSusLane
+                  ? "border-red-500/20 bg-red-500/10 text-red-200"
+                  : "border-[#4ade80]/20 bg-[#4ade80]/10 text-[#86efac]"
+              }`}
+            >
+              {alertMode === "dare" ? (
+                <Target size={22} strokeWidth={2.5} />
+              ) : isSusLane ? (
+                <Eye size={22} strokeWidth={2.5} />
+              ) : (
+                <BellRing size={22} strokeWidth={2.5} />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex items-center gap-2">
+                <span
+                  className={`alerts-signal-dot h-2 w-2 shrink-0 rounded-full ${
+                    isSusLane
+                      ? "bg-red-400 shadow-[0_0_14px_rgba(248,113,113,0.55)]"
+                      : "bg-[#4ade80] shadow-[0_0_14px_rgba(74,222,128,0.55)]"
+                  }`}
+                />
+                <p
+                  className={`truncate text-[11px] font-black uppercase tracking-[0.16em] ${
+                    isSusLane ? "text-red-200" : "text-[#86efac]"
+                  }`}
+                >
+                  {currentLaneLabel}
+                </p>
+              </div>
+              <p className="text-[15px] font-black leading-snug text-white">
+                {currentLaneCaption}
+              </p>
+            </div>
+            <div className="shrink-0 text-right">
+              <div
+                className={`text-[22px] font-black leading-none ${
+                  isSusLane ? "text-red-200" : "text-[#4ade80]"
+                }`}
+              >
+                {currentUnreadCount}
+              </div>
+              <div className="mt-1 text-[10px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">
+                unread
+              </div>
+            </div>
+          </div>
+        </div>
+        {alertMode === "dare" ? (
+          <>
+            {dareAlertTab === "personal" && personalDareToday.length > 0 && (
+              <div className="mb-6">
+                {renderSectionHeader("Today", "primary")}
+                <div className="space-y-2.5">
+                  {personalDareToday.map(renderAlertItem)}
+                </div>
+              </div>
+            )}
+            {dareAlertTab === "personal" &&
+              personalDareYesterday.length > 0 && (
+                <div className="mb-6">
+                  {renderSectionHeader("Yesterday", "muted")}
+                  <div className="space-y-2.5">
+                    {personalDareYesterday.map(renderAlertItem)}
+                  </div>
+                </div>
+              )}
+            {dareAlertTab === "friends" && friendChallengeToday.length > 0 && (
+              <div className="mb-6">
+                {renderSectionHeader("Today", "primary")}
+                <div className="space-y-2.5">
+                  {friendChallengeToday.map(renderAlertItem)}
+                </div>
+              </div>
+            )}
+            {dareAlertTab === "friends" &&
+              friendChallengeYesterday.length > 0 && (
+                <div className="mb-6">
+                  {renderSectionHeader("Yesterday", "muted")}
+                  <div className="space-y-2.5">
+                    {friendChallengeYesterday.map(renderAlertItem)}
+                  </div>
+                </div>
+              )}
+          </>
+        ) : activeTab === "social" ? (
           <>
             {socialToday.length > 0 && (
               <div className="mb-6">
                 {renderSectionHeader("Today", "primary")}
-                <div className="space-y-3.5">
+                <div className="space-y-2.5">
                   {socialToday.map(renderAlertItem)}
                 </div>
               </div>
@@ -1631,7 +2220,7 @@ export function AlertsScreen({
             {socialYesterday.length > 0 && (
               <div className="mb-6">
                 {renderSectionHeader("Yesterday", "muted")}
-                <div className="space-y-3.5">
+                <div className="space-y-2.5">
                   {socialYesterday.map(renderAlertItem)}
                 </div>
               </div>
@@ -1643,7 +2232,7 @@ export function AlertsScreen({
             {susToday.length > 0 && (
               <div className="mb-6">
                 {renderSectionHeader("Today", "danger")}
-                <div className="space-y-3.5">
+                <div className="space-y-2.5">
                   {susToday.map(renderSusAlertItem)}
                 </div>
               </div>
@@ -1651,7 +2240,7 @@ export function AlertsScreen({
             {susYesterday.length > 0 && (
               <div className="mb-6">
                 {renderSectionHeader("Yesterday", "muted")}
-                <div className="space-y-3.5">
+                <div className="space-y-2.5">
                   {susYesterday.map(renderSusAlertItem)}
                 </div>
               </div>
@@ -1660,24 +2249,40 @@ export function AlertsScreen({
         )}
 
         {currentAlerts.length === 0 &&
-          !(activeTab === "sus" && susAlertsForDisplay.length > 0) && (
-            <div className="rounded-[30px] border border-white/6 bg-[linear-gradient(180deg,rgba(22,26,22,0.98),rgba(14,16,14,0.98))] px-6 py-12 text-center shadow-[0_20px_56px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.04)]">
-              <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] border border-white/8 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.12),rgba(255,255,255,0.03)_55%,transparent_75%)]">
-                {activeTab === "social" ? (
+          !(
+            alertMode === "main" &&
+            activeTab === "sus" &&
+            susAlertsForDisplay.length > 0
+          ) && (
+            <div className="alerts-card rounded-[34px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,24,18,0.98),rgba(7,10,8,0.98))] px-6 py-12 text-center shadow-[0_24px_70px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.05)]">
+              <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(74,222,128,0.12),rgba(255,255,255,0.03))] shadow-[0_18px_48px_rgba(74,222,128,0.1)]">
+                {alertMode === "dare" ? (
+                  <span className="text-[30px] font-black text-[#86efac]">
+                    D
+                  </span>
+                ) : activeTab === "social" ? (
                   <Heart size={28} className="text-[#86efac]" />
                 ) : (
                   <Eye size={28} className="text-red-300" />
                 )}
               </div>
               <p className="mb-2 text-lg font-bold text-white">
-                {activeTab === "social"
-                  ? "No alerts yet"
-                  : "No suspicious activity detected"}
+                {alertMode === "dare"
+                  ? dareAlertTab === "personal"
+                    ? "No personal dare alerts"
+                    : "No friends challenge alerts"
+                  : activeTab === "social"
+                    ? "No alerts yet"
+                    : "No suspicious activity detected"}
               </p>
               <p className="mx-auto max-w-xs text-sm leading-relaxed text-[#94a3b8]">
-                {activeTab === "social"
-                  ? "When people interact with your world, the premium feed will light up here."
-                  : "Your surveillance lane is quiet for now. New signals will appear the moment they arrive."}
+                {alertMode === "dare"
+                  ? dareAlertTab === "personal"
+                    ? "Dare and truth workflow alerts will appear here."
+                    : "Dares and truths between mutual friends will appear here."
+                  : activeTab === "social"
+                    ? "New reactions, comments, and requests will appear here."
+                    : "Nothing suspicious has surfaced yet."}
               </p>
             </div>
           )}
