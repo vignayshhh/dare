@@ -15,6 +15,8 @@ import type {
 } from "@/middleware/services/messaging.service";
 import { getCachedResolvedUserProfile } from "@/utils/profileResolver";
 
+const MESSAGING_STORE_DEBUG = false;
+
 // Re-export MessageEvent for components
 export { MessageEvent };
 
@@ -429,11 +431,7 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
           last_message_at:
             conv.last_message?.created_at || conv.last_message_at || "",
           unread_count: conv.unread_count || 0,
-          is_online:
-            onlineFriends.includes(otherUserId) ||
-            existing?.is_online ||
-            conv.is_online ||
-            false,
+          is_online: onlineFriends.includes(otherUserId),
           is_typing: isTyping || existing?.is_typing || conv.is_typing || false,
           typing_speed: conv.typing_speed,
           cleared_at: conv.cleared_at || null,
@@ -1054,26 +1052,32 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
           if (participantIds.length === 0) {
             set({ onlineFriends: [] });
           } else {
-            console.log(
-              "🔍 [MessagingStore DEBUG] Setting up presence subscription for participantIds:",
-              participantIds,
-            );
+            if (MESSAGING_STORE_DEBUG) {
+              console.log(
+                "🔍 [MessagingStore DEBUG] Setting up presence subscription for participantIds:",
+                participantIds,
+              );
+            }
             const unsubscribeOnline =
               messagingService.subscribeToUsersLivePresenceStatus(
                 participantIds,
                 (statuses) => {
-                  console.log(
-                    "🔍 [MessagingStore DEBUG] Presence subscription callback received statuses:",
-                    statuses,
-                  );
+                  if (MESSAGING_STORE_DEBUG) {
+                    console.log(
+                      "🔍 [MessagingStore DEBUG] Presence subscription callback received statuses:",
+                      statuses,
+                    );
+                  }
                   const onlineIds = statuses
                     .filter((status) => status.isOnline)
                     .map((status) => status.userId);
                   const onlineSet = new Set(onlineIds);
-                  console.log(
-                    "🔍 [MessagingStore DEBUG] Processed onlineIds:",
-                    onlineIds,
-                  );
+                  if (MESSAGING_STORE_DEBUG) {
+                    console.log(
+                      "🔍 [MessagingStore DEBUG] Processed onlineIds:",
+                      onlineIds,
+                    );
+                  }
                   const presenceTypingUsers = statuses
                     .filter(
                       (status) =>
@@ -1088,15 +1092,17 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
                       started_at: new Date().toISOString(),
                       source: "presence" as const,
                     }));
-                  console.log(
-                    "[MessagingStore DEBUG] Presence-derived indicators:",
-                    {
-                      currentUserId,
-                      participantIds,
-                      onlineIds,
-                      presenceTypingUsers,
-                    },
-                  );
+                  if (MESSAGING_STORE_DEBUG) {
+                    console.log(
+                      "[MessagingStore DEBUG] Presence-derived indicators:",
+                      {
+                        currentUserId,
+                        participantIds,
+                        onlineIds,
+                        presenceTypingUsers,
+                      },
+                    );
+                  }
                   set((state) => {
                     const nextTypingUsers = [
                       ...state.typingUsers.filter(
@@ -1104,15 +1110,17 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
                       ),
                       ...presenceTypingUsers,
                     ];
-                    console.log(
-                      "[MessagingStore DEBUG] Applying presence indicators:",
-                      {
-                        previousOnlineFriends: state.onlineFriends,
-                        previousTypingUsers: state.typingUsers,
-                        nextOnlineFriends: onlineIds,
-                        nextTypingUsers,
-                      },
-                    );
+                    if (MESSAGING_STORE_DEBUG) {
+                      console.log(
+                        "[MessagingStore DEBUG] Applying presence indicators:",
+                        {
+                          previousOnlineFriends: state.onlineFriends,
+                          previousTypingUsers: state.typingUsers,
+                          nextOnlineFriends: onlineIds,
+                          nextTypingUsers,
+                        },
+                      );
+                    }
                     return {
                       onlineFriends: onlineIds,
                       typingUsers: nextTypingUsers,
@@ -1476,7 +1484,7 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
       ].filter(
         (id, index, self): id is string => !!id && self.indexOf(id) === index,
       );
-      await messagingService.sendMessageWithDelivery(
+      const sentMessage = await messagingService.sendMessageWithDelivery(
         conversationId,
         user.id,
         content,
@@ -1486,8 +1494,16 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
         replyTo,
         participantIds.length > 0 ? participantIds : undefined,
       );
-      // onSnapshot fires automatically and updates messages state —
-      // no manual state update needed here.
+      set((state) => {
+        if (state.messages.some((message) => message.id === sentMessage.id)) {
+          return state;
+        }
+
+        const normalized = normalizeMessage(sentMessage, user.id);
+        return {
+          messages: [...state.messages, normalized],
+        };
+      });
     } catch (error) {
       set({ error: (error as Error).message });
       throw error;

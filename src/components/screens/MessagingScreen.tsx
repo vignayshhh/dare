@@ -15,6 +15,8 @@ import {
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth as firebaseAuth } from "../../backend/lib/firebase";
 import {
   messagingService,
   type ChatSwitchSignal,
@@ -116,6 +118,8 @@ const FRIEND = {
   name: "Nina Creates",
   avatar: "https://picsum.photos/seed/nina/100/100",
 };
+
+const MESSAGING_SCREEN_DEBUG = false;
 
 function summarizeMessageForReply(msg: Msg): string {
   const trimmed = msg.text.trim();
@@ -2579,6 +2583,9 @@ export default function MessagingScreen({
   onOpenUserProfile?: (userId: string) => void;
 }) {
   const { user } = useAuthStore();
+  const [firebaseAuthReady, setFirebaseAuthReady] = useState(
+    () => !user?.id || firebaseAuth?.currentUser?.uid === user.id,
+  );
   const {
     conversations,
     currentConversation,
@@ -2612,6 +2619,25 @@ export default function MessagingScreen({
     clearError,
     clearMessages,
   } = useMessagingStore();
+
+  useEffect(() => {
+    if (!user?.id) {
+      setFirebaseAuthReady(true);
+      return;
+    }
+
+    if (firebaseAuth?.currentUser?.uid === user.id) {
+      setFirebaseAuthReady(true);
+      return;
+    }
+
+    setFirebaseAuthReady(false);
+    if (!firebaseAuth) return;
+
+    return onAuthStateChanged(firebaseAuth, (firebaseUser) => {
+      setFirebaseAuthReady(firebaseUser?.uid === user.id);
+    });
+  }, [user?.id]);
 
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("seen");
@@ -2905,7 +2931,7 @@ export default function MessagingScreen({
       currentConversation?.other_user?.display_name ||
       currentConversation?.other_user?.username ||
       "";
-    if (!uid) return;
+    if (!uid || !firebaseAuthReady) return;
     const db = getFirestore();
     const presenceRef = doc(db, "presence", uid);
     if (!otherUserId) {
@@ -2948,6 +2974,7 @@ export default function MessagingScreen({
     currentConversation?.other_user?.id,
     currentConversation?.other_user?.display_name,
     currentConversation?.other_user?.username,
+    firebaseAuthReady,
   ]);
 
   useEffect(() => {
@@ -2986,7 +3013,7 @@ export default function MessagingScreen({
     if (temporaryAccessEndedRef.current) return;
     const id = convId ?? convRef.current?.id;
     const uid = userIdRef.current;
-    if (!id || !uid) return;
+    if (!id || !uid || !firebaseAuthReady) return;
     const db = getFirestore();
     const draftRef = doc(db, "conversations", id, "drafts", uid);
     console.log("[draft write]", { convId: id, uid, textLen: text.length });
@@ -3075,7 +3102,7 @@ export default function MessagingScreen({
     if (temporaryAccessEndedRef.current) return;
     const id = convId ?? convRef.current?.id;
     const uid = userIdRef.current;
-    if (!id || !uid) return;
+    if (!id || !uid || !firebaseAuthReady) return;
     const db = getFirestore();
     const draftRef = doc(db, "conversations", id, "drafts", uid);
     console.log("[draft write 2]", { convId: id, uid, textLen: text.length });
@@ -3094,7 +3121,7 @@ export default function MessagingScreen({
   // ── Freeze listener ───────────────────────────────────────────────────────
   useEffect(() => {
     const convId = currentConversation?.id;
-    if (!convId || temporaryAccessEnded) {
+    if (!convId || temporaryAccessEnded || !firebaseAuthReady) {
       setLocalFrozenBy(null);
       return;
     }
@@ -3114,7 +3141,7 @@ export default function MessagingScreen({
       },
     );
     return () => unsub();
-  }, [currentConversation?.id, temporaryAccessEnded]);
+  }, [currentConversation?.id, temporaryAccessEnded, firebaseAuthReady]);
 
   // ── Friend online listener ────────────────────────────────────────────────
   useEffect(() => {
@@ -3129,6 +3156,7 @@ export default function MessagingScreen({
       lastPresenceSwitchRef.current = "";
       return;
     }
+    if (!firebaseAuthReady) return;
     setFriendFirestoreLastSeenAt(null);
     setFriendFirestoreTimeZone(getBrowserTimeZone());
     const db = getFirestore();
@@ -3212,6 +3240,7 @@ export default function MessagingScreen({
     currentConversation?.other_user?.user_id,
     currentConversation?.other_user?.id,
     user?.id,
+    firebaseAuthReady,
   ]);
 
   // ── Friend RTDB online status ────────────────────────────────────────────
@@ -3219,14 +3248,20 @@ export default function MessagingScreen({
     const friendId =
       currentConversation?.other_user?.user_id ||
       currentConversation?.other_user?.id;
-    console.log("🔍 [MessagingScreen DEBUG] Presence subscription setup:", {
-      friendId,
-      conversationId: currentConversation?.id,
-      hasFriend: !!friendId,
-    });
+    if (MESSAGING_SCREEN_DEBUG) {
+      console.log("🔍 [MessagingScreen DEBUG] Presence subscription setup:", {
+        friendId,
+        conversationId: currentConversation?.id,
+        hasFriend: !!friendId,
+      });
+    }
 
     if (!friendId) {
-      console.log("🔍 [MessagingScreen DEBUG] No friendId, clearing presence");
+      if (MESSAGING_SCREEN_DEBUG) {
+        console.log(
+          "🔍 [MessagingScreen DEBUG] No friendId, clearing presence",
+        );
+      }
       setRtdbOnline(false);
       setFriendRealtimeLastSeenAt(null);
       setFriendRealtimeTimeZone(getBrowserTimeZone());
@@ -3238,22 +3273,26 @@ export default function MessagingScreen({
     const unsub = messagingService.subscribeToUsersLivePresenceStatus(
       [friendId],
       (statuses) => {
-        console.log("🔍 [MessagingScreen DEBUG] Presence status callback:", {
-          friendId,
-          allStatuses: statuses,
-          status: statuses.find((entry) => entry.userId === friendId),
-        });
+        if (MESSAGING_SCREEN_DEBUG) {
+          console.log("🔍 [MessagingScreen DEBUG] Presence status callback:", {
+            friendId,
+            allStatuses: statuses,
+            status: statuses.find((entry) => entry.userId === friendId),
+          });
+        }
         const status = statuses.find((entry) => entry.userId === friendId);
         const isOnline = status?.isOnline ?? false;
         const lastSeen = parsePresenceTimestamp(status?.lastSeen);
         const timezone = status?.timezone || getBrowserTimeZone();
 
-        console.log("🔍 [MessagingScreen DEBUG] Updating presence state:", {
-          friendId,
-          isOnline,
-          lastSeen,
-          timezone,
-        });
+        if (MESSAGING_SCREEN_DEBUG) {
+          console.log("🔍 [MessagingScreen DEBUG] Updating presence state:", {
+            friendId,
+            isOnline,
+            lastSeen,
+            timezone,
+          });
+        }
 
         setRtdbOnline(isOnline);
         setFriendRealtimeLastSeenAt(lastSeen);
@@ -3261,10 +3300,12 @@ export default function MessagingScreen({
       },
     );
     return () => {
-      console.log(
-        "🔍 [MessagingScreen DEBUG] Unsubscribing presence for:",
-        friendId,
-      );
+      if (MESSAGING_SCREEN_DEBUG) {
+        console.log(
+          "🔍 [MessagingScreen DEBUG] Unsubscribing presence for:",
+          friendId,
+        );
+      }
       unsub();
     };
   }, [
@@ -3275,7 +3316,7 @@ export default function MessagingScreen({
   useEffect(() => {
     const convId = currentConversation?.id;
     const friendId = currentConversation?.other_user?.user_id;
-    if (!convId || !friendId || temporaryAccessEnded) {
+    if (!convId || !friendId || temporaryAccessEnded || !firebaseAuthReady) {
       setLiveDraft(null);
       return;
     }
@@ -3299,6 +3340,7 @@ export default function MessagingScreen({
     currentConversation?.id,
     currentConversation?.other_user?.user_id,
     temporaryAccessEnded,
+    firebaseAuthReady,
   ]);
 
   // ── Boot ──────────────────────────────────────────────────────────────────
@@ -3317,7 +3359,7 @@ export default function MessagingScreen({
   // ── Subscribe to conversation ─────────────────────────────────────────────
   useEffect(() => {
     if (temporaryAccessEnded) return;
-    if (!user?.id || conversations.length === 0) return;
+    if (!user?.id || !firebaseAuthReady || conversations.length === 0) return;
     const targetId =
       conversationId ??
       currentConversation?.id ??
@@ -3342,12 +3384,13 @@ export default function MessagingScreen({
     setHasOpenedChat(false);
     setInput(loadLocalDraft(conversation.id));
     lastDraftRef.current = "";
-  }, [user?.id, conversationId, conversations, temporaryAccessEnded]); // eslint-disable-line
+  }, [user?.id, firebaseAuthReady, conversationId, conversations, temporaryAccessEnded]); // eslint-disable-line
 
   useEffect(() => {
     if (
       temporaryAccessEnded ||
       !user?.id ||
+      !firebaseAuthReady ||
       !conversationId ||
       currentConversation?.id === conversationId
     ) {
@@ -3379,6 +3422,7 @@ export default function MessagingScreen({
     };
   }, [
     user?.id,
+    firebaseAuthReady,
     conversationId,
     currentConversation?.id,
     conversations,
@@ -3392,7 +3436,7 @@ export default function MessagingScreen({
   ]);
 
   useEffect(() => {
-    if (!currentConversation?.id || !user?.id) {
+    if (!currentConversation?.id || !user?.id || !firebaseAuthReady) {
       setConversationInvites([]);
       setConversationInvitesReady(false);
       return;
@@ -3422,6 +3466,7 @@ export default function MessagingScreen({
     inviteFriends,
     isOriginalParticipant,
     user?.id,
+    firebaseAuthReady,
   ]);
 
   // ── Viewport ──────────────────────────────────────────────────────────────
@@ -3527,7 +3572,7 @@ export default function MessagingScreen({
   };
 
   useEffect(() => {
-    if (!currentConversation?.id || temporaryAccessEnded) {
+    if (!currentConversation?.id || temporaryAccessEnded || !firebaseAuthReady) {
       setCurrentMoodBlock(null);
       return;
     }
@@ -3573,7 +3618,7 @@ export default function MessagingScreen({
       },
     );
     return () => unsub();
-  }, [currentConversation?.id, temporaryAccessEnded]);
+  }, [currentConversation?.id, temporaryAccessEnded, firebaseAuthReady]);
 
   // ── Progress bar ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -3802,6 +3847,7 @@ export default function MessagingScreen({
   const friendStatusIsLive = friendTyping || friendOnline;
 
   useEffect(() => {
+    if (!MESSAGING_SCREEN_DEBUG) return;
     const convId = currentConversation?.id;
     const friendId =
       currentConversation?.other_user?.user_id ||
@@ -4281,6 +4327,9 @@ export default function MessagingScreen({
         undefined,
         undefined,
         replyPayload,
+      );
+      setOptimisticTextMessages((current) =>
+        current.filter((message) => message.id !== optimisticMessage.id),
       );
       console.log("[MessagingScreen] Message sent successfully");
       setTimeout(() => setStatus("seen"), 2200);

@@ -47,6 +47,87 @@ service cloud.firestore {
         && request.resource.data[field].size() <= maxLen;
     }
 
+    function hasCommunityJoinForProof(challengeId, day, allowedStatuses) {
+      let joinPath = /databases/$(database)/documents/community_challenge_joins/$(challengeId + '_' + request.auth.uid);
+      return exists(joinPath)
+        && get(joinPath).data.user_id == request.auth.uid
+        && get(joinPath).data.challenge_id == challengeId
+        && (!('official_dare' in get(joinPath).data) || get(joinPath).data.official_dare == true)
+        && (!('status' in get(joinPath).data) || get(joinPath).data.status in allowedStatuses)
+        && (
+          get(joinPath).data.current_day == day
+          || (!('current_day' in get(joinPath).data) && day == 1)
+        )
+        && (
+          (
+            get(joinPath).data.proof_due_at is timestamp
+            && get(joinPath).data.proof_due_at >= request.time
+          )
+          || (
+            !('proof_due_at' in get(joinPath).data)
+            && get(joinPath).data.created_at is timestamp
+            && get(joinPath).data.created_at.toMillis() + 86400000 >= request.time.toMillis()
+          )
+        );
+    }
+
+    function hasCommunityRoomAccess(challengeId) {
+      let joinPath = /databases/$(database)/documents/community_challenge_joins/$(challengeId + '_' + request.auth.uid);
+      return exists(joinPath)
+        && get(joinPath).data.user_id == request.auth.uid
+        && get(joinPath).data.challenge_id == challengeId
+        && (!('official_dare' in get(joinPath).data) || get(joinPath).data.official_dare == true)
+        && (!('status' in get(joinPath).data) || get(joinPath).data.status in ['waiting', 'active', 'submitted', 'completed']);
+    }
+
+    function hasCommunityRoomMembership(challengeId) {
+      let joinPath = /databases/$(database)/documents/community_challenge_joins/$(challengeId + '_' + request.auth.uid);
+      return exists(joinPath)
+        && get(joinPath).data.user_id == request.auth.uid
+        && get(joinPath).data.challenge_id == challengeId
+        && (!('official_dare' in get(joinPath).data) || get(joinPath).data.official_dare == true)
+        && (!('status' in get(joinPath).data) || get(joinPath).data.status in ['waiting', 'active', 'submitted', 'completed', 'eliminated']);
+    }
+
+    function canReadChallengeRoomProof(proofId) {
+      let proofPath = /databases/$(database)/documents/challenge_room_proofs/$(proofId);
+      return exists(proofPath)
+        && hasCommunityRoomMembership(get(proofPath).data.challenge_id);
+    }
+
+    function canInteractWithChallengeRoomProof(proofId) {
+      let proofPath = /databases/$(database)/documents/challenge_room_proofs/$(proofId);
+      return exists(proofPath)
+        && hasCommunityRoomAccess(get(proofPath).data.challenge_id);
+    }
+
+    function challengeRoomProofBelongsToChallenge(proofId, challengeId) {
+      let proofPath = /databases/$(database)/documents/challenge_room_proofs/$(proofId);
+      return exists(proofPath)
+        && get(proofPath).data.challenge_id == challengeId;
+    }
+
+    function canReadChallengeProofComment(commentId) {
+      let commentPath = /databases/$(database)/documents/challenge_proof_comments/$(commentId);
+      return exists(commentPath)
+        && canReadChallengeRoomProof(get(commentPath).data.proofId);
+    }
+
+    function canInteractWithChallengeProofComment(commentId) {
+      let commentPath = /databases/$(database)/documents/challenge_proof_comments/$(commentId);
+      return exists(commentPath)
+        && canInteractWithChallengeRoomProof(get(commentPath).data.proofId);
+    }
+
+    function challengeProofCommentBelongsToChallenge(commentId, challengeId) {
+      let commentPath = /databases/$(database)/documents/challenge_proof_comments/$(commentId);
+      return exists(commentPath)
+        && (
+          get(commentPath).data.challengeId == challengeId
+          || challengeRoomProofBelongsToChallenge(get(commentPath).data.proofId, challengeId)
+        );
+    }
+
     function isConversationParticipant(conversationId) {
       let conv = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
       return conv.user1_id == request.auth.uid
@@ -476,13 +557,12 @@ service cloud.firestore {
     }
 
     // ─── DARES ──────────────────────────────────────────────────────────
-    // Challenge room proof docs live here before personal dare docs.
-    // Community challenge room proof feed. One user can submit or replace
-    // their own proof for a challenge day; everyone signed in can read the
-    // room feed. Vote counters remain client-read only here until moved to a
-    // dedicated vote document / Cloud Function path.
+    // Challenge room proof feed. Room members can read the feed; current
+    // non-eliminated members can submit/replace proof for the active window.
+    // Real/fake and comment counts are derived from dedicated interaction docs.
     match /challenge_room_proofs/{proofId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn()
+        && hasCommunityRoomMembership(resource.data.challenge_id);
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly([
@@ -527,7 +607,12 @@ service cloud.firestore {
         && request.resource.data.fake_votes == 0
         && request.resource.data.comments == 0
         && request.resource.data.client_created_at is number
-        && request.resource.data.client_created_at <= request.time.toMillis() + 60000;
+        && request.resource.data.client_created_at <= request.time.toMillis() + 60000
+        && hasCommunityJoinForProof(
+          request.resource.data.challenge_id,
+          request.resource.data.day,
+          ['active', 'submitted']
+        );
 
       allow update: if isSignedIn()
         && resource.data.submitter_id == request.auth.uid
@@ -571,14 +656,16 @@ service cloud.firestore {
         && isAllowedMediaUrl('thumbnail_url')
         && request.resource.data.media_type in ['image', 'video']
         && stringUnder('caption', 240)
-        && request.resource.data.real_votes is number
-        && request.resource.data.real_votes >= 0
-        && request.resource.data.fake_votes is number
-        && request.resource.data.fake_votes >= 0
-        && request.resource.data.comments is number
-        && request.resource.data.comments >= 0
+        && request.resource.data.real_votes == 0
+        && request.resource.data.fake_votes == 0
+        && request.resource.data.comments == 0
         && request.resource.data.client_created_at is number
-        && request.resource.data.client_created_at <= request.time.toMillis() + 60000;
+        && request.resource.data.client_created_at <= request.time.toMillis() + 60000
+        && hasCommunityJoinForProof(
+          request.resource.data.challenge_id,
+          request.resource.data.day,
+          ['active']
+        );
 
       allow delete: if isSignedIn()
         && resource.data.submitter_id == request.auth.uid;
@@ -664,6 +751,18 @@ service cloud.firestore {
       // must use resource.data.
       allow delete: if isSignedIn()
         && resource.data.user_id == request.auth.uid;
+    }
+
+    match /dare_comment_likes/{likeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && likeId == request.resource.data.comment_id + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['comment_id', 'user_id', 'created_at'])
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.comment_id is string
+        && request.resource.data.comment_id.size() > 0
+        && request.resource.data.comment_id.size() <= 200;
+      allow update, delete: if false;
     }
 
     // ─── TRUTHS ─────────────────────────────────────────────────────────
@@ -1357,6 +1456,369 @@ service cloud.firestore {
     // that the app actually uses is listed explicitly. Anything not
     // enumerated in this file is DENIED by default.
     // ═════════════════════════════════════════════════════════════════
+
+    // ─── CHALLENGE PROOF VOTING ───────────────────────────────────────────────
+    // Users can vote on challenge room proofs (real/fake)
+    match /community_challenge_joins/{joinId} {
+      allow get: if isSignedIn()
+        && (
+          !exists(/databases/$(database)/documents/community_challenge_joins/$(joinId))
+          || resource.data.user_id == request.auth.uid
+        );
+      allow list: if isSignedIn()
+        && (
+          resource.data.user_id == request.auth.uid
+          || hasCommunityRoomMembership(resource.data.challenge_id)
+        );
+
+      allow create: if isSignedIn()
+        && joinId == request.resource.data.challenge_id + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'challenge_id',
+          'challenge_title',
+          'user_id',
+          'username',
+          'display_name',
+          'avatar_url',
+          'status',
+          'current_day',
+          'total_days',
+          'proof_due_at',
+          'proof_window_hours',
+          'last_proof_day',
+          'last_proof_at',
+          'eliminated_at',
+          'completed_at',
+          'elimination_reason',
+          'official_dare',
+          'batch_started_at',
+          'joined_at',
+          'created_at',
+          'updated_at'
+        ])
+        && request.resource.data.user_id == request.auth.uid
+        && requiredString('challenge_id', 160)
+        && requiredString('challenge_title', 220)
+        && requiredString('username', 40)
+        && requiredString('display_name', 80)
+        && stringUnder('avatar_url', 2000)
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.current_day == 1
+        && request.resource.data.total_days is number
+        && request.resource.data.total_days >= 1
+        && request.resource.data.total_days <= 365
+        && request.resource.data.proof_due_at == null
+        && request.resource.data.proof_window_hours == 24
+        && request.resource.data.last_proof_day == 0
+        && request.resource.data.last_proof_at == null
+        && request.resource.data.eliminated_at == null
+        && request.resource.data.completed_at == null
+        && stringUnder('elimination_reason', 160)
+        && request.resource.data.official_dare is bool
+        && (!('batch_started_at' in request.resource.data) || request.resource.data.batch_started_at == null)
+        && request.resource.data.joined_at is timestamp
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.updated_at is timestamp;
+
+      allow update: if isSignedIn()
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == resource.data.user_id
+        && request.resource.data.challenge_id == resource.data.challenge_id
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.current_day == resource.data.current_day
+        && request.resource.data.total_days == resource.data.total_days
+        && request.resource.data.proof_due_at == resource.data.proof_due_at
+        && request.resource.data.proof_window_hours == resource.data.proof_window_hours
+        && request.resource.data.last_proof_day == resource.data.last_proof_day
+        && request.resource.data.last_proof_at == resource.data.last_proof_at
+        && request.resource.data.eliminated_at == resource.data.eliminated_at
+        && request.resource.data.completed_at == resource.data.completed_at
+        && request.resource.data.elimination_reason == resource.data.elimination_reason
+        && request.resource.data.official_dare == resource.data.official_dare
+        && request.resource.data.batch_started_at == resource.data.batch_started_at
+        && request.resource.data.joined_at == resource.data.joined_at
+        && request.resource.data.created_at == resource.data.created_at
+        && request.resource.data.keys().hasOnly([
+          'challenge_id',
+          'challenge_title',
+          'user_id',
+          'username',
+          'display_name',
+          'avatar_url',
+          'status',
+          'current_day',
+          'total_days',
+          'proof_due_at',
+          'proof_window_hours',
+          'last_proof_day',
+          'last_proof_at',
+          'eliminated_at',
+          'completed_at',
+          'elimination_reason',
+          'official_dare',
+          'batch_started_at',
+          'joined_at',
+          'created_at',
+          'updated_at'
+        ])
+        && requiredString('challenge_title', 220)
+        && requiredString('username', 40)
+        && requiredString('display_name', 80)
+        && stringUnder('avatar_url', 2000)
+        && request.resource.data.created_at is timestamp
+        && request.resource.data.updated_at is timestamp;
+
+      allow delete: if isSignedIn()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    match /community_challenge_summaries/{challengeId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /community_challenge_rooms/{challengeId} {
+      allow read: if isSignedIn() && hasCommunityRoomMembership(challengeId);
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && hasCommunityRoomAccess(challengeId);
+
+        allow create: if isSignedIn()
+          && hasCommunityRoomAccess(challengeId)
+          && request.resource.data.keys().hasOnly([
+            'challenge_id',
+            'sender_id',
+            'username',
+            'display_name',
+            'avatar_url',
+            'content',
+            'client_created_at',
+            'created_at'
+          ])
+          && request.resource.data.challenge_id == challengeId
+          && request.resource.data.sender_id == request.auth.uid
+          && requiredString('username', 40)
+          && requiredString('display_name', 80)
+          && stringUnder('avatar_url', 2000)
+          && requiredString('content', 700)
+          && request.resource.data.client_created_at is number
+          && request.resource.data.created_at is timestamp;
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /challenge_proof_votes/{voteId} {
+      allow read: if isSignedIn()
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomMembership(resource.data.challengeId)
+          )
+          || canReadChallengeRoomProof(resource.data.proofId)
+        );
+
+      allow create: if isSignedIn()
+        && voteId == request.resource.data.proofId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'proofId',
+          'challengeId',
+          'userId',
+          'vote',
+          'createdAt'
+        ])
+        && requiredString('challengeId', 160)
+        && challengeRoomProofBelongsToChallenge(
+          request.resource.data.proofId,
+          request.resource.data.challengeId
+        )
+        && hasCommunityRoomAccess(request.resource.data.challengeId)
+        && request.resource.data.userId == request.auth.uid
+        && requiredString('proofId', 200)
+        && requiredString('userId', 128)
+        && request.resource.data.vote in ['real', 'fake']
+        && request.resource.data.createdAt is timestamp;
+
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && voteId == resource.data.proofId + '_' + request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.proofId == resource.data.proofId
+        && (
+          (
+            'challengeId' in resource.data
+            && request.resource.data.challengeId == resource.data.challengeId
+          )
+          || (
+            !('challengeId' in resource.data)
+            && challengeRoomProofBelongsToChallenge(
+              resource.data.proofId,
+              request.resource.data.challengeId
+            )
+          )
+        )
+        && request.resource.data.keys().hasOnly([
+          'proofId',
+          'challengeId',
+          'userId',
+          'vote',
+          'createdAt'
+        ])
+        && requiredString('challengeId', 160)
+        && hasCommunityRoomAccess(request.resource.data.challengeId)
+        && request.resource.data.vote in ['real', 'fake']
+        && request.resource.data.createdAt is timestamp;
+
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomAccess(resource.data.challengeId)
+          )
+          || canInteractWithChallengeRoomProof(resource.data.proofId)
+        );
+    }
+
+    // ─── CHALLENGE PROOF COMMENTS ───────────────────────────────────────────
+    // Users can comment on challenge room proofs
+    match /challenge_proof_comments/{commentId} {
+      allow read: if isSignedIn()
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomMembership(resource.data.challengeId)
+          )
+          || canReadChallengeRoomProof(resource.data.proofId)
+        );
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'proofId',
+          'challengeId',
+          'userId',
+          'username',
+          'displayName',
+          'avatarUrl',
+          'content',
+          'likes',
+          'createdAt'
+        ])
+        && requiredString('challengeId', 160)
+        && challengeRoomProofBelongsToChallenge(
+          request.resource.data.proofId,
+          request.resource.data.challengeId
+        )
+        && hasCommunityRoomAccess(request.resource.data.challengeId)
+        && request.resource.data.userId == request.auth.uid
+        && requiredString('proofId', 200)
+        && requiredString('userId', 128)
+        && requiredString('username', 40)
+        && requiredString('displayName', 80)
+        && stringUnder('avatarUrl', 2000)
+        && requiredString('content', 500)
+        && request.resource.data.likes == 0
+        && request.resource.data.createdAt is timestamp;
+
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomAccess(resource.data.challengeId)
+          )
+          || canInteractWithChallengeRoomProof(resource.data.proofId)
+        )
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.proofId == resource.data.proofId
+        && (
+          (
+            'challengeId' in resource.data
+            && request.resource.data.challengeId == resource.data.challengeId
+          )
+          || (
+            !('challengeId' in resource.data)
+            && challengeRoomProofBelongsToChallenge(
+              resource.data.proofId,
+              request.resource.data.challengeId
+            )
+          )
+        )
+        && request.resource.data.keys().hasOnly([
+          'proofId',
+          'challengeId',
+          'userId',
+          'username',
+          'displayName',
+          'avatarUrl',
+          'content',
+          'likes',
+          'createdAt'
+        ])
+        && requiredString('challengeId', 160)
+        && hasCommunityRoomAccess(request.resource.data.challengeId)
+        && request.resource.data.username == resource.data.username
+        && request.resource.data.displayName == resource.data.displayName
+        && request.resource.data.avatarUrl == resource.data.avatarUrl
+        && request.resource.data.createdAt == resource.data.createdAt
+        && requiredString('content', 500)
+        && request.resource.data.likes == resource.data.likes;
+
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomAccess(resource.data.challengeId)
+          )
+          || canInteractWithChallengeRoomProof(resource.data.proofId)
+        );
+    }
+
+    // ─── CHALLENGE COMMENT LIKES ───────────────────────────────────────────
+    // Users can like/unlike challenge proof comments
+    match /challenge_comment_likes/{likeId} {
+      allow read: if isSignedIn()
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomMembership(resource.data.challengeId)
+          )
+          || canReadChallengeProofComment(resource.data.commentId)
+        );
+
+      allow create: if isSignedIn()
+        && likeId == request.resource.data.commentId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'commentId',
+          'challengeId',
+          'userId',
+          'createdAt'
+        ])
+        && requiredString('challengeId', 160)
+        && challengeProofCommentBelongsToChallenge(
+          request.resource.data.commentId,
+          request.resource.data.challengeId
+        )
+        && hasCommunityRoomAccess(request.resource.data.challengeId)
+        && requiredString('commentId', 200)
+        && requiredString('userId', 128)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdAt is timestamp;
+
+      allow update: if false;
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && likeId == resource.data.commentId + '_' + request.auth.uid
+        && (
+          (
+            'challengeId' in resource.data
+            && hasCommunityRoomAccess(resource.data.challengeId)
+          )
+          || canInteractWithChallengeProofComment(resource.data.commentId)
+        );
+    }
 
     // Sharded counters under post_counters/{id}/shards/{shardId}
     match /post_counters/{counterId}/shards/{shardId} {

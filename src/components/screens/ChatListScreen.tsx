@@ -20,6 +20,8 @@ import { primeResolvedUserProfile } from "../../utils/profileResolver";
 import { useUserGhostModes } from "../../hooks/useUserGhostModes";
 import { chatInviteService } from "../../middleware/services/chat-invite.service";
 
+const CHAT_LIST_DEBUG = false;
+
 function formatConversationTime(timestamp: unknown): string {
   if (!timestamp) return "";
 
@@ -201,7 +203,7 @@ export function ChatListScreen({
   const userProfiles = useProfileDataStore((s) => s.userProfiles);
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !CHAT_LIST_DEBUG) return;
     console.log("[ChatList DEBUG] indicator inputs:", {
       userId: user?.id ?? null,
       conversationCount: conversations.length,
@@ -218,8 +220,7 @@ export function ChatListScreen({
           storeIncludesOnlineFriend:
             !!otherUserId && onlineFriends.includes(otherUserId),
           finalIsOnline:
-            !!conversation.is_online ||
-            (!!otherUserId && onlineFriends.includes(otherUserId)),
+            !!otherUserId && onlineFriends.includes(otherUserId),
           conversationIsTyping: conversation.is_typing,
           matchingTypingUsers: typingUsers.filter(
             (typingUser) =>
@@ -599,8 +600,7 @@ export function ChatListScreen({
             const unreadCount = conversation.unread_count ?? 0;
             const isRead = unreadCount === 0;
             const isOnline =
-              !!conversation.is_online ||
-              (!!otherUserId && onlineFriends.includes(otherUserId));
+              !!otherUserId && onlineFriends.includes(otherUserId);
             const isTyping =
               !!conversation.is_typing ||
               typingUsers.some(

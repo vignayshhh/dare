@@ -9,11 +9,9 @@ import {
 export function CommunityJoinSuccessScreen({
   challenge,
   onClose,
-  onOpenHub,
 }: {
   challenge: CommunityChallenge;
   onClose: () => void;
-  onOpenHub?: () => void;
 }) {
   return (
     <div
@@ -153,17 +151,18 @@ export function CommunityJoinSuccessScreen({
               </div>
             </div>
             <div className="community-success-panel community-success-headline text-[36px] font-black uppercase leading-none text-white">
-              You're in
+              Batch joined
             </div>
             <div className="community-success-panel community-success-copy mt-3 max-w-[310px] text-[15px] font-semibold leading-relaxed text-[#94a3b8]">
-              Your community dare is ready. Upload daily proof to stay in.
+              Your spot is saved. The dare starts when 3 members join, then it
+              appears in your community dare hub.
             </div>
             <button
               type="button"
-              onClick={onOpenHub ?? onClose}
+              onClick={onClose}
               className="app-pressable community-success-button mt-7 flex min-h-[58px] w-full max-w-[390px] shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-5 text-[15px] font-black uppercase tracking-[0.05em] text-[#061006] shadow-[0_18px_44px_rgba(74,222,128,0.3)]"
             >
-              Open Dares Hub
+              Got it
             </button>
           </div>
         </div>

@@ -44,6 +44,8 @@ import {
   ArrowRight,
   SlidersHorizontal,
   Target,
+  Trophy,
+  Users,
 } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { CommentSection, type CommentItem } from "../ui/CommentSection";
@@ -76,11 +78,16 @@ import { commentLikePersistence } from "../../utils/commentLikePersistence";
 import { GhostModeTimer } from "../ui/GhostModeTimer";
 import { StoryViewer } from "../app/StoryViewer";
 import { CommunityChallengePreviewScreen } from "./CommunityChallengePreviewScreen";
+import { ChallengeHubScreen } from "./ChallengeHubScreen";
 import {
   COMMUNITY_CHALLENGES,
   getCommunityChallengeTitle,
   type CommunityChallenge,
 } from "./communityChallengeData";
+import {
+  communityChallengeService,
+  type CommunityChallengeSummary,
+} from "../../middleware/services/community-challenge.service";
 import { ghostModeService } from "../../middleware/services/ghost-mode.service";
 import { storyReactionService } from "../../middleware/services/story-reaction.service";
 import alertService from "../../middleware/services/alert.service.new";
@@ -98,7 +105,6 @@ import {
   encodeSharedPostPayload,
   encodeSharedStoryPayload,
   SHARED_POST_FALLBACK_TEXT,
-  SHARED_STORY_FALLBACK_TEXT,
 } from "../../utils/sharedPostMessage";
 
 // ---------------------------------------------------------------------------
@@ -127,6 +133,7 @@ interface HeartBurst {
 
 const DOUBLE_TAP_DELAY = 320;
 const BURST_LIFETIME = 950;
+const LIKE_PREVIEW_BATCH_SIZE = 12;
 const HEART_SIZES = [52, 68, 44, 60, 56];
 const HEART_COLORS = [
   "#ff3b6b",
@@ -169,6 +176,58 @@ const formatNumber = (n: number | undefined) =>
 const stripAtSymbol = (username?: string) =>
   (username || "unknown").replace(/^@/, "");
 
+const getLikeEntryName = (entry: UserLikeEntry) =>
+  stripAtSymbol(entry.username).trim() || entry.name?.trim() || "Someone";
+
+const getLikeInitial = (entry: UserLikeEntry) =>
+  getLikeEntryName(entry).charAt(0).toUpperCase() || "U";
+
+const isDisplayableLikeEntry = (entry: UserLikeEntry) => {
+  const name = entry.name?.trim().toLowerCase();
+  const username = stripAtSymbol(entry.username).trim().toLowerCase();
+
+  return (
+    entry.tapCount > 0 &&
+    Boolean(entry.userId) &&
+    Boolean(name || username) &&
+    !["anonymous", "unknown", "someone"].includes(name || "") &&
+    !["anonymous", "unknown", "someone"].includes(username)
+  );
+};
+
+const buildLikeSocialProof = (post: FeedPost) => {
+  const totalPeople = totalLikes(post);
+  if (totalPeople <= 0) return null;
+
+  const entries = Object.values(getLikesByUser(post))
+    .filter(isDisplayableLikeEntry)
+    .sort((a, b) => b.tapCount - a.tapCount);
+  const totalTaps = Math.max(totalLikeTaps(post), totalPeople);
+
+  if (entries.length === 0) return null;
+
+  const visible = entries.slice(0, 3);
+  const primary = visible[0];
+  const primaryName = getLikeEntryName(primary);
+  const remainingPeople = Math.max(totalPeople - 1, 0);
+  const primaryTapText = `liked ${formatNumber(primary.tapCount)} ${
+    primary.tapCount === 1 ? "time" : "times"
+  }`;
+
+  return {
+    avatars: visible,
+    lead: primaryName,
+    rest:
+      remainingPeople > 0
+        ? `${primaryTapText} with ${formatNumber(remainingPeople)} ${remainingPeople === 1 ? "other" : "others"}`
+        : primary.tapCount > 1
+          ? primaryTapText
+          : totalTaps > 1
+            ? `liked ${formatNumber(totalTaps)} times`
+            : "liked this",
+  };
+};
+
 const getStoryCreatedAtTime = (story: StoryDTO) => {
   const createdAt = new Date(story.createdAt).getTime();
   return Number.isFinite(createdAt) ? createdAt : 0;
@@ -182,14 +241,14 @@ const sortStoriesForPlayback = (stories: StoryDTO[]) =>
 
 const STORY_REPLY_PAYLOAD_URL_LIMIT = 7000;
 const STORY_REPLY_ENCODED_PAYLOAD_LIMIT = 15000;
-const STORY_TEXT_COLORS = ["#ffffff", "#4ade80", "#facc15", "#fb7185", "#38bdf8"];
-const STORY_TEXT_FONTS = [
-  "Bubble",
-  "Deco",
-  "Squeeze",
-  "Typewriter",
-  "Classic",
+const STORY_TEXT_COLORS = [
+  "#ffffff",
+  "#4ade80",
+  "#facc15",
+  "#fb7185",
+  "#38bdf8",
 ];
+const STORY_TEXT_FONTS = ["Bubble", "Deco", "Squeeze", "Typewriter", "Classic"];
 const STORY_TEXT_SIZE_MIN = 16;
 const STORY_TEXT_SIZE_MAX = 72;
 const STORY_BRUSHES = ["Pen", "Neon", "Marker", "Chalk"] as const;
@@ -337,49 +396,44 @@ function HeartBurstLayer({ bursts }: { bursts: HeartBurst[] }) {
 
 function PostSkeleton() {
   return (
-    <div className="bg-[#111] rounded-3xl overflow-hidden animate-pulse">
+    <div className="relative overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.97),rgba(6,9,8,0.99))] shadow-[0_22px_62px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.05)] animate-pulse">
+      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.68),rgba(14,165,233,0.38),rgba(74,222,128,0))]" />
       {/* Header skeleton */}
-      <div className="flex items-center px-3 pt-3 pb-2">
-        <div className="flex items-center space-x-3 bg-[#1e1e1e] rounded-full px-4 py-2.5">
-          <div className="w-10 h-10 rounded-full bg-[#2a2a2a]" />
-          <div>
-            <div className="h-4 w-24 bg-[#2a2a2a] rounded mb-1" />
-            <div className="h-3 w-16 bg-[#2a2a2a] rounded" />
-          </div>
+      <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+        <div className="h-[42px] w-[42px] rounded-full bg-[#1a2a1a]/60 ring-2 ring-[#4ade80]/20" />
+        <div className="min-w-0 flex-1">
+          <div className="h-4 w-28 bg-[#1a2a1a]/60 rounded mb-1.5" />
+          <div className="h-3 w-20 bg-[#1a2a1a]/50 rounded" />
         </div>
       </div>
       {/* Media skeleton */}
-      <div className="px-2">
+      <div className="px-1">
         <div
-          className="w-full bg-[#1a1a1a] rounded-3xl"
-          style={{ height: "520px" }}
+          className="w-full bg-[#0a120a]/80 rounded-3xl"
+          style={{ height: "500px" }}
         />
       </div>
       {/* Actions skeleton */}
-      <div className="px-2 pt-3">
-        <div className="bg-[#1e1e1e] rounded-full flex items-center px-4 py-3">
-          <div className="h-5 w-5 bg-[#2a2a2a] rounded-full" />
-          <div className="h-4 w-8 bg-[#2a2a2a] rounded ml-2" />
-          <div className="flex-1" />
-          <div className="h-5 w-5 bg-[#2a2a2a] rounded-full" />
-          <div className="h-4 w-8 bg-[#2a2a2a] rounded ml-2" />
-          <div className="flex-1" />
-          <div className="h-5 w-5 bg-[#2a2a2a] rounded-full" />
+      <div className="px-3 pt-3">
+        <div className="flex items-center justify-between gap-2 rounded-[22px] border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.92),rgba(10,14,10,0.96))] px-4 py-3">
+          <div className="h-[42px] flex-1 bg-[#1a2a1a]/50 rounded-full" />
+          <div className="h-[42px] flex-1 bg-[#1a2a1a]/50 rounded-full" />
+          <div className="h-[42px] w-[42px] bg-[#1a2a1a]/50 rounded-full" />
         </div>
       </div>
       {/* Caption skeleton */}
       <div className="px-4 pt-3 pb-5">
-        <div className="h-4 w-3/4 bg-[#1e1e1e] rounded mb-2" />
-        <div className="h-3 w-20 bg-[#1e1e1e] rounded" />
+        <div className="h-4 w-3/4 bg-[#1a2a1a]/60 rounded mb-2" />
+        <div className="h-3 w-24 bg-[#1a2a1a]/50 rounded" />
       </div>
     </div>
   );
 }
 
-const COMMUNITY_RAIL_FIRST_INSERT_AFTER = 3;
 const COMMUNITY_RAIL_REPEAT_EVERY = 12;
-const SOCIAL_DARES_RAIL_FIRST_INSERT_AFTER = 5;
-const TRUTHS_RAIL_FIRST_INSERT_AFTER = 7;
+const SOCIAL_DARES_RAIL_FIRST_INSERT_AFTER = 3;
+const TRUTHS_RAIL_FIRST_INSERT_AFTER = 6;
+const COMMUNITY_RAIL_FIRST_INSERT_AFTER = 9;
 const SOCIAL_CONTENT_RAIL_REPEAT_EVERY = 12;
 
 const shouldShowRailAfterPost = (
@@ -392,10 +446,7 @@ const shouldShowRailAfterPost = (
   if (totalPosts < firstInsertAfter) return false;
   if (visiblePostNumber === firstInsertAfter) return true;
   if (visiblePostNumber < firstInsertAfter) return false;
-  return (
-    (visiblePostNumber - firstInsertAfter) % repeatEvery ===
-    0
-  );
+  return (visiblePostNumber - firstInsertAfter) % repeatEvery === 0;
 };
 
 const getCreatedAtMs = (createdAt?: string) => {
@@ -407,16 +458,46 @@ const getCreatedAtMs = (createdAt?: string) => {
 const getTruthPreviewText = (truth: TruthPost) =>
   truth.answer?.trim() || truth.question;
 
+const getTruthRailActor = (truth: TruthPost) => truth.receiver || truth.challenger;
+
+const getTruthRailAction = (truth: TruthPost) =>
+  truth.answer?.trim() ? "answered" : "was asked";
+
+const getCommunityRailJoinPreviewText = (challenges: CommunityChallenge[]) => {
+  const joinedUsers = challenges
+    .flatMap((challenge) => challenge.joinPreview || [])
+    .filter((user, index, users) => {
+      return (
+        user?.id &&
+        users.findIndex((candidate) => candidate.id === user.id) === index
+      );
+    })
+    .slice(0, 3);
+
+  if (joinedUsers.length === 0) return "Open now";
+
+  const names = joinedUsers.map(
+    (user) => user.username || user.displayName || "Someone",
+  );
+
+  if (names.length === 1) return `${names[0]} joined recently`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} joined recently`;
+  return `${names[0]}, ${names[1]} and ${names[2]} joined recently`;
+};
+
 function CommunityDareFeedRail({
+  challenges,
   joinedChallengeIds,
   onPreview,
   onExploreAll,
 }: {
+  challenges: CommunityChallenge[];
   joinedChallengeIds: Set<string>;
   onPreview: (challenge: CommunityChallenge) => void;
   onExploreAll: () => void;
 }) {
-  const displayChallenges = COMMUNITY_CHALLENGES.slice(0, 5);
+  const displayChallenges = challenges.slice(0, 5);
+  const joinPreviewText = getCommunityRailJoinPreviewText(displayChallenges);
 
   return (
     <section
@@ -440,7 +521,7 @@ function CommunityDareFeedRail({
                 Community dares
               </p>
               <p className="truncate text-xs font-semibold text-[#7c8c80]">
-                Open now
+                {joinPreviewText}
               </p>
             </div>
           </div>
@@ -456,7 +537,7 @@ function CommunityDareFeedRail({
       </div>
 
       <div
-        className="community-feed-rail flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-4 pb-1"
+        className="community-feed-rail flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1"
         style={{
           WebkitOverflowScrolling: "touch",
           scrollbarWidth: "none",
@@ -466,30 +547,69 @@ function CommunityDareFeedRail({
         {displayChallenges.map((challenge) => {
           const challengeTitle = getCommunityChallengeTitle(challenge);
           const isJoined = joinedChallengeIds.has(challenge.id);
+          const hasStarted = challenge.batchStatus === "started";
 
           return (
             <button
               key={challenge.id}
               type="button"
               onClick={() => onPreview(challenge)}
-              className="app-pressable relative flex h-[92px] w-[232px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-[22px] border p-3 text-left shadow-[0_14px_30px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
+              className="app-pressable relative flex h-[228px] w-[148px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-[24px] border text-left shadow-[0_18px_40px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
               style={{
                 borderColor: `${challenge.accent}38`,
-                background: `linear-gradient(135deg, ${challenge.accent}26, rgba(255,255,255,0.055) 48%, ${challenge.secondaryAccent}20), linear-gradient(180deg, rgba(10,15,11,0.98), rgba(5,8,6,0.99))`,
+                background:
+                  "linear-gradient(180deg, rgba(10,15,11,0.98), rgba(5,8,6,0.99))",
               }}
               aria-label={`Open ${challengeTitle}`}
             >
+              {challenge.imageUrl && (
+                <img
+                  src={challenge.imageUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 h-full w-full object-cover"
+                  style={{
+                    objectPosition: challenge.imagePosition || "center",
+                  }}
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
+              )}
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full opacity-35 blur-2xl"
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  background: challenge.imageUrl
+                    ? "linear-gradient(180deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.22) 38%, rgba(0,0,0,0.82) 100%)"
+                    : challenge.banner,
+                }}
+              />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full opacity-30 blur-2xl"
                 style={{ backgroundColor: challenge.accent }}
               />
-              <span className="relative z-[1] inline-flex w-fit items-center rounded-full border border-white/10 bg-black/28 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white/78">
-                {isJoined ? "Joined" : challenge.durationLabel}
+              <span className="relative z-[1] m-2.5 inline-flex w-fit items-center rounded-full border border-white/12 bg-black/42 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-white/84 shadow-[0_10px_22px_rgba(0,0,0,0.28)] backdrop-blur-md">
+                {hasStarted && !isJoined
+                  ? "Wait next batch"
+                  : isJoined
+                    ? "Joined"
+                    : challenge.durationLabel}
               </span>
-              <span className="relative z-[1] line-clamp-2 pr-4 text-[15px] font-black uppercase leading-[1.08] text-white">
-                {challengeTitle}
-              </span>
+              <div className="relative z-[1] mt-auto p-3">
+                <span className="mb-2 inline-flex rounded-full border border-[#4ade80]/18 bg-[#4ade80]/12 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
+                  Dare official
+                </span>
+                <p className="line-clamp-4 text-[14px] font-black uppercase leading-[1.08] text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.65)]">
+                  {challengeTitle}
+                </p>
+                <p className="mt-1.5 truncate text-[10px] font-bold text-white/68">
+                  {challenge.joinedCount > 0
+                    ? `${challenge.joinedCount} joined`
+                    : "Open community run"}
+                </p>
+              </div>
             </button>
           );
         })}
@@ -501,9 +621,11 @@ function CommunityDareFeedRail({
 function SocialDaresFeedRail({
   dares,
   onExploreAll,
+  onOpenDare,
 }: {
   dares: DarePost[];
   onExploreAll: () => void;
+  onOpenDare: (dare: DarePost) => void;
 }) {
   if (dares.length === 0) return null;
 
@@ -515,25 +637,25 @@ function SocialDaresFeedRail({
       <style>{`
         .feed-inline-rail::-webkit-scrollbar { display: none; }
       `}</style>
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(250,204,21,0.58),rgba(74,222,128,0.38),transparent)]" />
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.62),rgba(56,189,248,0.34),transparent)]" />
       <div className="mb-3 flex items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#facc15]/20 bg-[#facc15]/12 text-[#fde68a] shadow-[0_10px_24px_rgba(250,204,21,0.08)]">
-            <Target size={16} />
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#4ade80]/22 bg-[#4ade80]/12 text-[#86efac] shadow-[0_10px_24px_rgba(74,222,128,0.1)]">
+            <Trophy size={16} />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-black uppercase tracking-[0.13em] text-[#fef3c7]">
+            <p className="truncate text-[13px] font-black uppercase tracking-[0.13em] text-[#bbf7d0]">
               Social dares
             </p>
-            <p className="truncate text-xs font-semibold text-[#8b8f7f]">
-              Proofs your friends approved
+            <p className="truncate text-xs font-semibold text-[#7c8c80]">
+              Challenges your friends completed
             </p>
           </div>
         </div>
         <button
           type="button"
           onClick={onExploreAll}
-          className="app-pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.055] text-white transition-colors hover:border-[#facc15]/30 hover:text-[#fde68a]"
+          className="app-pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.055] text-white transition-colors hover:border-[#4ade80]/30 hover:text-[#86efac]"
           aria-label="Explore social dares"
         >
           <ArrowRight size={16} />
@@ -555,31 +677,63 @@ function SocialDaresFeedRail({
             <button
               key={dare.id}
               type="button"
-              onClick={onExploreAll}
-              className="app-pressable relative flex h-[118px] w-[250px] shrink-0 snap-start flex-col justify-end overflow-hidden rounded-[22px] border border-white/10 p-3 text-left shadow-[0_14px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
+              onClick={() => onOpenDare(dare)}
+              className="app-pressable relative flex h-[224px] w-[188px] shrink-0 snap-start flex-col justify-end overflow-hidden rounded-[24px] border border-white/10 bg-[#030403] p-3 text-left shadow-[0_16px_34px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
               aria-label={`Open dare ${dare.description}`}
             >
               {thumbnailUrl ? (
-                <img
-                  src={thumbnailUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="absolute inset-0 h-full w-full object-cover"
-                  loading="lazy"
-                />
+                <>
+                  <img
+                    src={thumbnailUrl}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 h-full w-full scale-110 object-cover opacity-42 blur-xl"
+                    loading="lazy"
+                  />
+                  <img
+                    src={thumbnailUrl}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                </>
               ) : (
-                <span className="absolute inset-0 bg-[linear-gradient(135deg,rgba(250,204,21,0.18),rgba(74,222,128,0.12),rgba(8,12,10,0.98))]" />
+                <span className="absolute inset-0 bg-[linear-gradient(135deg,rgba(74,222,128,0.16),rgba(56,189,248,0.1),rgba(8,12,10,0.98))]" />
               )}
-              <span className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.1),rgba(0,0,0,0.36)_42%,rgba(0,0,0,0.86))]" />
-              <span className="relative z-[1] mb-2 inline-flex w-fit items-center rounded-full border border-white/10 bg-black/36 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#fde68a] backdrop-blur-md">
-                Real dare
-              </span>
-              <span className="relative z-[1] line-clamp-2 text-[15px] font-black uppercase leading-[1.08] text-white">
+              <span className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.06),rgba(0,0,0,0.2)_44%,rgba(0,0,0,0.9))]" />
+              <span className="relative z-[1] line-clamp-3 text-[14px] font-black uppercase leading-[1.08] text-white">
                 {dare.description}
               </span>
-              <span className="relative z-[1] mt-2 truncate text-xs font-bold text-white/68">
-                {dare.challenger.nickname} dared {dare.receiver.nickname}
-              </span>
+              <div className="relative z-[1] mt-2 flex min-w-0 items-center gap-1 text-[10.5px] font-bold leading-none text-white/72">
+                <span className="inline-flex min-w-0 flex-1 items-center gap-1">
+                  <Avatar
+                    src={dare.challenger.avatar}
+                    alt={dare.challenger.nickname}
+                    size={17}
+                    userId={dare.challengerId}
+                    username={dare.challenger.nickname}
+                    disableGhostMode
+                    className="shrink-0 border border-white/12 bg-black/35"
+                  />
+                  <span className="truncate">{dare.challenger.nickname}</span>
+                </span>
+                <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.12em] text-[#4ade80] drop-shadow-[0_0_10px_rgba(74,222,128,0.55)]">
+                  DARED
+                </span>
+                <span className="inline-flex min-w-0 flex-1 items-center gap-1">
+                  <Avatar
+                    src={dare.receiver.avatar}
+                    alt={dare.receiver.nickname}
+                    size={17}
+                    userId={dare.receiverId}
+                    username={dare.receiver.nickname}
+                    disableGhostMode
+                    className="shrink-0 border border-white/12 bg-black/35"
+                  />
+                  <span className="truncate">{dare.receiver.nickname}</span>
+                </span>
+              </div>
             </button>
           );
         })}
@@ -591,9 +745,11 @@ function SocialDaresFeedRail({
 function TruthsFeedRail({
   truths,
   onExploreAll,
+  onOpenTruth,
 }: {
   truths: TruthPost[];
   onExploreAll: () => void;
+  onOpenTruth: (truth: TruthPost) => void;
 }) {
   if (truths.length === 0) return null;
 
@@ -638,29 +794,83 @@ function TruthsFeedRail({
           scrollPaddingInline: "16px",
         }}
       >
-        {truths.map((truth) => (
-          <button
-            key={truth.id}
-            type="button"
-            onClick={onExploreAll}
-            className="app-pressable relative flex h-[118px] w-[250px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-[22px] border border-[#4ade80]/16 bg-[linear-gradient(145deg,rgba(74,222,128,0.14),rgba(255,255,255,0.055)_48%,rgba(56,189,248,0.12)),linear-gradient(180deg,rgba(9,15,12,0.98),rgba(5,8,6,0.99))] p-3 text-left shadow-[0_14px_30px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
-            aria-label={`Open truth ${truth.question}`}
-          >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full bg-[#4ade80] opacity-20 blur-2xl"
-            />
-            <span className="relative z-[1] inline-flex w-fit items-center rounded-full border border-white/10 bg-black/28 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
-              Truth
-            </span>
-            <span className="relative z-[1] line-clamp-3 text-[15px] font-black leading-[1.15] text-white">
-              {getTruthPreviewText(truth)}
-            </span>
-            <span className="relative z-[1] truncate text-xs font-bold text-white/62">
-              {truth.challenger.nickname} asked {truth.receiver.nickname}
-            </span>
-          </button>
-        ))}
+        {truths.map((truth) => {
+          const actor = getTruthRailActor(truth);
+          const action = getTruthRailAction(truth);
+          const actorName = actor.nickname || "Someone";
+          const question = truth.question?.trim() || getTruthPreviewText(truth);
+
+          return (
+            <button
+              key={truth.id}
+              type="button"
+              onClick={() => onOpenTruth(truth)}
+              className="app-pressable relative flex h-[156px] w-[286px] shrink-0 snap-start flex-col overflow-hidden rounded-[24px] border border-[#4ade80]/16 bg-[linear-gradient(145deg,rgba(74,222,128,0.12),rgba(255,255,255,0.045)_48%,rgba(56,189,248,0.1)),linear-gradient(180deg,rgba(9,15,12,0.98),rgba(5,8,6,0.99))] p-3.5 text-left shadow-[0_16px_34px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.06)] transition-transform active:scale-[0.985]"
+              aria-label={`${actorName} ${action} ${question}`}
+            >
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full bg-[#4ade80] opacity-16 blur-2xl"
+              />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-4 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.6),rgba(56,189,248,0.3),transparent)]"
+              />
+
+              <div className="relative z-[1] flex items-start gap-3">
+                <Avatar
+                  src={actor.avatar}
+                  alt={actorName}
+                  size={40}
+                  fallbackText={actorName.charAt(0)}
+                  style={{
+                    border: "2px solid rgba(3,4,3,0.94)",
+                    boxShadow:
+                      "0 0 0 1px rgba(74,222,128,0.24), 0 10px 24px rgba(0,0,0,0.34)",
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-black leading-tight text-white">
+                    {actorName}
+                  </p>
+                  <p className="mt-0.5 truncate text-[10.5px] font-black uppercase tracking-[0.14em] text-[#86efac]">
+                    {action}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full border border-white/10 bg-black/28 px-2 py-1 text-[9.5px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
+                  Truth
+                </span>
+              </div>
+
+              <p className="relative z-[1] mt-2.5 line-clamp-4 text-[15px] font-black leading-[1.22] text-white">
+                <span className="inline-flex max-w-full items-center gap-1.5 align-middle text-[#94a3b8]">
+                  <Avatar
+                    src={actor.avatar}
+                    alt={actorName}
+                    size={18}
+                    fallbackText={actorName.charAt(0)}
+                    className="shrink-0 border border-white/12 bg-black/35"
+                  />
+                  <span className="truncate">{actorName}</span>
+                  <span>{action}</span>
+                </span>{" "}
+                {question}
+              </p>
+
+              <div className="relative z-[1] mt-1.5 flex min-w-0 items-center gap-1.5 text-[10.5px] font-black uppercase tracking-[0.12em] text-white/54">
+                <span className="shrink-0">Question from</span>
+                <Avatar
+                  src={truth.challenger.avatar}
+                  alt={truth.challenger.nickname}
+                  size={16}
+                  fallbackText={truth.challenger.nickname.charAt(0)}
+                  className="shrink-0 border border-white/10 bg-black/35"
+                />
+                <span className="truncate">{truth.challenger.nickname}</span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
@@ -693,8 +903,8 @@ export function FeedScreen({
   onNavigateToAlerts: () => void;
   onNavigateToSearch: () => void;
   onNavigateToDares: () => void;
-  onNavigateToSocialDares: () => void;
-  onNavigateToTruths: () => void;
+  onNavigateToSocialDares: (dare?: DarePost) => void;
+  onNavigateToTruths: (truth?: TruthPost) => void;
   onNavigateToCommunityDares: () => void;
   onNavigateToDareCenter: () => void;
   onNavigateToProfile?: (userId: string) => void;
@@ -720,6 +930,7 @@ export function FeedScreen({
     unsubscribeFromPostComments,
     subscribeToPostLikes,
     unsubscribeFromPostLikes,
+    loadPostLikePreviews,
     loadMorePosts,
   } = usePostsStore();
   const {
@@ -816,8 +1027,9 @@ export function FeedScreen({
   );
   const [storyGallerySnap, setStoryGallerySnap] =
     useState<StoryGallerySnap>(25);
-  const [dedicationRecipient, setDedicationRecipient] =
-    useState<Friend | null>(null);
+  const [dedicationRecipient, setDedicationRecipient] = useState<Friend | null>(
+    null,
+  );
   const [storyDraftFiles, setStoryDraftFiles] = useState<File[]>([]);
   const [storyDraftPreviewUrls, setStoryDraftPreviewUrls] = useState<string[]>(
     [],
@@ -865,7 +1077,13 @@ export function FeedScreen({
   const [storyBrushSize, setStoryBrushSize] = useState(7);
   const [storyBrushColor, setStoryBrushColor] = useState("#ffffff");
   const [storyDrawPaths, setStoryDrawPaths] = useState<
-    { id: string; d: string; color: string; width: number; brush: StoryBrushId }[]
+    {
+      id: string;
+      d: string;
+      color: string;
+      width: number;
+      brush: StoryBrushId;
+    }[]
   >([]);
   const [showStoryViewerModal, setShowStoryViewerModal] = useState(false);
   const [selectedStoryIndex, setSelectedStoryIndex] = useState(0);
@@ -885,6 +1103,10 @@ export function FeedScreen({
   const [loadingFriends, setLoadingFriends] = useState(false);
   const [selectedCommunityChallenge, setSelectedCommunityChallenge] =
     useState<CommunityChallenge | null>(null);
+  const [showCommunityChallengeHub, setShowCommunityChallengeHub] =
+    useState(false);
+  const [communityChallengeSummaries, setCommunityChallengeSummaries] =
+    useState<Record<string, CommunityChallengeSummary>>({});
   const [joinedCommunityChallengeIds, setJoinedCommunityChallengeIds] =
     useState<Set<string>>(() => new Set());
   const storyDraftFile = storyDraftFiles[selectedStoryDraftIndex] ?? null;
@@ -921,6 +1143,8 @@ export function FeedScreen({
   const postsCountRef = useRef(0);
   const exhaustedLoadAttemptsRef = useRef(0);
   const hasScrolledSinceFeedActivatedRef = useRef(false);
+  const requestedLikePreviewPostIdsRef = useRef<Set<string>>(new Set());
+  const [likePreviewBatchTick, setLikePreviewBatchTick] = useState(0);
   const [hasMorePosts, setHasMorePosts] = useState(true);
 
   const [bursts, setBursts] = useState<Record<string, HeartBurst[]>>({});
@@ -1014,18 +1238,67 @@ export function FeedScreen({
     onNavigateToDareCenter();
   }, [onNavigateToDareCenter]);
 
-  const handleJoinCommunityChallenge = useCallback((challengeId: string) => {
-    setJoinedCommunityChallengeIds((current) => {
-      if (current.has(challengeId)) return current;
-      const next = new Set(current);
-      next.add(challengeId);
-      return next;
-    });
-  }, []);
+  const hydratedCommunityChallenges = useMemo(
+    () =>
+      communityChallengeService.hydrateChallenges(
+        COMMUNITY_CHALLENGES,
+        communityChallengeSummaries,
+      ),
+    [communityChallengeSummaries],
+  );
+
+  const selectedHydratedCommunityChallenge = selectedCommunityChallenge
+    ? hydratedCommunityChallenges.find(
+        (challenge) => challenge.id === selectedCommunityChallenge.id,
+      ) || selectedCommunityChallenge
+    : null;
+
+  const handleJoinCommunityChallenge = useCallback(
+    async (challenge: CommunityChallenge) => {
+      if (!user?.id) return;
+
+      setJoinedCommunityChallengeIds((current) => {
+        if (current.has(challenge.id)) return current;
+        const next = new Set(current);
+        next.add(challenge.id);
+        return next;
+      });
+
+      const result = await communityChallengeService.joinChallenge(challenge, {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName || user.username,
+        avatar: user.avatar || "",
+      });
+
+      if (!result.success) {
+        setJoinedCommunityChallengeIds((current) => {
+          const next = new Set(current);
+          next.delete(challenge.id);
+          return next;
+        });
+      }
+    },
+    [user?.avatar, user?.displayName, user?.id, user?.username],
+  );
 
   useEffect(() => {
     return () => clearDareCenterLongPressTimer();
   }, [clearDareCenterLongPressTimer]);
+
+  useEffect(() => {
+    return communityChallengeService.subscribeToSummaries(
+      COMMUNITY_CHALLENGES.map((challenge) => challenge.id),
+      setCommunityChallengeSummaries,
+    );
+  }, []);
+
+  useEffect(() => {
+    return communityChallengeService.subscribeToJoinedChallengeIds(
+      user?.id,
+      setJoinedCommunityChallengeIds,
+    );
+  }, [user?.id]);
 
   // ── Header hide/show logic ──
   useEffect(() => {
@@ -1128,7 +1401,9 @@ export function FeedScreen({
     () =>
       [...darePosts]
         .filter((dare) => dare.state === "ACCEPTED_REAL" && dare.proof?.url)
-        .sort((a, b) => getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt))
+        .sort(
+          (a, b) => getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt),
+        )
         .slice(0, 8),
     [darePosts],
   );
@@ -1137,7 +1412,9 @@ export function FeedScreen({
     () =>
       [...truthPosts]
         .filter((truth) => truth.state === "APPROVED" && truth.answer?.trim())
-        .sort((a, b) => getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt))
+        .sort(
+          (a, b) => getCreatedAtMs(b.createdAt) - getCreatedAtMs(a.createdAt),
+        )
         .slice(0, 8),
     [truthPosts],
   );
@@ -1147,6 +1424,47 @@ export function FeedScreen({
     () => sortedPosts.find((p) => p.id === selectedPostId) || null,
     [sortedPosts, selectedPostId],
   );
+
+  useEffect(() => {
+    if (!isActive || currentUser.userId === "me") return;
+
+    const postIdsNeedingPreview = sortedPosts
+      .filter((post) => {
+        if (totalLikes(post) <= 0) return false;
+        if (requestedLikePreviewPostIdsRef.current.has(post.id)) return false;
+        return !Object.values(getLikesByUser(post)).some(isDisplayableLikeEntry);
+      })
+      .map((post) => post.id);
+
+    if (postIdsNeedingPreview.length === 0) return;
+
+    let cancelled = false;
+    const batchPostIds = postIdsNeedingPreview.slice(0, LIKE_PREVIEW_BATCH_SIZE);
+
+    batchPostIds.forEach((postId) =>
+      requestedLikePreviewPostIdsRef.current.add(postId),
+    );
+    void loadPostLikePreviews(batchPostIds).finally(() => {
+      if (cancelled) return;
+      if (postIdsNeedingPreview.length > batchPostIds.length) {
+        window.setTimeout(
+          () => setLikePreviewBatchTick((tick) => tick + 1),
+          80,
+        );
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentUser.userId,
+    isActive,
+    likePreviewBatchTick,
+    loadPostLikePreviews,
+    sortedPosts,
+  ]);
+
   const storyGroups = useMemo(() => {
     const groups = new Map<
       string,
@@ -1376,7 +1694,8 @@ export function FeedScreen({
       showShareModal ||
       showStoryTypeSheet ||
       showStoryUploadModal ||
-      showStoryViewerModal,
+      showStoryViewerModal ||
+      showCommunityChallengeHub,
   );
 
   // ── Story handlers ──
@@ -1435,12 +1754,7 @@ export function FeedScreen({
     return () => {
       isMounted = false;
     };
-  }, [
-    showStoryUploadModal,
-    storyUploadMode,
-    user?.id,
-    friends.length,
-  ]);
+  }, [showStoryUploadModal, storyUploadMode, user?.id, friends.length]);
 
   useEffect(() => {
     storyDraftPreviewUrlsRef.current = storyDraftPreviewUrls;
@@ -1826,7 +2140,9 @@ export function FeedScreen({
         }
       : null;
     if (!remainingPair && storyTextPointersRef.current.size === 1) {
-      const remainingPointer = Array.from(storyTextPointersRef.current.values())[0];
+      const remainingPointer = Array.from(
+        storyTextPointersRef.current.values(),
+      )[0];
       const preview = storyDraftPreviewRef.current;
       if (preview && remainingPointer) {
         const rect = preview.getBoundingClientRect();
@@ -2054,7 +2370,8 @@ export function FeedScreen({
     if (pair) {
       const nextScale =
         gesture.transform.scale * (pair.distance / gesture.distance);
-      const nextRotation = gesture.transform.rotation + pair.angle - gesture.angle;
+      const nextRotation =
+        gesture.transform.rotation + pair.angle - gesture.angle;
       const nextX = gesture.transform.x + pair.centerX - gesture.centerX;
       const nextY = gesture.transform.y + pair.centerY - gesture.centerY;
       const verticalSnap = smoothSnapToCenter(
@@ -2062,7 +2379,10 @@ export function FeedScreen({
         0,
         STORY_MEDIA_VERTICAL_SNAP_THRESHOLD,
       );
-      if (Math.abs(nextX - gesture.transform.x) > 3 || Math.abs(nextY - gesture.transform.y) > 3) {
+      if (
+        Math.abs(nextX - gesture.transform.x) > 3 ||
+        Math.abs(nextY - gesture.transform.y) > 3
+      ) {
         storyMediaMovedRef.current = true;
       }
       if (storyMediaPositionFrameRef.current !== null) {
@@ -2249,12 +2569,15 @@ export function FeedScreen({
 
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
-        const mediaUrl = await storyService.uploadStoryMedia(file, (percent) => {
-          const overallProgress = Math.round(
-            ((index + percent / 100) / files.length) * 100,
-          );
-          useStoryStore.setState({ uploadProgress: overallProgress });
-        });
+        const mediaUrl = await storyService.uploadStoryMedia(
+          file,
+          (percent) => {
+            const overallProgress = Math.round(
+              ((index + percent / 100) / files.length) * 100,
+            );
+            useStoryStore.setState({ uploadProgress: overallProgress });
+          },
+        );
         const mediaType = file.type.startsWith("video/") ? "video" : "image";
 
         const request: CreateStoryDTO = {
@@ -2327,7 +2650,9 @@ export function FeedScreen({
       if (files.length > 0 && !isUploading) {
         storyDraftPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
         setStoryDraftFiles(files);
-        setStoryDraftPreviewUrls(files.map((file) => URL.createObjectURL(file)));
+        setStoryDraftPreviewUrls(
+          files.map((file) => URL.createObjectURL(file)),
+        );
         setSelectedStoryDraftIndex(0);
         setStoryMediaTransform({ x: 0, y: 0, scale: 1, rotation: 0 });
         setStoryComposerStage("editor");
@@ -2338,8 +2663,30 @@ export function FeedScreen({
   };
 
   const publishStoryDraft = async () => {
-    if (storyDraftFiles.length === 0 || isUploading) return;
-    await handleStoryUpload(storyDraftFiles);
+    console.log("🚀 publishStoryDraft called", {
+      storyDraftFilesLength: storyDraftFiles.length,
+      isUploading,
+      storyDraftFiles: storyDraftFiles.map((f) => ({
+        name: f.name,
+        type: f.type,
+        size: f.size,
+      })),
+    });
+
+    if (storyDraftFiles.length === 0 || isUploading) {
+      console.log("❌ publishStoryDraft early return", {
+        filesEmpty: storyDraftFiles.length === 0,
+        isUploading,
+      });
+      return;
+    }
+
+    try {
+      await handleStoryUpload(storyDraftFiles);
+      console.log("✅ Story upload completed successfully");
+    } catch (error) {
+      console.error("❌ Story upload failed:", error);
+    }
   };
 
   const handleDeleteStory = async (storyId: string) => {
@@ -2463,26 +2810,14 @@ export function FeedScreen({
           encodedStoryPayload.length <= STORY_REPLY_ENCODED_PAYLOAD_LIMIT
             ? encodedStoryPayload
             : "";
+        const storyReplyPreviewText = `Replied to your story: ${text.trim()}`;
 
         await sendRealTimeMessage(
           convId,
-          safeStoryPayload ? SHARED_STORY_FALLBACK_TEXT : text.trim(),
+          safeStoryPayload ? storyReplyPreviewText : text.trim(),
           safeStoryPayload || undefined,
           safeStoryPayload ? "TEXT" : undefined,
         );
-        const { alertService } =
-          await import("../../middleware/services/service-factory");
-        await alertService.createAlert({
-          userId: authorId,
-          type: "STORY_REPLY",
-          entityId: storyId,
-          actorId: currentUser.userId,
-          actorName: currentUser.name,
-          actorUsername: currentUser.username,
-          actorAvatar: currentUser.avatar,
-          message: `${currentUser.name} replied to your story`,
-          metadata: { replyText: text.trim() },
-        });
       } catch (err) {
         console.error("Story reply failed:", err);
       }
@@ -2796,22 +3131,29 @@ export function FeedScreen({
             "radial-gradient(ellipse at 28% -42%, rgba(74,222,128,0.11), transparent 66%), radial-gradient(ellipse at 76% -34%, rgba(14,165,233,0.07), transparent 64%), linear-gradient(180deg, rgba(6,8,6,0.94) 0%, rgba(10,15,10,0.93) 54%, rgba(3,4,3,0.92) 100%)",
         }}
       >
-        <div className="px-4 pb-4 pt-3">
+        <div className="px-4 pb-3 pt-3">
           <div className="relative flex items-center justify-between">
             <div className="z-10 flex items-center gap-2">
               <button
                 onClick={onNavigateToSearch}
-                className="flex h-10 w-10 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
+                className="flex h-10 w-10 items-center justify-center text-[#94a3b8] transition-all duration-200 hover:text-[#4ade80]"
                 aria-label="Search"
               >
                 <Search size={18} />
               </button>
               <button
                 onClick={onNavigateToDares}
-                className="flex h-10 w-10 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
+                className="flex h-10 w-10 items-center justify-center text-[#94a3b8] transition-all duration-200 hover:text-[#4ade80]"
                 aria-label="Dares received"
               >
                 <Target size={18} />
+              </button>
+              <button
+                onClick={() => setShowCommunityChallengeHub(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-[#4ade80]/14 bg-[#4ade80]/[0.045] text-[#94a3b8] transition-all duration-200 hover:border-[#4ade80]/30 hover:bg-[#4ade80]/10 hover:text-[#86efac]"
+                aria-label="Community dare hub"
+              >
+                <Users size={18} />
               </button>
             </div>
             <div
@@ -2847,7 +3189,7 @@ export function FeedScreen({
                   }
                   onNavigateToAlerts();
                 }}
-                className="relative flex h-11 w-11 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#fb7185]/30 hover:bg-[#fb7185]/10 hover:text-white"
+                className="relative flex h-11 w-11 items-center justify-center text-[#94a3b8] transition-all duration-200 hover:text-[#fb7185]"
                 aria-label="Notifications"
               >
                 <Heart size={18} />
@@ -2859,7 +3201,7 @@ export function FeedScreen({
               </button>
               <button
                 onClick={onNavigateToChat}
-                className="relative flex h-11 w-11 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.045] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
+                className="relative flex h-11 w-11 items-center justify-center text-[#94a3b8] transition-all duration-200 hover:text-[#4ade80]"
                 aria-label="Messages"
               >
                 <MessageSquare size={18} />
@@ -2888,21 +3230,21 @@ export function FeedScreen({
           onClick={() => setShowDareCenterPrompt(false)}
         >
           <div
-            className="app-modal-sheet flex max-h-[calc(100dvh-var(--safe-area-top)-8px)] min-h-[min(460px,calc(100dvh-var(--safe-area-top)-8px))] w-full flex-col overflow-hidden rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)]"
+            className="app-modal-sheet mb-[calc(var(--safe-area-bottom)+86px)] flex h-[min(348px,calc(100dvh-var(--safe-area-top)-var(--safe-area-bottom)-124px))] max-h-[calc(100dvh-var(--safe-area-top)-var(--safe-area-bottom)-124px)] w-full flex-col overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[#3a3a3a]" />
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 scrollbar-hide">
-              <div className="mb-5 flex items-start justify-between gap-4">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 scrollbar-hide">
+              <div className="mb-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-[#86efac]">
                     <Sparkles size={13} />
                     Hidden hub
                   </div>
-                  <h3 className="text-[26px] font-black leading-tight text-white">
+                  <h3 className="text-[24px] font-black leading-tight text-white">
                     Enter Dare Center?
                   </h3>
-                  <p className="mt-2 text-sm font-semibold leading-relaxed text-[#94a3b8]">
+                  <p className="mt-1.5 text-[13px] font-semibold leading-relaxed text-[#94a3b8]">
                     A guided tour of the features that make Dare different, with
                     animated screens and quick ways to understand each flow.
                   </p>
@@ -2916,7 +3258,7 @@ export function FeedScreen({
                   <X size={18} />
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2 pb-4">
+              <div className="grid grid-cols-3 gap-2 pb-3">
                 {[
                   ["Proof", "real/fake"],
                   ["Ghost", "15 min"],
@@ -2924,7 +3266,7 @@ export function FeedScreen({
                 ].map(([top, bottom]) => (
                   <div
                     key={`${top}-${bottom}`}
-                    className="rounded-[22px] border border-white/8 bg-white/[0.035] px-3 py-4 text-center"
+                    className="rounded-[20px] border border-white/8 bg-white/[0.035] px-3 py-3 text-center"
                   >
                     <p className="text-base font-black text-white">{top}</p>
                     <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#64748b]">
@@ -2934,18 +3276,18 @@ export function FeedScreen({
                 ))}
               </div>
             </div>
-            <div className="grid shrink-0 grid-cols-2 gap-3 border-t border-white/8 bg-[linear-gradient(180deg,rgba(6,8,7,0.72),rgba(6,8,7,0.99))] px-5 pb-[calc(var(--safe-area-bottom)+18px)] pt-4">
+            <div className="grid shrink-0 grid-cols-2 gap-3 border-t border-white/8 bg-[linear-gradient(180deg,rgba(6,8,7,0.72),rgba(6,8,7,0.99))] px-5 pb-4 pt-3">
               <button
                 type="button"
                 onClick={() => setShowDareCenterPrompt(false)}
-                className="min-h-[54px] rounded-full border border-white/8 bg-white/[0.04] px-5 text-sm font-black text-white transition-colors hover:bg-white/[0.07]"
+                className="min-h-[48px] rounded-full border border-white/8 bg-white/[0.04] px-5 text-sm font-black text-white transition-colors hover:bg-white/[0.07]"
               >
                 Stay here
               </button>
               <button
                 type="button"
                 onClick={handleEnterDareCenter}
-                className="min-h-[54px] rounded-full bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-5 text-sm font-black text-black shadow-[0_16px_36px_rgba(74,222,128,0.28)] transition-transform active:scale-[0.98]"
+                className="min-h-[48px] rounded-full bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-5 text-sm font-black text-black shadow-[0_16px_36px_rgba(74,222,128,0.28)] transition-transform active:scale-[0.98]"
               >
                 Enter center
               </button>
@@ -2962,8 +3304,8 @@ export function FeedScreen({
       >
         <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(74,222,128,0))]" />
         {/* ── Stories row ── */}
-        <div className="px-4 py-5">
-          <div className="flex space-x-4 overflow-x-auto rounded-[30px] border border-white/8 bg-white/[0.025] px-3 py-4 shadow-[0_18px_44px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.04)] scrollbar-hide">
+        <div className="px-4 pt-2 pb-1">
+          <div className="flex space-x-4 overflow-x-auto px-3 py-2 scrollbar-hide">
             {/* Your Story Circle */}
             <div
               className="shrink-0 flex flex-col items-center cursor-pointer group"
@@ -2989,11 +3331,21 @@ export function FeedScreen({
                   // User has active stories — show profile picture avatar with green ring
                   <div className="relative h-[84px] w-[84px] rounded-full bg-gradient-to-br from-[#4ade80] via-[#34d399] to-[#facc15] p-[3px] shadow-[0_18px_40px_rgba(10,14,12,0.45)] transition-all duration-300 group-hover:scale-[1.04]">
                     <div className="w-full h-full rounded-full bg-[#050505] p-[3px]">
-                      <img
-                        src={currentUser.avatar}
-                        alt="Your story"
-                        className="w-full h-full rounded-full object-cover"
-                      />
+                      {currentUser.avatar ? (
+                        <img
+                          src={currentUser.avatar}
+                          alt="Your story"
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full rounded-full bg-[#1a1a1a] flex items-center justify-center">
+                          <span className="text-white text-2xl font-bold">
+                            {currentUser.name?.charAt(0) ||
+                              currentUser.username?.charAt(0) ||
+                              "U"}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -3042,115 +3394,117 @@ export function FeedScreen({
               if (!story) return null;
 
               return (
-              <div
-                key={storyGroup.authorId}
-                className="shrink-0 flex flex-col items-center group"
-              >
-                <button
-                  type="button"
-                  className="relative h-[84px] w-[84px] cursor-pointer"
-                  onClick={() => handleStoryClick(index)}
+                <div
+                  key={storyGroup.authorId}
+                  className="shrink-0 flex flex-col items-center group"
                 >
-                  {!hasViewed && (
-                    <div className="absolute inset-0 h-[84px] w-[84px] rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="w-full h-full rounded-full border-2 border-[#f59e0b]/35" />
-                    </div>
-                  )}
-                  <div
-                    className={`relative h-[84px] w-[84px] rounded-full p-[3px] shadow-[0_18px_40px_rgba(0,0,0,0.45)] transition-all duration-300 group-hover:scale-[1.04] ${
-                      hasViewed
-                        ? "bg-gradient-to-br from-[#2b2f35] via-[#353941] to-[#44474f]"
-                        : story.storyType === "dedication"
-                          ? "bg-gradient-to-br from-[#bef264] via-[#f59e0b] to-[#fb7185]"
-                          : "bg-gradient-to-br from-[#84cc16] via-[#facc15] to-[#fb7185]"
-                    }`}
+                  <button
+                    type="button"
+                    className="relative h-[84px] w-[84px] cursor-pointer"
+                    onClick={() => handleStoryClick(index)}
                   >
+                    {!hasViewed && (
+                      <div className="absolute inset-0 h-[84px] w-[84px] rounded-full opacity-0 blur-sm group-hover:opacity-100 transition-opacity duration-300">
+                        <div className="w-full h-full rounded-full border-2 border-[#f59e0b]/35" />
+                      </div>
+                    )}
                     <div
-                      className={`w-full h-full rounded-full ${
-                        hasViewed ? "bg-[#111315]" : "bg-[#050505]"
-                      } p-[3px]`}
+                      className={`relative h-[84px] w-[84px] rounded-full p-[3px] shadow-[0_18px_40px_rgba(0,0,0,0.45)] transition-all duration-300 group-hover:scale-[1.04] ${
+                        hasViewed
+                          ? "bg-gradient-to-br from-[#2b2f35] via-[#353941] to-[#44474f]"
+                          : story.storyType === "dedication"
+                            ? "bg-gradient-to-br from-[#bef264] via-[#f59e0b] to-[#fb7185]"
+                            : "bg-gradient-to-br from-[#84cc16] via-[#facc15] to-[#fb7185]"
+                      }`}
                     >
-                      <div className="w-full h-full rounded-full overflow-hidden">
+                      <div
+                        className={`w-full h-full rounded-full ${
+                          hasViewed ? "bg-[#111315]" : "bg-[#050505]"
+                        } p-[3px]`}
+                      >
+                        <div className="w-full h-full rounded-full overflow-hidden">
+                          <Avatar
+                            src={story.author.avatar}
+                            alt={story.author.displayName}
+                            size="2xl"
+                            userId={story.author.id}
+                            username={story.author.username}
+                            forceGhostMode={ghostModesByUserId[story.author.id]}
+                            className="!h-full !w-full"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                  {story.storyType === "dedication" && story.dedicatedTo ? (
+                    <div className="mt-3 flex w-[84px] items-center justify-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToProfile?.(story.author.id)}
+                        className="shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
+                        aria-label={`Open ${story.author.displayName}'s profile`}
+                      >
                         <Avatar
                           src={story.author.avatar}
                           alt={story.author.displayName}
-                          size="2xl"
+                          size={17}
                           userId={story.author.id}
                           username={story.author.username}
                           forceGhostMode={ghostModesByUserId[story.author.id]}
-                          className="!h-full !w-full"
+                          className="ring-1 ring-white/20"
                         />
-                      </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStoryClick(index)}
+                        className="flex h-4 w-3 shrink-0 items-center justify-center text-[#86efac] transition-transform hover:scale-110 active:scale-95"
+                        aria-label="Open dedicated story"
+                      >
+                        <Play size={9} fill="currentColor" strokeWidth={0} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onNavigateToProfile?.(story.dedicatedTo!.id)
+                        }
+                        className="shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
+                        aria-label={`Open ${story.dedicatedTo.displayName}'s profile`}
+                      >
+                        <Avatar
+                          src={story.dedicatedTo.avatar}
+                          alt={story.dedicatedTo.displayName}
+                          size={17}
+                          userId={story.dedicatedTo.id}
+                          username={story.dedicatedTo.username}
+                          forceGhostMode={
+                            ghostModesByUserId[story.dedicatedTo.id]
+                          }
+                          className="ring-1 ring-[#4ade80]/70"
+                        />
+                      </button>
                     </div>
-                  </div>
-                </button>
-                {story.storyType === "dedication" && story.dedicatedTo ? (
-                  <div className="mt-3 flex w-[84px] items-center justify-center gap-1">
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => onNavigateToProfile?.(story.author.id)}
-                      className="shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
-                      aria-label={`Open ${story.author.displayName}'s profile`}
+                      onClick={() => {
+                        if (onNavigateToProfile && story.author.id) {
+                          onNavigateToProfile(story.author.id);
+                        }
+                      }}
+                      className={`mt-3 block w-[84px] truncate text-center text-sm font-medium transition-colors duration-300 ${
+                        hasViewed
+                          ? "text-[#6b7280]"
+                          : "text-[#d1d5db] group-hover:text-white"
+                      } ${
+                        onNavigateToProfile && story.author.id
+                          ? "cursor-pointer hover:text-[#4ade80]"
+                          : "cursor-default"
+                      }`}
                     >
-                      <Avatar
-                        src={story.author.avatar}
-                        alt={story.author.displayName}
-                        size={17}
-                        userId={story.author.id}
-                        username={story.author.username}
-                        forceGhostMode={ghostModesByUserId[story.author.id]}
-                        className="ring-1 ring-white/20"
-                      />
+                      {stripAtSymbol(story.author.username)}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStoryClick(index)}
-                      className="flex h-4 w-3 shrink-0 items-center justify-center text-[#86efac] transition-transform hover:scale-110 active:scale-95"
-                      aria-label="Open dedicated story"
-                    >
-                      <Play size={9} fill="currentColor" strokeWidth={0} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onNavigateToProfile?.(story.dedicatedTo!.id)
-                      }
-                      className="shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
-                      aria-label={`Open ${story.dedicatedTo.displayName}'s profile`}
-                    >
-                      <Avatar
-                        src={story.dedicatedTo.avatar}
-                        alt={story.dedicatedTo.displayName}
-                        size={17}
-                        userId={story.dedicatedTo.id}
-                        username={story.dedicatedTo.username}
-                        forceGhostMode={ghostModesByUserId[story.dedicatedTo.id]}
-                        className="ring-1 ring-[#4ade80]/70"
-                      />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onNavigateToProfile && story.author.id) {
-                        onNavigateToProfile(story.author.id);
-                      }
-                    }}
-                    className={`mt-3 block w-[84px] truncate text-center text-sm font-medium transition-colors duration-300 ${
-                      hasViewed
-                        ? "text-[#6b7280]"
-                        : "text-[#d1d5db] group-hover:text-white"
-                    } ${
-                      onNavigateToProfile && story.author.id
-                        ? "cursor-pointer hover:text-[#4ade80]"
-                        : "cursor-default"
-                    }`}
-                  >
-                    {stripAtSymbol(story.author.username)}
-                  </button>
-                )}
-              </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -3168,6 +3522,7 @@ export function FeedScreen({
             {sortedPosts.map((post: FeedPost, index) => {
               const liked = iLiked(post, currentUser.userId);
               const likeCount = totalLikes(post);
+              const likeSocialProof = buildLikeSocialProof(post);
               const postBursts = bursts[post.id] ?? [];
               const author = resolveAuthor(post.author);
               const showCommunityRail = shouldShowRailAfterPost(
@@ -3193,24 +3548,28 @@ export function FeedScreen({
                 <Fragment key={post.id}>
                   <div
                     id={`feed-post-${post.id}`}
-                    className={`relative overflow-hidden rounded-3xl bg-[linear-gradient(180deg,rgba(17,23,18,0.98),rgba(8,10,9,0.99))] shadow-[0_18px_44px_rgba(0,0,0,0.32)] ${
+                    className={`relative overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.97),rgba(6,9,8,0.99))] shadow-[0_22px_62px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.05)] ${
                       animatingPosts.has(post.id) ? "premium-card-burst" : ""
                     }`}
                   >
+                    <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.68),rgba(14,165,233,0.38),rgba(74,222,128,0))]" />
                     <div className="premium-card-glow" />
                     <div className="premium-card-ring" />
                     {/* Post header */}
-                    <div className="flex items-center px-3 pt-3 pb-3">
-                      <div className="flex w-full items-center space-x-3 rounded-full bg-[linear-gradient(180deg,rgba(24,28,24,0.96),rgba(12,15,12,0.98))] px-5 py-2.5 pr-7 backdrop-blur-md border border-white/10 shadow-[0_12px_28px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.06)]">
+                    <div className="relative z-10 flex items-center justify-between gap-3 px-3 pt-3 pb-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <Avatar
                           src={author.avatar}
                           alt={author.name}
-                          size="md"
+                          size={46}
                           userId={author.id}
                           username={author.username}
                           forceGhostMode={
-                            author.id ? ghostModesByUserId[author.id] : undefined
+                            author.id
+                              ? ghostModesByUserId[author.id]
+                              : undefined
                           }
+                          style={{ border: "2px solid rgba(74,222,128,0.22)" }}
                         />
                         <button
                           type="button"
@@ -3225,11 +3584,11 @@ export function FeedScreen({
                               : "cursor-default"
                           }`}
                         >
-                          <h3 className="font-bold text-white text-base leading-tight">
+                          <h3 className="truncate text-[16px] font-black leading-tight text-white">
                             {author.name}
                           </h3>
-                          <p className="text-[#8ea18e] text-sm font-medium tracking-wide">
-                            {author.username}
+                          <p className="mt-0.5 truncate text-[13px] font-semibold leading-tight text-[#94a3b8]">
+                            @{author.username}
                           </p>
                         </button>
                       </div>
@@ -3259,121 +3618,186 @@ export function FeedScreen({
                               }}
                             />
                           ) : post.media.type === "video" ? (
-                          <div
-                            className="w-full bg-[#2a2a2a] flex items-center justify-center rounded-3xl"
-                            style={{ height: "500px" }}
-                          >
-                            <span className="text-[#94a3b8] text-2xl">
-                              🎥 Video
-                            </span>
-                          </div>
-                        ) : (
-                          <div
-                            className="w-full bg-gradient-to-br from-[#4ade80]/10 via-[#22c55e]/10 to-[#16a34a]/10 flex items-center justify-center rounded-3xl"
-                            style={{ height: "500px" }}
-                          >
-                            <div className="text-center">
-                              <div className="w-16 h-16 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-2xl flex items-center justify-center mb-3 mx-auto">
-                                <Music size={28} className="text-black" />
-                              </div>
-                              <p className="text-white font-medium">
-                                Audio File
-                              </p>
-                              {post.media.duration && (
-                                <p className="text-[#94a3b8] text-sm mt-1">
-                                  {post.media.duration}
-                                </p>
-                              )}
+                            <div
+                              className="w-full bg-[#2a2a2a] flex items-center justify-center rounded-3xl"
+                              style={{ height: "500px" }}
+                            >
+                              <span className="text-[#94a3b8] text-2xl">
+                                🎥 Video
+                              </span>
                             </div>
-                          </div>
-                        )}
-                        <HeartBurstLayer bursts={postBursts} />
+                          ) : (
+                            <div
+                              className="w-full bg-gradient-to-br from-[#4ade80]/10 via-[#22c55e]/10 to-[#16a34a]/10 flex items-center justify-center rounded-3xl"
+                              style={{ height: "500px" }}
+                            >
+                              <div className="text-center">
+                                <div className="w-16 h-16 bg-gradient-to-br from-[#4ade80] to-[#22c55e] rounded-2xl flex items-center justify-center mb-3 mx-auto">
+                                  <Music size={28} className="text-black" />
+                                </div>
+                                <p className="text-white font-medium">
+                                  Audio File
+                                </p>
+                                {post.media.duration && (
+                                  <p className="text-[#94a3b8] text-sm mt-1">
+                                    {post.media.duration}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          <HeartBurstLayer bursts={postBursts} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="relative z-10 px-2 pt-3">
+                      <div className="grid grid-cols-3 items-center gap-1 rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.97),rgba(6,9,8,0.99))] px-3 py-2.5 shadow-[0_12px_26px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                        <div className="flex min-w-0 items-center justify-center">
+                          <button
+                            onClick={(e) => handleHeartIconClick(post.id, e)}
+                            className="group app-pressable flex min-w-0 items-center justify-center text-white transition-colors hover:text-[#4ade80]"
+                            aria-label={liked ? "Unlike post" : "Like post"}
+                          >
+                            <Heart
+                              size={20}
+                              fill={liked ? "#ef4444" : "white"}
+                              strokeWidth={0}
+                              className={`shrink-0 transition-all duration-200 ${
+                                liked
+                                  ? "scale-110 text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]"
+                                  : "text-white group-hover:scale-110"
+                              }`}
+                            />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedPostId(post.id);
+                              setShowLikesModal(true);
+                            }}
+                            className="ml-1 truncate text-sm font-bold text-white transition-colors hover:text-[#4ade80]"
+                            aria-label="Open likes"
+                          >
+                            {formatNumber(likeCount)}
+                          </button>
+                        </div>
+                        <div className="flex min-w-0 items-center justify-center">
+                          <button
+                            onClick={() => {
+                              setSentTo(new Set());
+                              setSelectedPostId(post.id);
+                              setShowCommentsModal(true);
+                            }}
+                            className="app-pressable flex min-w-0 items-center justify-center gap-2 text-white transition-colors hover:text-[#4ade80]"
+                            aria-label="Open comments"
+                          >
+                            <MessageCircle
+                              size={20}
+                              fill="white"
+                              strokeWidth={0}
+                              className="shrink-0"
+                            />
+                            <span className="truncate text-sm font-bold">
+                              {formatNumber(post.comments_count)}
+                            </span>
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-center">
+                          <button
+                            onClick={() => {
+                              setSelectedPostId(post.id);
+                              setSentTo(new Set());
+                              setShowShareModal(true);
+                            }}
+                            className="app-pressable flex items-center justify-center text-white transition-colors hover:text-[#4ade80]"
+                            aria-label="Share to DM"
+                          >
+                            <Send size={18} fill="white" strokeWidth={0} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  )}
 
-                  {/* Actions */}
-                  <div className="px-2 pt-3">
-                    <div className="bg-[linear-gradient(180deg,rgba(26,30,26,0.96),rgba(14,17,14,0.98))] rounded-full flex items-center px-4 py-2.5 border border-white/10 shadow-[0_10px_26px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.055)]">
-                      <button
-                        onClick={(e) => handleHeartIconClick(post.id, e)}
-                        className="group flex items-center space-x-2"
-                      >
-                        <Heart
-                          size={20}
-                          fill={liked ? "#fb7185" : "#f8fafc"}
-                          strokeWidth={0}
-                          className={`transition-all duration-200 ${
-                            liked
-                              ? "text-rose-400 scale-110 drop-shadow-[0_0_6px_rgba(251,113,133,0.45)]"
-                              : "text-white group-hover:scale-110 group-hover:text-[#8bdba7]"
-                          }`}
-                        />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelectedPostId(post.id);
-                          setShowLikesModal(true);
-                        }}
-                        className="text-white font-bold text-sm ml-1 hover:text-[#8bdba7] transition-colors"
-                      >
-                        {formatNumber(likeCount)}
-                      </button>
-                      <div className="flex-1" />
-                      <button
-                        onClick={() => {
-                          setSelectedPostId(post.id);
-                          setShowCommentsModal(true);
-                        }}
-                        className="flex items-center space-x-2 text-white hover:text-[#8bdba7] transition-colors"
-                      >
-                        <MessageCircle size={20} fill="currentColor" strokeWidth={0} />
-                      </button>
-                      <span className="text-white font-bold text-sm ml-1">
-                        {formatNumber(post.comments_count)}
-                      </span>
-                      <div className="flex-1" />
-                      <button
-                        onClick={() => {
-                          setSelectedPostId(post.id);
-                          setSentTo(new Set());
-                          setShowShareModal(true);
-                        }}
-                        className="text-white hover:text-[#8bdba7] transition-colors"
-                        aria-label="Share to DM"
-                      >
-                        <Send size={18} fill="currentColor" strokeWidth={0} />
-                      </button>
+                    {likeSocialProof && (
+                      <div className="relative z-10 px-4 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedPostId(post.id);
+                            setShowLikesModal(true);
+                          }}
+                          className="group flex w-full items-center gap-3 rounded-2xl px-1 py-1.5 text-left transition-colors hover:bg-white/[0.025]"
+                        >
+                          {likeSocialProof.avatars.length > 0 ? (
+                            <div className="flex shrink-0 -space-x-2">
+                              {likeSocialProof.avatars.map((entry) => (
+                                <span
+                                  key={entry.userId}
+                                  className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-[#101713] bg-[#1b241e] text-[11px] font-black text-[#4ade80] shadow-[0_5px_14px_rgba(0,0,0,0.32)]"
+                                >
+                                  <span>{getLikeInitial(entry)}</span>
+                                  {entry.avatar ? (
+                                    <img
+                                      src={entry.avatar}
+                                      alt={getLikeEntryName(entry)}
+                                      className="absolute inset-0 h-full w-full object-cover"
+                                      loading="lazy"
+                                      decoding="async"
+                                      onError={(event) => {
+                                        event.currentTarget.style.display =
+                                          "none";
+                                      }}
+                                    />
+                                  ) : null}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#4ade80]/20 bg-[#132018] text-[#4ade80] shadow-[0_5px_14px_rgba(0,0,0,0.25)]">
+                              <Heart size={14} fill="currentColor" />
+                            </span>
+                          )}
+                          <p className="min-w-0 truncate text-[13px] font-semibold leading-tight text-[#9bb1a6]">
+                            <span className="font-black text-white">
+                              {likeSocialProof.lead}
+                            </span>{" "}
+                            <span>{likeSocialProof.rest}</span>
+                          </p>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Caption */}
+                    <div className="relative z-10 px-4 pt-2 pb-5">
+                      <p className="text-[15px] font-black leading-relaxed text-white">
+                        {post.content}
+                      </p>
+                      <p className="mt-1.5 text-xs font-bold text-[#64748b]">
+                        {formatTimeAgo(post.timestamp)}
+                      </p>
                     </div>
                   </div>
-
-                  {/* Caption */}
-                  <div className="px-4 pt-3 pb-5">
-                    <p className="text-white text-base leading-snug">
-                      {post.content}
-                    </p>
-                    <p className="text-[#64748b] text-xs mt-2">
-                      {formatTimeAgo(post.timestamp)}
-                    </p>
-                  </div>
-                  </div>
-                  {showCommunityRail && (
-                    <CommunityDareFeedRail
-                      joinedChallengeIds={joinedCommunityChallengeIds}
-                      onPreview={setSelectedCommunityChallenge}
-                      onExploreAll={onNavigateToCommunityDares}
-                    />
-                  )}
                   {showSocialDaresRail && feedSocialDares.length > 0 && (
                     <SocialDaresFeedRail
                       dares={feedSocialDares}
                       onExploreAll={onNavigateToSocialDares}
+                      onOpenDare={onNavigateToSocialDares}
                     />
                   )}
                   {showTruthsRail && feedTruths.length > 0 && (
                     <TruthsFeedRail
                       truths={feedTruths}
                       onExploreAll={onNavigateToTruths}
+                      onOpenTruth={onNavigateToTruths}
+                    />
+                  )}
+                  {showCommunityRail && (
+                    <CommunityDareFeedRail
+                      challenges={hydratedCommunityChallenges}
+                      joinedChallengeIds={joinedCommunityChallengeIds}
+                      onPreview={setSelectedCommunityChallenge}
+                      onExploreAll={onNavigateToCommunityDares}
                     />
                   )}
                 </Fragment>
@@ -3414,14 +3838,14 @@ export function FeedScreen({
             .comment-fade-in { animation: fadeIn 0.2s ease-out forwards; }
           `}</style>
           <div
-            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col overflow-hidden"
+            className="app-modal-sheet w-full overflow-hidden rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)] flex flex-col"
             style={{
               minHeight: "min(68dvh, 720px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 pt-4 pb-3 border-b border-[#2a2a2a] shrink-0">
-              <div className="w-10 h-1 bg-[#3a3a3a] rounded-full mx-auto mb-4" />
+            <div className="px-6 pt-4 pb-3 border-b border-white/8 shrink-0">
+              <div className="w-10 h-1 bg-white/18 rounded-full mx-auto mb-4" />
               <div className="flex items-center justify-between">
                 <h3 className="text-white font-bold text-lg">Comments</h3>
                 <button
@@ -3497,14 +3921,14 @@ export function FeedScreen({
             .modal-fade-in { animation: fadeIn 0.2s ease-out forwards; }
           `}</style>
           <div
-            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
+            className="app-modal-sheet w-full rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)] flex flex-col"
             style={{
               minHeight: "min(60dvh, 640px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 pt-4 pb-3 shrink-0">
-              <div className="w-10 h-1 bg-[#3a3a3a] rounded-full mx-auto mb-5" />
+              <div className="w-10 h-1 bg-white/18 rounded-full mx-auto mb-5" />
               <h3 className="text-white font-bold text-lg mb-1">Likes</h3>
               <p className="text-[#64748b] text-sm mb-3">
                 {totalLikeTaps(selectedPost)} total likes ·{" "}
@@ -3523,19 +3947,19 @@ export function FeedScreen({
                 No likes yet
               </p>
             ) : (
-              <div className="app-modal-sheet-scroll px-6 pb-[calc(var(--safe-area-bottom)+16px)] space-y-4">
+              <div className="app-modal-sheet-scroll px-5 pb-[calc(var(--safe-area-bottom)+16px)] space-y-2.5">
                 {Object.values(getLikesByUser(selectedPost))
                   .sort((a, b) => b.tapCount - a.tapCount)
                   .map((entry, index) => (
                     <div
                       key={entry.userId}
-                      className="flex items-center space-x-4 p-3 bg-[#1a1a1a] rounded-2xl modal-fade-in"
+                      className="flex items-center gap-3 rounded-2xl border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.96),rgba(7,10,8,0.98))] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] modal-fade-in"
                       style={{ animationDelay: `${index * 50}ms` }}
                     >
                       <Avatar
                         src={entry.avatar}
                         alt={entry.name}
-                        size="xl"
+                        size={52}
                         userId={entry.userId}
                         forceGhostMode={
                           entry.userId
@@ -3550,7 +3974,7 @@ export function FeedScreen({
                               onNavigateToProfile(entry.userId);
                             }
                           }}
-                          className="text-white font-semibold text-base cursor-pointer hover:text-[#4ade80] transition-colors"
+                          className="cursor-pointer text-[14px] font-bold leading-tight text-white transition-colors hover:text-[#4ade80]"
                         >
                           {entry.name}
                         </p>
@@ -3561,7 +3985,7 @@ export function FeedScreen({
                               onNavigateToProfile(entry.userId);
                             }
                           }}
-                          className={`text-sm text-[#94a3b8] transition-colors ${
+                          className={`text-[12px] font-semibold leading-tight text-[#94a3b8] transition-colors ${
                             onNavigateToProfile && entry.userId
                               ? "cursor-pointer hover:text-[#4ade80]"
                               : "cursor-default"
@@ -3570,13 +3994,13 @@ export function FeedScreen({
                           {entry.username}
                         </button>
                       </div>
-                      <div className="flex items-center space-x-2 bg-[#2a2a2a] border border-[#3a3a3a] rounded-full px-4 py-2">
+                      <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/8 bg-[#101713] px-3 py-1.5">
                         <Heart
-                          size={14}
+                          size={12}
                           fill="#ef4444"
                           className="text-red-500"
                         />
-                        <span className="text-white text-sm font-semibold">
+                        <span className="text-[12px] font-bold text-white">
                           liked {entry.tapCount}{" "}
                           {entry.tapCount === 1 ? "time" : "times"}
                         </span>
@@ -3635,14 +4059,14 @@ export function FeedScreen({
             .share-fade-in { animation: fadeIn 0.2s ease-out forwards; }
           `}</style>
           <div
-            className="app-modal-sheet bg-[#111] w-full rounded-t-3xl flex flex-col"
+            className="app-modal-sheet w-full rounded-t-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,24,20,0.98),rgba(6,8,7,0.99))] shadow-[0_-24px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06)] flex flex-col"
             style={{
               height: "min(86dvh, 760px)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 pt-4 pb-3 border-b border-[#2a2a2a] shrink-0">
-              <div className="w-10 h-1 bg-[#3a3a3a] rounded-full mx-auto mb-4" />
+            <div className="px-6 pt-4 pb-3 border-b border-white/8 shrink-0">
+              <div className="w-10 h-1 bg-white/18 rounded-full mx-auto mb-4" />
               <div className="flex items-center justify-between">
                 <h3 className="text-white font-bold text-lg">Send to…</h3>
                 <button
@@ -3654,7 +4078,7 @@ export function FeedScreen({
               </div>
             </div>
             {selectedPost.media && (
-              <div className="px-6 py-4 shrink-0 border-b border-[#2a2a2a]">
+              <div className="px-6 py-4 shrink-0 border-b border-white/8">
                 <div className="flex items-center space-x-3">
                   <img
                     src={selectedPost.media.url}
@@ -3672,9 +4096,7 @@ export function FeedScreen({
                 </div>
               </div>
             )}
-            <div
-              className="app-modal-sheet-scroll px-4 py-3 pb-[calc(var(--safe-area-bottom)+12px)] space-y-2"
-            >
+            <div className="app-modal-sheet-scroll px-4 py-3 pb-[calc(var(--safe-area-bottom)+12px)] space-y-2">
               {loadingFriends ? (
                 <p className="text-[#64748b] text-center py-10 text-sm">
                   Loading friends...
@@ -3692,7 +4114,7 @@ export function FeedScreen({
                   return (
                     <div
                       key={recipientId || friend.id || index}
-                      className="flex items-center space-x-4 py-3 px-3 rounded-2xl hover:bg-[#1e1e1e] transition-colors bg-[#1a1a1a] share-fade-in"
+                      className="flex items-center space-x-4 rounded-2xl border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.96),rgba(7,10,8,0.98))] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4ade80]/24 hover:bg-[#101713] share-fade-in"
                       style={{ animationDelay: `${index * 50}ms` }}
                     >
                       <Avatar
@@ -3746,7 +4168,7 @@ export function FeedScreen({
                       <button
                         onClick={() => void handleSendToDM(friend)}
                         disabled={!recipientId || sent || sending}
-                        className={`min-w-[104px] justify-center px-5 py-2 rounded-full text-base font-semibold transition-all duration-200 flex items-center space-x-2 ${sent ? "bg-[#2a2a2a] text-[#64748b] cursor-default" : sending ? "bg-[#d9fbe5] text-[#18532c] cursor-wait" : "bg-[#4ade80] text-black hover:bg-[#22c55e] active:scale-95"} disabled:bg-[#2a2a2a] disabled:text-[#64748b] disabled:cursor-default`}
+                        className={`min-w-[104px] justify-center px-5 py-2 rounded-full text-base font-semibold transition-all duration-200 flex items-center space-x-2 ${sent ? "bg-[#101713] text-[#64748b] cursor-default" : sending ? "bg-[#d9fbe5] text-[#18532c] cursor-wait" : "bg-[#4ade80] text-black hover:bg-[#22c55e] active:scale-95"} disabled:bg-[#101713] disabled:text-[#64748b] disabled:cursor-default`}
                       >
                         {sent ? (
                           <span>Sent ✓</span>
@@ -3985,7 +4407,8 @@ export function FeedScreen({
                     <div
                       className="flex h-[42px] w-[42px] items-center justify-center rounded-xl"
                       style={{
-                        background: getStoryMusicPreset(storyDraftMusicId).color,
+                        background:
+                          getStoryMusicPreset(storyDraftMusicId).color,
                         color: "#07110a",
                       }}
                     >
@@ -4046,7 +4469,8 @@ export function FeedScreen({
                       : "Your story"}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-white/62">
-                  Fullscreen preview with gallery, effects, text, music, and draw.
+                  Fullscreen preview with gallery, effects, text, music, and
+                  draw.
                 </p>
               </div>
               {storyComposerStage === "audience" ? (
@@ -4092,7 +4516,8 @@ export function FeedScreen({
                       className="story-shutter app-pressable"
                       disabled={
                         isUploading ||
-                        (storyUploadMode === "dedication" && !dedicationRecipient)
+                        (storyUploadMode === "dedication" &&
+                          !dedicationRecipient)
                       }
                       aria-label="Select story media"
                     />
@@ -4171,7 +4596,8 @@ export function FeedScreen({
                         onClick={openStoryFilePicker}
                         disabled={
                           isUploading ||
-                          (storyUploadMode === "dedication" && !dedicationRecipient)
+                          (storyUploadMode === "dedication" &&
+                            !dedicationRecipient)
                         }
                         className="story-gallery-tile flex flex-col items-center justify-center gap-2 text-white disabled:opacity-45"
                       >
@@ -4190,9 +4616,18 @@ export function FeedScreen({
                           aria-label={`Select story media ${index + 1}`}
                         >
                           {storyDraftFiles[index]?.type.startsWith("video/") ? (
-                            <video src={url} className="h-full w-full object-cover" muted playsInline />
+                            <video
+                              src={url}
+                              className="h-full w-full object-cover"
+                              muted
+                              playsInline
+                            />
                           ) : (
-                            <img src={url} alt="" className="h-full w-full object-cover" />
+                            <img
+                              src={url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
                           )}
                         </button>
                       ))}
@@ -4361,7 +4796,10 @@ export function FeedScreen({
                   onClick={(event) => {
                     event.stopPropagation();
                     setStoryToolbarCollapsed(true);
-                    window.setTimeout(() => setStoryToolbarCollapsed(false), 1200);
+                    window.setTimeout(
+                      () => setStoryToolbarCollapsed(false),
+                      1200,
+                    );
                   }}
                   aria-label="Collapse tools"
                 >
@@ -4390,7 +4828,9 @@ export function FeedScreen({
                       setStoryPublishAudience("close-friends");
                     }}
                     className={`story-share-pill ${
-                      storyPublishAudience === "close-friends" ? "is-active" : ""
+                      storyPublishAudience === "close-friends"
+                        ? "is-active"
+                        : ""
                     }`}
                   >
                     Close Friends
@@ -4423,7 +4863,10 @@ export function FeedScreen({
           )}
 
           {isStoryTextEditorOpen && (
-            <div className="story-panel" onClick={(event) => event.stopPropagation()}>
+            <div
+              className="story-panel"
+              onClick={(event) => event.stopPropagation()}
+            >
               <div className="mb-3 flex items-center justify-between">
                 <button
                   type="button"
@@ -4529,7 +4972,11 @@ export function FeedScreen({
                   className="story-control-pill"
                   onClick={() =>
                     setStoryDraftTextAlign((align) =>
-                      align === "center" ? "left" : align === "left" ? "right" : "center",
+                      align === "center"
+                        ? "left"
+                        : align === "left"
+                          ? "right"
+                          : "center",
                     )
                   }
                 >
@@ -4562,7 +5009,9 @@ export function FeedScreen({
                     type="button"
                     onClick={() => setStoryDraftTextColor(color)}
                     className={`h-10 w-10 shrink-0 rounded-full border-2 ${
-                      storyDraftTextColor === color ? "border-white" : "border-white/20"
+                      storyDraftTextColor === color
+                        ? "border-white"
+                        : "border-white/20"
                     }`}
                     style={{ backgroundColor: color }}
                     aria-label={`Use ${color}`}
@@ -4576,7 +5025,10 @@ export function FeedScreen({
           )}
 
           {isStoryMusicModalOpen && (
-            <div className="story-panel" onClick={(event) => event.stopPropagation()}>
+            <div
+              className="story-panel"
+              onClick={(event) => event.stopPropagation()}
+            >
               <div className="mb-4 flex items-center gap-3">
                 <button
                   type="button"
@@ -4593,7 +5045,9 @@ export function FeedScreen({
                   <Search size={17} className="text-white/65" />
                   <input
                     value={storyMusicSearch}
-                    onChange={(event) => setStoryMusicSearch(event.target.value)}
+                    onChange={(event) =>
+                      setStoryMusicSearch(event.target.value)
+                    }
                     placeholder="Search music"
                     className="min-w-0 flex-1 bg-transparent text-sm font-bold text-white outline-none placeholder:text-white/50"
                   />
@@ -4601,7 +5055,11 @@ export function FeedScreen({
               </div>
               <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide">
                 {["Trending", "For You", "Recent"].map((tab) => (
-                  <button key={tab} type="button" className="story-control-pill">
+                  <button
+                    key={tab}
+                    type="button"
+                    className="story-control-pill"
+                  >
                     {tab}
                   </button>
                 ))}
@@ -4652,13 +5110,15 @@ export function FeedScreen({
                         </div>
                       </div>
                       <div className="mt-3 flex h-6 items-center gap-1">
-                        {[8, 14, 9, 18, 11, 20, 12, 16, 10, 15, 7].map((height, index) => (
-                          <span
-                            key={`${music.id}-wave-${index}`}
-                            className="w-1 rounded-full bg-white/55"
-                            style={{ height }}
-                          />
-                        ))}
+                        {[8, 14, 9, 18, 11, 20, 12, 16, 10, 15, 7].map(
+                          (height, index) => (
+                            <span
+                              key={`${music.id}-wave-${index}`}
+                              className="w-1 rounded-full bg-white/55"
+                              style={{ height }}
+                            />
+                          ),
+                        )}
                       </div>
                     </div>
                   </button>
@@ -4679,12 +5139,15 @@ export function FeedScreen({
                   min={5}
                   max={30}
                   value={storyMusicTrim}
-                  onChange={(event) => setStoryMusicTrim(Number(event.target.value))}
+                  onChange={(event) =>
+                    setStoryMusicTrim(Number(event.target.value))
+                  }
                   className="w-full accent-[#4ade80]"
                   aria-label="Music trim"
                 />
                 <p className="mt-2 text-[11px] font-semibold text-white/50">
-                  Tap a track to preview it. Close this sheet when you want to keep the selected one.
+                  Tap a track to preview it. Close this sheet when you want to
+                  keep the selected one.
                 </p>
               </div>
             </div>
@@ -4715,7 +5178,9 @@ export function FeedScreen({
                       type="button"
                       onClick={() => setStoryBrushColor(color)}
                       className={`h-10 w-10 shrink-0 rounded-full border-2 ${
-                        storyBrushColor === color ? "border-white" : "border-white/20"
+                        storyBrushColor === color
+                          ? "border-white"
+                          : "border-white/20"
                       }`}
                       style={{ backgroundColor: color }}
                       aria-label={`Use brush ${color}`}
@@ -4727,7 +5192,9 @@ export function FeedScreen({
                     min={2}
                     max={18}
                     value={storyBrushSize}
-                    onChange={(event) => setStoryBrushSize(Number(event.target.value))}
+                    onChange={(event) =>
+                      setStoryBrushSize(Number(event.target.value))
+                    }
                     className="min-w-28 flex-1 accent-[#4ade80]"
                     aria-label="Brush size"
                   />
@@ -4780,7 +5247,8 @@ export function FeedScreen({
                 <div className="rounded-[24px] border border-[#4ade80]/15 bg-[#08110b]/80 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-white text-sm font-medium">
-                      Uploading {storyDraftFiles.length > 1 ? "stories" : "story"}
+                      Uploading{" "}
+                      {storyDraftFiles.length > 1 ? "stories" : "story"}
                     </span>
                     <span className="text-[#4ade80] text-sm font-medium">
                       {uploadProgress}%
@@ -4853,8 +5321,8 @@ export function FeedScreen({
                         src={storyDraftPreviewUrl}
                         className="h-full w-full object-contain object-center"
                         style={{
-                          filter: getStoryFilterPreset(storyDraftFilter)
-                            .cssFilter,
+                          filter:
+                            getStoryFilterPreset(storyDraftFilter).cssFilter,
                         }}
                         muted
                         playsInline
@@ -4867,16 +5335,16 @@ export function FeedScreen({
                         alt="Story preview"
                         className="h-full w-full object-contain object-center"
                         style={{
-                          filter: getStoryFilterPreset(storyDraftFilter)
-                            .cssFilter,
+                          filter:
+                            getStoryFilterPreset(storyDraftFilter).cssFilter,
                         }}
                       />
                     )}
                     <div
                       className="pointer-events-none absolute inset-0"
                       style={{
-                        background: getStoryFilterPreset(storyDraftFilter)
-                          .overlay,
+                        background:
+                          getStoryFilterPreset(storyDraftFilter).overlay,
                       }}
                     />
                     {storyDraftText.trim() && (
@@ -4923,7 +5391,9 @@ export function FeedScreen({
                     <input
                       value={storyDraftText}
                       maxLength={120}
-                      onChange={(event) => setStoryDraftText(event.target.value)}
+                      onChange={(event) =>
+                        setStoryDraftText(event.target.value)
+                      }
                       placeholder="Add text"
                       className="w-full rounded-2xl border border-white/8 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none placeholder:text-[#64748b] focus:border-[#4ade80]/45"
                     />
@@ -5205,15 +5675,30 @@ export function FeedScreen({
       ══════════════════════════════════════════ */}
       {selectedCommunityChallenge && (
         <CommunityChallengePreviewScreen
-          challenge={selectedCommunityChallenge}
+          challenge={selectedHydratedCommunityChallenge || selectedCommunityChallenge}
           isJoined={joinedCommunityChallengeIds.has(
             selectedCommunityChallenge.id,
           )}
           onClose={() => setSelectedCommunityChallenge(null)}
           onJoin={() =>
-            handleJoinCommunityChallenge(selectedCommunityChallenge.id)
+            handleJoinCommunityChallenge(
+              selectedHydratedCommunityChallenge || selectedCommunityChallenge,
+            )
           }
+          onOpenHub={() => {
+            setSelectedCommunityChallenge(null);
+            setShowCommunityChallengeHub(true);
+          }}
         />
+      )}
+
+      {showCommunityChallengeHub && (
+        <div className="fixed inset-0 z-[10000] bg-[#030403]">
+          <ChallengeHubScreen
+            isActive
+            onBack={() => setShowCommunityChallengeHub(false)}
+          />
+        </div>
       )}
 
       {showStoryViewerModal && viewerStories.length > 0 && (

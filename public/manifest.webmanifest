@@ -8,7 +8,7 @@
   "display_override": ["standalone", "fullscreen"],
   "orientation": "portrait",
   "background_color": "#020604",
-  "theme_color": "#060806",
+  "theme_color": "#030403",
   "categories": ["social", "entertainment"],
   "icons": [
     {

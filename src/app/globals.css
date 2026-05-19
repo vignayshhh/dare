@@ -2,6 +2,8 @@
 @import "tailwindcss";
 
 :root {
+  --app-bg-base: #030403;
+  --app-bg-surface: #0a0f0a;
   --background: #0a0f0a;
   --foreground: #ffffff;
   --card-bg: #1a1a1a;
@@ -46,14 +48,15 @@
 }
 
 html {
-  background: var(--background);
+  background: var(--app-bg-base);
   min-height: 100%;
   min-height: 100dvh;
   color-scheme: dark;
+  overflow: hidden;
 }
 
 body {
-  background: var(--background);
+  background: var(--app-bg-base);
   color: var(--foreground);
   font-family:
     var(--font-geist-sans),
@@ -64,14 +67,15 @@ body {
     sans-serif;
   margin: 0;
   padding: 0;
-  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
   min-height: 100%;
   min-height: 100dvh;
   position: relative;
   isolation: isolate;
   scroll-behavior: smooth;
-  padding-left: var(--safe-area-left);
-  padding-right: var(--safe-area-right);
+  box-sizing: border-box;
   /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - touch-action might be blocking touch events */
   /* DISABLED: touch-action: manipulation; */
   touch-action: auto;
@@ -89,6 +93,15 @@ body::before {
   background: var(--status-bar-fill);
   pointer-events: none;
   z-index: 1;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: -2px;
+  background: var(--app-bg-base);
+  pointer-events: none;
+  z-index: -1;
 }
 
 * {
@@ -492,13 +505,23 @@ body::before {
 .app-viewport {
   min-height: 100vh;
   min-height: 100dvh;
-  background: var(--background);
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
+  background: var(--app-bg-base);
 }
 
 .app-fixed-viewport {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: 100vw;
   height: 100vh;
   height: 100dvh;
-  background: var(--background);
+  overflow: hidden;
+  background: var(--app-bg-base);
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .safe-area-top {
@@ -578,11 +601,11 @@ body::before {
 @keyframes appScreenEnter {
   from {
     opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.985);
+    transform: translate3d(0, 10px, 0);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -631,11 +654,14 @@ body::before {
 .app-screen-layer {
   position: absolute;
   inset: 0;
-  background: var(--background);
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
+  background: var(--app-bg-base);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translate3d(0, 8px, 0) scale(0.992);
+  transform: translate3d(0, 8px, 0);
   transition:
     opacity var(--motion-medium) var(--motion-ease-standard),
     transform var(--motion-medium) var(--motion-ease-standard),
@@ -649,7 +675,7 @@ body::before {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translate3d(0, 0, 0) scale(1);
+  transform: translate3d(0, 0, 0);
   transition:
     opacity var(--motion-medium) var(--motion-ease-out),
     transform var(--motion-medium) var(--motion-ease-out);
@@ -659,8 +685,11 @@ body::before {
 .app-overlay-screen {
   position: absolute;
   inset: 0;
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
   z-index: 60;
-  background: var(--background);
+  background: var(--app-bg-base);
   animation: appScreenEnter var(--motion-slow) var(--motion-ease-out) both;
   will-change: opacity, transform;
   contain: layout paint style;
@@ -670,6 +699,27 @@ body::before {
   animation: appSheetEnter var(--motion-slow) var(--motion-ease-out) both;
   transform: translateZ(0);
   will-change: transform;
+}
+
+.app-bottom-safe-floor {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9998;
+  height: calc(
+    var(--safe-area-bottom) + var(--bottom-nav-bottom-offset) + 34px
+  );
+  background:
+    linear-gradient(
+      180deg,
+      rgba(3, 4, 3, 0) 0%,
+      rgba(3, 4, 3, 0.88) 34%,
+      var(--app-bg-base) 100%
+    );
+  pointer-events: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .fixed.inset-0:not(.app-modal-backdrop):not(.app-story-shell) {
@@ -853,7 +903,7 @@ body::before {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  background: #0b0f0c;
+  background: #030403;
   z-index: 9999;
   overflow: hidden;
 }

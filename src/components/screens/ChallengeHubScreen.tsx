@@ -1,10 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  BookOpen,
+  Camera,
   ChevronRight,
+  Dumbbell,
+  Flame,
+  Leaf,
+  ShieldCheck,
+  Sunrise,
 } from "lucide-react";
+import { useAuthStore } from "../../stores/useAuthStore-v2";
+import {
+  communityChallengeService,
+  type CommunityChallengeJoin,
+  type CommunityChallengeSummary,
+} from "../../middleware/services/community-challenge.service";
 import { CommunityChallengePreviewScreen } from "./CommunityChallengePreviewScreen";
 import {
   COMMUNITY_CHALLENGES,
@@ -18,134 +31,103 @@ import {
 
 type HubTab = "active" | "completed" | "eliminated";
 
-const JOINED_CHALLENGES: JoinedChallengeRun[] = [
-  {
-    id: "run-no-instagram",
-    title: "No Instagram",
-    day: 2,
-    totalDays: 7,
-    survivors: 73,
-    accent: "#4ade80",
-    icon: "instagram",
-    status: "upload_due",
-    countdown: "04:11:22",
-  },
-  {
-    id: "run-5am",
-    title: "5AM Wake Up",
-    day: 4,
-    totalDays: 7,
-    survivors: 68,
-    accent: "#facc15",
-    icon: "sun",
-    status: "submitted",
-  },
-  {
-    id: "run-cold-shower",
-    title: "Cold Shower",
-    day: 1,
-    totalDays: 7,
-    survivors: 91,
-    accent: "#38bdf8",
-    icon: "droplets",
-    status: "upload_today",
-  },
-  {
-    id: "run-study",
-    title: "Study 3 Hours",
-    day: 3,
-    totalDays: 7,
-    survivors: 112,
-    accent: "#4ade80",
-    icon: "book",
-    status: "upload_due",
-    countdown: "02:45:10",
-  },
-];
+const FEED_SCREEN_SURFACE_BACKGROUND =
+  "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)";
 
-const COMPLETED_CHALLENGES: JoinedChallengeRun[] = [
-  {
-    id: "run-no-sugar-done",
-    title: "No Sugar",
-    day: 30,
-    totalDays: 30,
-    survivors: 204,
-    accent: "#4ade80",
-    icon: "shield",
-    status: "submitted",
-  },
-  {
-    id: "run-walk-done",
-    title: "Walk 10K",
-    day: 7,
-    totalDays: 7,
-    survivors: 131,
-    accent: "#84cc16",
-    icon: "shield",
-    status: "submitted",
-  },
-];
+// Map CommunityChallenge icons to ChallengeRunIcon types
+const mapIconToChallengeRun = (
+  icon: "flame" | "shield" | "trophy",
+): ChallengeRunIcon => {
+  switch (icon) {
+    case "flame":
+      return "sun";
+    case "shield":
+      return "droplets";
+    case "trophy":
+      return "instagram";
+    default:
+      return "sun";
+  }
+};
 
-const ELIMINATED_CHALLENGES: JoinedChallengeRun[] = [
-  {
-    id: "run-sleep-eliminated",
-    title: "Sleep Before 11PM",
-    day: 3,
-    totalDays: 7,
-    survivors: 89,
-    accent: "#38bdf8",
-    icon: "moon",
-    status: "upload_due",
-    countdown: "Missed",
-  },
-];
+// Filter official Dare challenges that user hasn't joined yet
+const getRecommendedChallenges = (
+  joinedIds: Set<string>,
+  challenges: CommunityChallenge[],
+) => {
+  return challenges.filter(
+    (challenge) =>
+      challenge.creatorUsername === "dare" &&
+      challenge.sponsoredByDare &&
+      !joinedIds.has(challenge.id),
+  ).map((challenge) => ({
+    challenge,
+    label: challenge.titleTop,
+    duration: challenge.durationLabel,
+    icon: mapIconToChallengeRun(challenge.icon),
+    joined:
+      challenge.joinedCount > 0
+        ? `${challenge.joinedCount} joined`
+        : "No one joined yet",
+    accent: challenge.accent,
+  }));
+};
 
-const RECOMMENDED_CHALLENGES: Array<{
-  challenge: CommunityChallenge;
-  label: string;
-  duration: string;
-  icon: ChallengeRunIcon;
-  joined: string;
-  accent: string;
-}> = [
-  {
-    challenge: COMMUNITY_CHALLENGES[1],
-    label: "Speak Truth",
-    duration: "24 hours",
-    icon: "shield",
-    joined: "1.1K joined",
-    accent: "#38bdf8",
-  },
-  {
-    challenge: COMMUNITY_CHALLENGES[2],
-    label: "No Sugar",
-    duration: "30 days",
-    icon: "shield",
-    joined: "2.4K joined",
-    accent: "#4ade80",
-  },
-  {
-    challenge: COMMUNITY_CHALLENGES[0],
-    label: "Sleep Before",
-    duration: "11PM",
-    icon: "moon",
-    joined: "890 joined",
-    accent: "#38bdf8",
-  },
-  {
-    challenge: COMMUNITY_CHALLENGES[2],
-    label: "Study Deep",
-    duration: "7 days",
-    icon: "book",
-    joined: "1.3K joined",
-    accent: "#facc15",
-  },
-];
+function formatHubCountdown(proofDueAtMs: number | null) {
+  if (!proofDueAtMs) return "24:00:00";
+  const totalSeconds = Math.max(0, Math.floor((proofDueAtMs - Date.now()) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+}
 
-function getRunsForTab(tab: HubTab) {
-  if (tab === "completed") return COMPLETED_CHALLENGES;
-  if (tab === "eliminated") return ELIMINATED_CHALLENGES;
-  return JOINED_CHALLENGES;
+function getRunStatus(join: CommunityChallengeJoin): JoinedChallengeRun["status"] {
+  if (join.status === "submitted" || join.status === "completed") {
+    return "submitted";
+  }
+  if (join.proofDueAtMs && join.proofDueAtMs - Date.now() > 6 * 60 * 60 * 1000) {
+    return "upload_today";
+  }
+  return "upload_due";
+}
+
+function toJoinedRun(
+  join: CommunityChallengeJoin,
+  challenge: CommunityChallenge,
+  summary?: CommunityChallengeSummary,
+): JoinedChallengeRun {
+  const derivedLifecycleStatus =
+    join.status === "active" &&
+    join.proofDueAtMs !== null &&
+    join.proofDueAtMs <= Date.now()
+      ? "eliminated"
+      : join.status === "waiting"
+        ? "active"
+        : join.status;
+  return {
+    id: challenge.id,
+    title: `${challenge.titleTop} ${challenge.titleAccent}`.trim(),
+    day: join.currentDay,
+    totalDays: join.totalDays,
+    survivors: summary?.activeCount ?? challenge.survivors,
+    accent: challenge.accent,
+    icon: mapIconToChallengeRun(challenge.icon),
+    status: getRunStatus(join),
+    countdown:
+      derivedLifecycleStatus === "eliminated"
+        ? "Missed"
+        : derivedLifecycleStatus === "completed"
+          ? "Complete"
+          : formatHubCountdown(join.proofDueAtMs),
+    lifecycleStatus: derivedLifecycleStatus,
+    proofDueAtMs: join.proofDueAtMs,
+    eliminatedAtMs: join.eliminatedAtMs,
+    completedAtMs: join.completedAtMs,
+    eliminationReason: join.eliminationReason,
+  };
 }
 
 function HubStyles() {
@@ -183,16 +165,18 @@ function HubStyles() {
 }
 
 function ChallengeGlyph({
-  icon,
+  challenge,
   accent,
   compact = false,
 }: {
-  icon: ChallengeRunIcon;
+  challenge: Pick<JoinedChallengeRun, "id" | "title" | "icon">;
   accent: string;
   compact?: boolean;
 }) {
-  const size = compact ? "h-12 w-12 rounded-[18px]" : "h-14 w-14 rounded-[22px]";
-  const centerClass = compact ? "h-5 w-5" : "h-6 w-6";
+  const size = compact
+    ? "h-12 w-12 rounded-[18px]"
+    : "h-14 w-14 rounded-[22px]";
+  const iconSize = compact ? 21 : 24;
 
   return (
     <div
@@ -206,66 +190,61 @@ function ChallengeGlyph({
         className="absolute inset-2 rounded-[inherit] border border-white/8"
         style={{ boxShadow: `inset 0 0 20px ${accent}12` }}
       />
-      {icon === "sun" ? (
-        <span
-          className={`challenge-hub-glyph-core ${centerClass} rounded-full`}
-          style={{
-            background: accent,
-            boxShadow: `0 0 20px ${accent}80`,
-          }}
-        />
-      ) : icon === "droplets" ? (
-        <span
-          className={`challenge-hub-glyph-core ${centerClass} rotate-45 rounded-br-full rounded-tl-full rounded-tr-full`}
-          style={{
-            background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.7))`,
-            boxShadow: `0 0 20px ${accent}68`,
-          }}
-        />
-      ) : icon === "book" ? (
-        <span className={`challenge-hub-glyph-core ${centerClass} relative`}>
-          <span
-            className="absolute inset-y-0 left-0 w-[46%] rounded-l-md"
-            style={{ background: accent }}
-          />
-          <span
-            className="absolute inset-y-0 right-0 w-[46%] rounded-r-md"
-            style={{ background: `${accent}bb` }}
-          />
-        </span>
-      ) : icon === "moon" ? (
-        <span
-          className={`challenge-hub-glyph-core ${centerClass} rounded-full`}
-          style={{
-            background: accent,
-            boxShadow: `inset -7px 0 0 rgba(3,4,3,0.95), 0 0 20px ${accent}70`,
-          }}
-        />
-      ) : icon === "instagram" ? (
-        <span
-          className={`challenge-hub-glyph-core ${centerClass} relative rounded-[7px] border-2`}
-          style={{
-            borderColor: accent,
-            boxShadow: `0 0 20px ${accent}62`,
-          }}
-        >
-          <span
-            className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-            style={{ background: accent }}
-          />
-        </span>
-      ) : (
-        <span
-          className={`challenge-hub-glyph-core ${centerClass} rounded-[9px]`}
-          style={{
-            background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.72))`,
-            clipPath: "polygon(50% 0%, 90% 18%, 82% 82%, 50% 100%, 18% 82%, 10% 18%)",
-            boxShadow: `0 0 20px ${accent}70`,
-          }}
-        />
-      )}
+      <div
+        className="challenge-hub-glyph-core relative z-10 flex items-center justify-center rounded-[16px]"
+        style={{
+          width: compact ? 34 : 38,
+          height: compact ? 34 : 38,
+          color: accent,
+          background: `linear-gradient(180deg, ${accent}18, rgba(255,255,255,0.035))`,
+          boxShadow: `0 0 24px ${accent}24, inset 0 1px 0 rgba(255,255,255,0.08)`,
+        }}
+      >
+        {renderJoinedChallengeIcon(challenge, iconSize)}
+      </div>
     </div>
   );
+}
+
+function renderJoinedChallengeIcon(
+  challenge: Pick<JoinedChallengeRun, "id" | "title" | "icon">,
+  size: number,
+) {
+  const key = `${challenge.id} ${challenge.title}`.toLowerCase();
+  const iconProps = { size, strokeWidth: 2.35 };
+
+  if (key.includes("read") || key.includes("page") || key.includes("book")) {
+    return <BookOpen {...iconProps} />;
+  }
+  if (
+    key.includes("push") ||
+    key.includes("workout") ||
+    key.includes("exercise")
+  ) {
+    return <Dumbbell {...iconProps} />;
+  }
+  if (key.includes("wake") || key.includes("morning") || key.includes("8 am")) {
+    return <Sunrise {...iconProps} />;
+  }
+  if (key.includes("nature") || key.includes("plant") || key.includes("tree")) {
+    return <Leaf {...iconProps} />;
+  }
+  if (
+    key.includes("photo") ||
+    key.includes("unfiltered") ||
+    key.includes("camera")
+  ) {
+    return <Camera {...iconProps} />;
+  }
+
+  if (challenge.icon === "shield") return <ShieldCheck {...iconProps} />;
+  if (challenge.icon === "instagram") return <Camera {...iconProps} />;
+  if (challenge.icon === "sun") return <Sunrise {...iconProps} />;
+  if (challenge.icon === "book") return <BookOpen {...iconProps} />;
+  if (challenge.icon === "droplets") return <Leaf {...iconProps} />;
+  if (challenge.icon === "moon") return <Sunrise {...iconProps} />;
+
+  return <Flame {...iconProps} />;
 }
 
 function ChallengeRunCard({
@@ -276,62 +255,64 @@ function ChallengeRunCard({
   onContinue: () => void;
 }) {
   const isSubmitted = challenge.status === "submitted";
-  const isUploadToday = challenge.status === "upload_today";
+  const isEliminated = challenge.lifecycleStatus === "eliminated";
   const progress = Math.min(100, (challenge.day / challenge.totalDays) * 100);
 
   return (
-    <div className="challenge-hub-panel relative overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.97),rgba(6,9,8,0.99))] p-4 shadow-[0_22px_62px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.05)]">
+    <div
+      className={`challenge-hub-panel relative overflow-hidden rounded-[26px] border p-3.5 shadow-[0_20px_54px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)] ${
+        isEliminated ? "border-red-300/14" : "border-white/8"
+      }`}
+      style={{ background: FEED_SCREEN_SURFACE_BACKGROUND }}
+    >
       <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.72),rgba(14,165,233,0.38),rgba(74,222,128,0))]" />
       <div
         className="pointer-events-none absolute -right-12 -top-16 h-36 w-36 rounded-full blur-3xl"
         style={{ background: `${challenge.accent}14` }}
       />
       <div className="relative z-10 flex items-start gap-3">
-        <ChallengeGlyph icon={challenge.icon} accent={challenge.accent} />
+        <ChallengeGlyph challenge={challenge} accent={challenge.accent} />
 
         <div className="min-w-0 flex-1">
-          <div className="mb-2 flex items-start justify-between gap-3">
+          <div className="mb-2 flex items-start justify-between gap-2.5">
             <div className="min-w-0">
-              <div className="truncate text-[18px] font-black uppercase leading-tight text-white">
+              <div className="truncate text-[17px] font-black uppercase leading-tight text-white">
                 {challenge.title}
               </div>
-              <div className="mt-1 text-[12px] font-black uppercase tracking-[0.12em] text-[#6ee7b7]">
+              <div className="mt-1 text-[11px] font-black uppercase tracking-[0.12em] text-[#6ee7b7]">
                 Day {challenge.day} of {challenge.totalDays}
               </div>
             </div>
             <button
               type="button"
               onClick={onContinue}
-              className="app-pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 text-[#bbf7d0] shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
+              className="app-pressable flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 text-[#bbf7d0] shadow-[0_10px_22px_rgba(0,0,0,0.22)]"
               aria-label={`Open ${challenge.title}`}
             >
-              <ChevronRight size={21} />
+              <ChevronRight size={20} />
             </button>
           </div>
 
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="mb-2.5 flex flex-wrap gap-1.5">
             <span
-              className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] ${
-                isSubmitted
+              className={`rounded-full border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] ${
+                isEliminated
+                  ? "border-red-300/22 bg-red-500/10 text-red-200"
+                  : isSubmitted
                   ? "border-[#4ade80]/22 bg-[#4ade80]/10 text-[#86efac]"
-                  : isUploadToday
-                    ? "border-[#facc15]/22 bg-[#facc15]/10 text-[#fde68a]"
-                    : "border-red-400/22 bg-red-500/10 text-red-200"
+                  : "border-red-400/22 bg-red-500/10 text-red-200"
               }`}
             >
-              {isSubmitted
+              {isEliminated
+                ? "Eliminated"
+                : isSubmitted
                 ? "Proof submitted"
-                : isUploadToday
-                  ? "Upload today"
-                  : "Upload due"}
+                : challenge.countdown || "30 mins"}
             </span>
-            {!isSubmitted && challenge.countdown ? (
-              <span className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#cbd5e1]">
-                {challenge.countdown}
-              </span>
-            ) : null}
-            <span className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#94a3b8]">
-              {challenge.survivors} surviving
+            <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#94a3b8]">
+              {isEliminated
+                ? "Moved to eliminated"
+                : `${Math.max(0, challenge.totalDays - challenge.day + 1)} days left`}
             </span>
           </div>
 
@@ -354,34 +335,38 @@ function RecommendedChallengeCard({
   item,
   onOpen,
 }: {
-  item: (typeof RECOMMENDED_CHALLENGES)[number];
+  item: ReturnType<typeof getRecommendedChallenges>[0];
   onOpen: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="challenge-hub-panel app-pressable relative w-[176px] shrink-0 overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,23,19,0.96),rgba(7,10,8,0.99))] p-3 text-left shadow-[0_18px_48px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.04)]"
+      className="challenge-hub-panel app-pressable relative w-[140px] shrink-0 overflow-hidden rounded-[20px] border border-white/8 p-2 text-left shadow-[0_12px_30px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.04)]"
+      style={{ background: FEED_SCREEN_SURFACE_BACKGROUND }}
     >
       <div
-        className="mb-3 h-24 overflow-hidden rounded-[22px] border border-white/8"
-        style={{ background: item.challenge.banner }}
+        className="mb-2 h-16 overflow-hidden rounded-[16px] border border-white/8"
+        style={{
+          backgroundImage: `url(${item.challenge.imageUrl})`,
+          backgroundSize: "cover",
+          backgroundPosition: item.challenge.imagePosition || "center",
+        }}
       >
         <div className="h-full w-full bg-[linear-gradient(180deg,rgba(0,0,0,0),rgba(3,4,3,0.58))]" />
       </div>
       <div className="flex items-start gap-2">
-        <ChallengeGlyph icon={item.icon} accent={item.accent} compact />
         <div className="min-w-0">
-          <div className="line-clamp-2 text-[14px] font-black uppercase leading-tight text-white">
+          <div className="line-clamp-2 text-[12.5px] font-black uppercase leading-tight text-white">
             {item.label}
           </div>
-          <div className="mt-1 text-xs font-bold uppercase text-[#cbd5e1]">
+          <div className="mt-1 text-[10px] font-bold uppercase text-[#94a3b8]">
             {item.duration}
           </div>
         </div>
       </div>
-      <div className="mt-3 rounded-full border border-[#4ade80]/22 bg-[#4ade80]/10 px-3 py-2 text-center text-[11px] font-black uppercase tracking-[0.08em] text-[#bbf7d0]">
-        View dare
+      <div className="mt-2 rounded-full border border-[#4ade80]/18 bg-[#4ade80]/8 px-2 py-1.5 text-center text-[9px] font-black uppercase tracking-[0.08em] text-[#bbf7d0]">
+        Preview
       </div>
     </button>
   );
@@ -394,23 +379,93 @@ export function ChallengeHubScreen({
   isActive?: boolean;
   onBack?: () => void;
 }) {
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<HubTab>("active");
   const [selectedRoomChallenge, setSelectedRoomChallenge] =
     useState<JoinedChallengeRun | null>(null);
   const [selectedRecommendedChallenge, setSelectedRecommendedChallenge] =
     useState<CommunityChallenge | null>(null);
-  const [joinedChallengeIds, setJoinedChallengeIds] = useState<Set<string>>(
-    () => new Set(),
+  const [communityChallengeSummaries, setCommunityChallengeSummaries] =
+    useState<Record<string, CommunityChallengeSummary>>({});
+  const [joinedChallenges, setJoinedChallenges] = useState<
+    CommunityChallengeJoin[]
+  >([]);
+  const [registeredChallengeIds, setRegisteredChallengeIds] = useState<
+    Set<string>
+  >(() => new Set());
+
+  useEffect(() => {
+    return communityChallengeService.subscribeToSummaries(
+      COMMUNITY_CHALLENGES.map((challenge) => challenge.id),
+      setCommunityChallengeSummaries,
+    );
+  }, []);
+
+  useEffect(() => {
+    return communityChallengeService.subscribeToJoinedChallenges(
+      user?.id,
+      setJoinedChallenges,
+    );
+  }, [user?.id]);
+
+  useEffect(() => {
+    return communityChallengeService.subscribeToJoinedChallengeIds(
+      user?.id,
+      setRegisteredChallengeIds,
+    );
+  }, [user?.id]);
+
+  const hydratedCommunityChallenges = useMemo(
+    () =>
+      communityChallengeService.hydrateChallenges(
+        COMMUNITY_CHALLENGES,
+        communityChallengeSummaries,
+      ),
+    [communityChallengeSummaries],
   );
 
-  const runs = useMemo(() => getRunsForTab(activeTab), [activeTab]);
+  const runs = useMemo(() => {
+    const challengeById = new Map(
+      hydratedCommunityChallenges.map((challenge) => [challenge.id, challenge]),
+    );
+    return joinedChallenges
+      .filter((join) => join.officialDare)
+      .map((join) => {
+        const challenge = challengeById.get(join.challengeId);
+        if (!challenge) return null;
+        return toJoinedRun(
+          join,
+          challenge,
+          communityChallengeSummaries[join.challengeId],
+        );
+      })
+      .filter((run): run is JoinedChallengeRun => Boolean(run))
+      .filter((run) => {
+        if (activeTab === "completed") {
+          return run.lifecycleStatus === "completed";
+        }
+        if (activeTab === "eliminated") {
+          return run.lifecycleStatus === "eliminated";
+        }
+        return (
+          run.lifecycleStatus !== "completed" &&
+          run.lifecycleStatus !== "eliminated"
+        );
+      });
+  }, [
+    activeTab,
+    communityChallengeSummaries,
+    hydratedCommunityChallenges,
+    joinedChallenges,
+  ]);
 
-  const handleJoinRecommended = (challengeId: string) => {
-    setJoinedChallengeIds((current) => {
-      if (current.has(challengeId)) return current;
-      const next = new Set(current);
-      next.add(challengeId);
-      return next;
+  const handleJoinRecommended = async (challenge: CommunityChallenge) => {
+    if (!user?.id) return;
+    await communityChallengeService.joinChallenge(challenge, {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName || user.username,
+      avatar: user.avatar || "",
     });
   };
 
@@ -427,33 +482,33 @@ export function ChallengeHubScreen({
       <div
         className="min-h-0 flex-1 overflow-y-auto px-4"
         style={{
-          paddingTop: "calc(var(--safe-area-top) + 28px)",
-          paddingBottom: "calc(var(--bottom-nav-total-height) + 28px)",
-          scrollPaddingTop: "calc(var(--safe-area-top) + 28px)",
+          paddingTop: "calc(var(--safe-area-top) + 20px)",
+          paddingBottom: "calc(var(--bottom-nav-total-height) + 22px)",
+          scrollPaddingTop: "calc(var(--safe-area-top) + 20px)",
           WebkitOverflowScrolling: "touch",
           overscrollBehaviorY: "contain",
         }}
       >
-        <div className="mx-auto max-w-[460px]">
+        <div className="mx-auto flex min-h-[calc(100dvh-var(--safe-area-top)-var(--bottom-nav-total-height)-42px)] max-w-[448px] flex-col">
           {onBack ? (
-            <div className="relative mb-5 flex items-center justify-center">
+            <div className="relative mb-4 flex min-h-[46px] items-center justify-center">
               <button
                 type="button"
                 onClick={onBack}
                 aria-label="Back to community dares"
-                className="app-pressable absolute left-0 flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_18px_44px_rgba(0,0,0,0.32)]"
+                className="app-pressable absolute left-0 flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_14px_34px_rgba(0,0,0,0.3)]"
               >
-                <ArrowLeft size={21} />
+                <ArrowLeft size={20} />
               </button>
               <div className="min-w-0 px-14 text-center">
-                <h1 className="truncate text-[25px] font-black leading-none tracking-tight text-white">
+                <h1 className="truncate text-[23px] font-black leading-none tracking-tight text-white">
                   Community Dare Hub
                 </h1>
               </div>
             </div>
           ) : null}
 
-          <div className="mb-3 grid grid-cols-3 rounded-[22px] border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.9),rgba(10,14,10,0.96))] p-1 shadow-[0_16px_44px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.045)]">
+          <div className="mb-4 grid grid-cols-3 rounded-[20px] border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.9),rgba(10,14,10,0.96))] p-1 shadow-[0_14px_38px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.045)]">
             {[
               ["active", "Active"],
               ["completed", "Completed"],
@@ -463,7 +518,7 @@ export function ChallengeHubScreen({
                 key={tab}
                 type="button"
                 onClick={() => setActiveTab(tab as HubTab)}
-                className={`rounded-[18px] px-2 py-2.5 text-[11px] font-black transition-all ${
+                className={`rounded-[16px] px-2 py-2.5 text-[11px] font-black transition-all ${
                   activeTab === tab
                     ? "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_10px_24px_rgba(74,222,128,0.22)]"
                     : "text-[#94a3b8] hover:bg-white/[0.04] hover:text-white"
@@ -474,64 +529,81 @@ export function ChallengeHubScreen({
             ))}
           </div>
 
-          <div className="mb-3 mt-5 flex items-center justify-between">
+          <div className="mb-3 flex items-end justify-between">
             <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#86efac]">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#86efac]">
                 Your dares
               </p>
-              <h2 className="mt-1 text-[22px] font-black leading-none text-white">
+              <h2 className="mt-1 text-[21px] font-black leading-none text-white">
                 Current community runs
               </h2>
             </div>
           </div>
 
-          <div className="flex flex-col gap-2.5">
-            {runs.map((challenge) => (
-              <ChallengeRunCard
-                key={challenge.id}
-                challenge={challenge}
-                onContinue={() => setSelectedRoomChallenge(challenge)}
-              />
-            ))}
+          <div className="flex flex-col gap-3">
+            {runs.length > 0 ? (
+              runs.map((challenge) => (
+                <ChallengeRunCard
+                  key={challenge.id}
+                  challenge={challenge}
+                  onContinue={() => setSelectedRoomChallenge(challenge)}
+                />
+              ))
+            ) : (
+              <div className="challenge-hub-panel rounded-[26px] border border-white/8 bg-white/[0.035] px-5 py-7 text-center shadow-[0_16px_42px_rgba(0,0,0,0.26)]">
+                <div className="text-[13px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
+                  {activeTab === "active"
+                    ? "No active community dares"
+                    : activeTab === "completed"
+                      ? "No completed dares yet"
+                      : "No eliminated dares"}
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="challenge-hub-panel challenge-hub-shine relative mb-4 mt-7 overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.92),rgba(10,14,10,0.96))] p-4 shadow-[0_22px_62px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="relative z-10 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#86efac]">
-                  Recommended for you
-                </p>
-                <h2 className="mt-1 text-[22px] font-black leading-tight text-white">
-                  Premium community dares to start next
-                </h2>
-              </div>
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-[#4ade80]/20 bg-[#4ade80]/10 text-[20px] font-black text-[#86efac]">
-                D
+          <div className="mt-auto pt-10">
+            <div className="challenge-hub-panel relative mb-3 overflow-hidden rounded-[24px] border border-white/8 bg-white/[0.04] px-4 py-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="relative z-10 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10.5px] font-black uppercase tracking-[0.2em] text-[#86efac]">
+                    Recommended for you
+                  </p>
+                  <h2 className="mt-1 text-[16px] font-black leading-tight text-white/92">
+                    Start another community run
+                  </h2>
+                </div>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[15px] border border-[#4ade80]/18 bg-[#4ade80]/9 text-[14px] font-black text-[#86efac]">
+                  D
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-[12px] font-black uppercase tracking-[0.18em] text-[#94a3b8]">
-              Pick a run
-            </p>
-            <button
-              type="button"
-              className="flex items-center gap-1 text-sm font-black text-[#94a3b8]"
-            >
-              See all
-              <ChevronRight size={17} />
-            </button>
-          </div>
+            <div className="mb-2 flex items-center justify-between px-0.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#64748b]">
+                Pick a run
+              </p>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[11px] font-black text-[#64748b]"
+              >
+                See all
+                <ChevronRight size={14} />
+              </button>
+            </div>
 
-          <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-hide">
-            {RECOMMENDED_CHALLENGES.map((item) => (
-              <RecommendedChallengeCard
-                key={`${item.label}-${item.duration}`}
-                item={item}
-                onOpen={() => setSelectedRecommendedChallenge(item.challenge)}
-              />
-            ))}
+            <div className="-mx-4 flex gap-2.5 overflow-x-auto px-4 pb-2 scrollbar-hide">
+              {getRecommendedChallenges(
+                registeredChallengeIds,
+                hydratedCommunityChallenges,
+              ).map((item) => (
+                <RecommendedChallengeCard
+                  key={`${item.label}-${item.duration}`}
+                  item={item}
+                  onOpen={() => setSelectedRecommendedChallenge(item.challenge)}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -546,9 +618,9 @@ export function ChallengeHubScreen({
       {selectedRecommendedChallenge && (
         <CommunityChallengePreviewScreen
           challenge={selectedRecommendedChallenge}
-          isJoined={joinedChallengeIds.has(selectedRecommendedChallenge.id)}
+          isJoined={registeredChallengeIds.has(selectedRecommendedChallenge.id)}
           onClose={() => setSelectedRecommendedChallenge(null)}
-          onJoin={() => handleJoinRecommended(selectedRecommendedChallenge.id)}
+          onJoin={() => handleJoinRecommended(selectedRecommendedChallenge)}
           onOpenHub={() => setSelectedRecommendedChallenge(null)}
         />
       )}

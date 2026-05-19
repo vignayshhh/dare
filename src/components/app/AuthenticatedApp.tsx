@@ -485,7 +485,7 @@ export default function AuthenticatedApp() {
     const onlineHeartbeat = window.setInterval(() => {
       if (!started || document.visibilityState === "hidden") return;
       messagingStore.setOnlineStatus(true);
-    }, 30000);
+    }, 15000);
 
     return () => {
       cancelled = true;
@@ -1211,13 +1211,34 @@ export default function AuthenticatedApp() {
             onNavigateToAlerts={() => setCurrentScreen("alerts")}
             onNavigateToSearch={handleNavigateToSearch}
             onNavigateToDares={() => handleTabScreenChange("dares")}
-            onNavigateToSocialDares={() => {
-              setMainFocusRequest(null);
+            onNavigateToSocialDares={(dare?: DarePost) => {
+              setMainFocusRequest(
+                dare
+                  ? {
+                      view: "dares",
+                      post: dare,
+                      nonce: Date.now(),
+                    }
+                  : null,
+              );
               setMainDareAudience("friends");
               setMainScreenResetKey((key) => key + 1);
               setCurrentScreen("main");
             }}
-            onNavigateToTruths={() => handleTabScreenChange("truth")}
+            onNavigateToTruths={(truth?: TruthPost) => {
+              if (!truth) {
+                handleTabScreenChange("truth");
+                return;
+              }
+
+              setMainFocusRequest({
+                view: "truth",
+                post: truth,
+                nonce: Date.now(),
+              });
+              setMainScreenResetKey((key) => key + 1);
+              setCurrentScreen("truth");
+            }}
             onNavigateToCommunityDares={() => {
               setMainFocusRequest(null);
               setMainDareAudience("community");

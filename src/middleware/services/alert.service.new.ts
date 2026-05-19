@@ -95,6 +95,11 @@ export class AlertService {
   // Create a new alert
   async createAlert(request: CreateAlertRequest): Promise<AlertResponse> {
     try {
+      if (request.type === "STORY_REPLY") {
+        console.log("Skipping STORY_REPLY alert; story replies live in DMs.");
+        return { success: true };
+      }
+
       console.log(
         "🔔 Creating alert for user:",
         request.userId,
@@ -122,6 +127,17 @@ export class AlertService {
       const actorUsername =
         request.actorUsername || actorProfile?.username || "user";
       const actorAvatar = request.actorAvatar || actorProfile?.avatarUrl || "";
+      const aggregatedAlert = await this.tryUpdateAggregatedAlert(
+        request,
+        actorName,
+        actorUsername,
+        actorAvatar,
+      );
+
+      if (aggregatedAlert) {
+        console.log("✅ Aggregated existing alert:", aggregatedAlert.id);
+        return { success: true, alert: aggregatedAlert };
+      }
 
       const alertData = {
         id: createAlertId(),
@@ -154,6 +170,219 @@ export class AlertService {
         error instanceof Error ? error.message : "Unknown error";
       return { success: false, error: errorMessage };
     }
+  }
+
+  private getAggregationTarget(input: {
+    type: AlertType;
+    entityId: string;
+    metadata?: Record<string, any>;
+  }): string | null {
+    switch (input.type) {
+      case "POST_LIKED":
+        return `post-like:${input.metadata?.postId || input.entityId}`;
+      case "STORY_REACTION":
+        return `story-reaction:${input.entityId}`;
+      case "COMMENT_RECEIVED":
+        return `post-comment:${input.metadata?.postId || input.entityId}`;
+      case "COMMENT_REPLY":
+        return `comment-reply:${
+          input.metadata?.parentCommentId ||
+          input.metadata?.commentId ||
+          input.metadata?.postId ||
+          input.entityId
+        }`;
+      case "STORY_REPLY":
+        return `story-reply:${input.entityId}`;
+      default:
+        return null;
+    }
+  }
+
+  private formatAggregatedMessage(
+    type: AlertType,
+    actors: Array<{ username?: string; name?: string }>,
+  ) {
+    const displayActors = [...actors].reverse();
+    const names = displayActors.slice(0, 3).map((actor) => {
+      const username = actor.username || actor.name || "someone";
+      return username.startsWith("@") ? username : `@${username}`;
+    });
+    const actorLine =
+      displayActors.length <= 1
+        ? names[0] || "@someone"
+        : displayActors.length === 2
+          ? `${names[0]} and ${names[1]}`
+          : displayActors.length === 3
+            ? `${names[0]}, ${names[1]} and ${names[2]}`
+            : `${names[0]}, ${names[1]} and ${displayActors.length - 2} others`;
+    const reactionTypes = new Set(
+      displayActors.flatMap((actor: any) => {
+        const types = Array.isArray(actor.reactionTypes)
+          ? actor.reactionTypes
+          : [];
+        return [
+          ...types,
+          ...(actor.reactionType ? [actor.reactionType] : []),
+        ].map((type) => (type === "hate" ? "hate" : "like"));
+      }),
+    );
+    const action =
+      type === "POST_LIKED"
+        ? "liked your post"
+        : type === "STORY_REACTION"
+          ? reactionTypes.has("like") && reactionTypes.has("hate")
+            ? displayActors.length === 1
+              ? "liked and hated your story"
+              : "reacted to your story"
+            : reactionTypes.has("hate")
+              ? "hated your story"
+              : "liked your story"
+          : type === "COMMENT_RECEIVED"
+            ? "commented on your post"
+            : type === "COMMENT_REPLY"
+              ? "replied to your comment"
+              : type === "STORY_REPLY"
+                ? "replied to your story"
+                : this.generateDefaultMessage(type);
+
+    return `${actorLine} ${action}`;
+  }
+
+  private async tryUpdateAggregatedAlert(
+    request: CreateAlertRequest,
+    actorName: string,
+    actorUsername: string,
+    actorAvatar: string,
+  ): Promise<AlertEntity | null> {
+    const target = this.getAggregationTarget(request);
+    if (!target) return null;
+
+    let existingAlerts: AlertEntity[] = [];
+    try {
+      existingAlerts = await this.alertRepository.getAlertsForUser(
+        request.userId,
+        100,
+        0,
+        false,
+      );
+    } catch (error) {
+      if (!this.isPermissionDenied(error)) {
+        throw error;
+      }
+      return null;
+    }
+    const existingAlert = existingAlerts.find(
+      (alert) =>
+        this.getAggregationTarget({
+          type: alert.type,
+          entityId: alert.entityId,
+          metadata: alert.metadata,
+        }) === target,
+    );
+
+    if (!existingAlert) return null;
+
+    const actor = {
+      id: request.actorId,
+      name: actorName,
+      username: actorUsername,
+      avatar: actorAvatar,
+      reactionType: request.metadata?.reactionType,
+      reactionTypes: request.metadata?.reactionType
+        ? [request.metadata.reactionType === "hate" ? "hate" : "like"]
+        : [],
+    };
+    const previousActors = Array.isArray(existingAlert.metadata?.actors)
+      ? existingAlert.metadata.actors
+      : [
+          {
+            id: existingAlert.actorId,
+            name: existingAlert.metadata?.actorName || "Someone",
+            username: existingAlert.metadata?.actorUsername || "someone",
+            avatar: existingAlert.metadata?.actorAvatar || "",
+            reactionType: existingAlert.metadata?.reactionType,
+            reactionTypes: existingAlert.metadata?.reactionType
+              ? [
+                  existingAlert.metadata.reactionType === "hate"
+                    ? "hate"
+                    : "like",
+                ]
+              : [],
+          },
+        ];
+    const existingActor = previousActors.find(
+      (item: any) => item.id === request.actorId,
+    );
+    const mergedActor = existingActor
+      ? {
+          ...existingActor,
+          ...actor,
+          reactionTypes: [
+            ...new Set([
+              ...(Array.isArray(existingActor.reactionTypes)
+                ? existingActor.reactionTypes
+                : []),
+              ...(existingActor.reactionType
+                ? [existingActor.reactionType]
+                : []),
+              ...actor.reactionTypes,
+            ]),
+          ].map((type) => (type === "hate" ? "hate" : "like")),
+        }
+      : actor;
+    const actors = [
+      ...previousActors.filter((item: any) => item.id !== request.actorId),
+      mergedActor,
+    ];
+    const storyReactionTypes = new Set(
+      actors.flatMap((item: any) => [
+        ...(Array.isArray(item.reactionTypes) ? item.reactionTypes : []),
+        ...(item.reactionType ? [item.reactionType] : []),
+      ]),
+    );
+    const now = new Date().toISOString();
+    const metadata = {
+      ...existingAlert.metadata,
+      ...request.metadata,
+      actorName,
+      actorUsername,
+      actorAvatar,
+      actors,
+      aggregatedCount: actors.length,
+      lastActivityAt: now,
+      lastReactionAt:
+        request.type === "STORY_REACTION"
+          ? now
+          : existingAlert.metadata?.lastReactionAt,
+      reactionType:
+        request.type === "STORY_REACTION"
+          ? storyReactionTypes.has("like") && storyReactionTypes.has("hate")
+            ? "mixed"
+            : storyReactionTypes.has("hate")
+              ? "hate"
+              : "like"
+          : request.metadata?.reactionType,
+    };
+    const message = this.formatAggregatedMessage(request.type, actors);
+
+    await this.updateAlert(existingAlert.id, request.userId, {
+      message,
+      metadata,
+      isRead: false,
+    });
+
+    return AlertEntity.create({
+      id: existingAlert.id,
+      userId: existingAlert.userId,
+      type: existingAlert.type,
+      entityId: existingAlert.entityId,
+      actorId: existingAlert.actorId,
+      message,
+      metadata,
+      isRead: false,
+      createdAt: existingAlert.createdAt,
+      updatedAt: now,
+    });
   }
 
   // Get alerts for a user
@@ -476,12 +705,25 @@ export class AlertService {
         const actorIndex = actors.findIndex((actor: any) => actor.id === actorId);
 
         if (actorIndex >= 0) {
+          const reactionTypes = [
+            ...new Set([
+              ...(Array.isArray(actors[actorIndex].reactionTypes)
+                ? actors[actorIndex].reactionTypes
+                : []),
+              ...(actors[actorIndex].reactionType
+                ? [actors[actorIndex].reactionType]
+                : []),
+              reactionType,
+            ]),
+          ].map((type) => (type === "hate" ? "hate" : "like"));
+
           actors[actorIndex] = {
             ...actors[actorIndex],
             name: actorName,
             username: actorUsername,
             avatar: actorAvatar,
             reactionType,
+            reactionTypes,
           };
         } else {
           actors.push({
@@ -490,16 +732,25 @@ export class AlertService {
             username: actorUsername,
             avatar: actorAvatar,
             reactionType,
+            reactionTypes: [reactionType],
           });
         }
 
         const reactionCounts = {
-          likes: actors.filter((a: any) => a.reactionType === "like").length,
-          hates: actors.filter((a: any) => a.reactionType === "hate").length,
+          likes: actors.filter(
+            (a: any) =>
+              a.reactionType === "like" || a.reactionTypes?.includes("like"),
+          ).length,
+          hates: actors.filter(
+            (a: any) =>
+              a.reactionType === "hate" || a.reactionTypes?.includes("hate"),
+          ).length,
         };
 
-        const message =
-          this.generateAggregatedReactionMessage(reactionCounts);
+        const message = this.formatAggregatedMessage(
+          "STORY_REACTION",
+          actors,
+        );
 
         await this.updateAlert(existingAlert.id, storyAuthorId, {
           metadata: {
@@ -507,8 +758,16 @@ export class AlertService {
             actors,
             reactionCounts,
             lastReactionAt: new Date().toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            reactionType:
+              reactionCounts.likes > 0 && reactionCounts.hates > 0
+                ? "mixed"
+                : reactionCounts.hates > 0
+                  ? "hate"
+                  : "like",
           },
           message,
+          isRead: false,
         });
       } else {
         // Create new alert
@@ -528,6 +787,7 @@ export class AlertService {
                 username: actorUsername,
                 avatar: actorAvatar,
                 reactionType,
+                reactionTypes: [reactionType],
               },
             ],
             reactionCounts: {

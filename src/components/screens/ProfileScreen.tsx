@@ -55,7 +55,13 @@ import type {
 } from "../../middleware/adapters/data-adapters";
 import { resolveUserProfile } from "../../utils/profileResolver";
 import { db } from "../../backend/lib/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  getCountFromServer,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 import { TruthEntity } from "../../backend/domain/entities/Truth";
 
 interface ProfileStats {
@@ -68,6 +74,13 @@ type ProfileTabLoadState = {
   truthsLoadedForUserId: string | null;
   daresLoadedForUserId: string | null;
 };
+
+type ProfileHeaderCounts = {
+  dares: number | null;
+  truths: number | null;
+};
+
+type ProfileCountCollection = "dares" | "truths";
 
 interface ProfileScreenProps {
   isActive?: boolean;
@@ -156,6 +169,28 @@ function extractAvatar(profile: any): string {
   }
 
   return "/default-avatar.png";
+}
+
+async function countUserChallengeDocs(
+  collectionName: ProfileCountCollection,
+  userId: string,
+): Promise<number> {
+  const [sentSnapshot, receivedSnapshot] = await Promise.all([
+    getCountFromServer(
+      query(
+        collection(db, collectionName),
+        where("challenger_id", "==", userId),
+      ),
+    ),
+    getCountFromServer(
+      query(
+        collection(db, collectionName),
+        where("receiver_id", "==", userId),
+      ),
+    ),
+  ]);
+
+  return sentSnapshot.data().count + receivedSnapshot.data().count;
 }
 
 async function buildTruthPost(truth: TruthEntity): Promise<TruthPost | null> {
@@ -274,6 +309,11 @@ export function ProfileScreen({
     truthsLoadedForUserId: null,
     daresLoadedForUserId: null,
   });
+  const [profileHeaderCounts, setProfileHeaderCounts] =
+    useState<ProfileHeaderCounts>({
+      dares: null,
+      truths: null,
+    });
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   // Handle logout
@@ -322,6 +362,41 @@ export function ProfileScreen({
     loadProfile,
     loadUserDares,
   ]);
+
+  const loadProfileHeaderCounts = useCallback(async (userId: string) => {
+    const [dares, truths] = await Promise.all([
+      countUserChallengeDocs("dares", userId),
+      countUserChallengeDocs("truths", userId),
+    ]);
+
+    return { dares, truths };
+  }, []);
+
+  useEffect(() => {
+    if (!isActive || !user?.id) {
+      setProfileHeaderCounts({ dares: null, truths: null });
+      return;
+    }
+
+    let isCancelled = false;
+    setProfileHeaderCounts({ dares: null, truths: null });
+    void loadProfileHeaderCounts(user.id)
+      .then((counts) => {
+        if (!isCancelled) {
+          setProfileHeaderCounts(counts);
+        }
+      })
+      .catch((error) => {
+        console.warn("[ProfileScreen] Failed to load profile counts:", error);
+        if (!isCancelled) {
+          setProfileHeaderCounts({ dares: null, truths: null });
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isActive, user?.id, loadProfileHeaderCounts]);
 
   const loadProfileTruthPosts = useCallback(async (userId: string) => {
     setLoadingTruth(true);
@@ -495,23 +570,28 @@ export function ProfileScreen({
   };
 
   const allUserDares = [...sentDares, ...receivedDares];
-  const completedDaresCount = allUserDares.filter(
-    (dare) => dare.state === "ACCEPTED_REAL",
-  ).length;
+  const loadedUserDaresCount = new Set(
+    allUserDares.map((dare) => dare.id).filter(Boolean),
+  ).size;
   const surrenderedDaresCount = allUserDares.filter(
     (dare) => dare.state === "CHICKEN_OUT",
   ).length;
+  const fallbackProfileDaresCount = toSafeCount(
+    (profile as any)?.daresCount ??
+      (profile as any)?.dares_count ??
+      (profile as any)?.daresCompleted ??
+      (profile as any)?.dares_completed,
+  );
+  const profileDaresCount =
+    profileHeaderCounts.dares ??
+    (loadedUserDaresCount > 0
+      ? loadedUserDaresCount
+      : fallbackProfileDaresCount);
 
   // In production mode, profile stats come from backend
   // Start with empty stats - will be populated by real data
   const profileStats: ProfileStats = {
-    daresCompleted:
-      completedDaresCount > 0
-        ? completedDaresCount
-        : toSafeCount(
-            (profile as any)?.daresCompleted ??
-              (profile as any)?.dares_completed,
-          ),
+    daresCompleted: profileDaresCount,
     daresSurrendered:
       surrenderedDaresCount > 0
         ? surrenderedDaresCount
@@ -520,7 +600,6 @@ export function ProfileScreen({
           ),
     friends: toSafeCount(friendsCount), // Use actual friends count from useUserProfileStore
   };
-
   // Keep ProfileScreen locked to the authenticated user's own posts only.
   // `userPosts` is shared in the store and can temporarily hold another user's
   // posts when visiting their profile, so we hard-filter here.
@@ -546,6 +625,17 @@ export function ProfileScreen({
       truth.challengerId === user.id ||
       truth.receiverId === user.id,
   );
+  const fallbackProfileTruthsCount = toSafeCount(
+    (profile as any)?.truthsCount ??
+      (profile as any)?.truths_count ??
+      (profile as any)?.truthsAnswered ??
+      (profile as any)?.truths_answered,
+  );
+  const profileTruthsCount =
+    profileHeaderCounts.truths ??
+    (userTruthPosts.length > 0
+      ? userTruthPosts.length
+      : fallbackProfileTruthsCount);
 
   const userDarePosts = darePosts.filter(
     (dare) =>
@@ -908,66 +998,70 @@ export function ProfileScreen({
         .profile-posts-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
+          gap: 18px;
           margin-bottom: 0;
         }
         .profile-hero-card {
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 20px;
         }
-        .profile-stat-capsule {
-          min-height: 68px;
+        .profile-proof-stat-row {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
         }
-        .profile-ig-stat {
+        .profile-proof-stat {
           align-items: center;
+          border: 1px solid rgba(255,255,255,0.055);
+          border-radius: 999px;
           display: flex;
-          flex-direction: column;
           justify-content: center;
+          min-height: 48px;
           min-width: 0;
-          min-height: 66px;
+          padding: 0 10px;
           text-align: center;
+          white-space: nowrap;
         }
-        .profile-ig-stat-value {
-          color: #fff;
-          font-size: 26px;
-          font-weight: 950;
-          line-height: 1;
-          margin: 0 0 9px;
-          letter-spacing: -0.02em;
+        .profile-proof-stat.is-primary {
+          background: linear-gradient(135deg,#4ade80,#22c55e);
+          border-color: rgba(255,255,255,0.08);
+          box-shadow: 0 14px 30px rgba(74,222,128,0.2);
         }
-        .profile-ig-stat-label {
-          color: rgba(148, 163, 184, 0.9);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
+        .profile-proof-stat:not(.is-primary) {
+          background: rgba(255,255,255,0.045);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.045);
+        }
+        .profile-proof-stat-text {
+          color: #d7ffe6;
+          font-size: 13px;
+          font-weight: 900;
           line-height: 1;
           margin: 0;
-          text-transform: uppercase;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .profile-proof-stat.is-primary .profile-proof-stat-text {
+          color: #061006;
         }
         @media (max-width: 480px) {
           .profile-posts-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 8px;
+            gap: 18px;
           }
           .profile-hero-card {
-            gap: 16px;
-            padding: 24px 26px 18px !important;
+            gap: 19px;
+            padding: 24px 22px 26px !important;
             border-radius: 34px !important;
           }
           .profile-hero-card h2 {
-            font-size: 20px !important;
+            font-size: 25px !important;
           }
-          .profile-stat-capsule {
-            min-height: 58px;
-            padding: 8px 7px !important;
-            border-radius: 16px !important;
+          .profile-proof-stat {
+            min-height: 46px;
+            padding: 0 8px;
           }
-          .profile-ig-stat-value {
-            font-size: 23px;
-          }
-          .profile-ig-stat-label {
-            font-size: 9px;
+          .profile-proof-stat-text {
+            font-size: 13px;
           }
         }
         @keyframes fadeInUp {
@@ -1036,8 +1130,8 @@ export function ProfileScreen({
       <div
         className="animate-fade-in-up"
         style={{
-          padding: "0 20px 18px",
-          maxWidth: "1100px",
+          padding: "0 14px 12px",
+          maxWidth: "430px",
           margin: "0 auto",
           position: "relative",
           zIndex: 1,
@@ -1055,14 +1149,14 @@ export function ProfileScreen({
             <h1
               style={{
                 color: "#fff",
-                fontSize: "32px",
-                fontWeight: 900,
-                lineHeight: 1,
+                fontSize: "18px",
+                fontWeight: 850,
+                lineHeight: 1.2,
                 margin: 0,
-                letterSpacing: 0,
+                letterSpacing: "-0.02em",
               }}
             >
-              Profile
+              {username.startsWith("@") ? username : `@${username}`}
             </h1>
           </div>
           <button
@@ -1070,23 +1164,24 @@ export function ProfileScreen({
             onClick={() => {
               setShowEditProfile(true);
             }}
-            aria-label="Edit profile"
+            aria-label="Settings"
             style={{
-              width: "56px",
-              height: "56px",
+              width: "42px",
+              height: "42px",
               flexShrink: 0,
-              borderRadius: "22px",
+              borderRadius: "17px",
               border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.04)",
-              color: "#4ade80",
+              background: "rgba(255,255,255,0.045)",
+              color: "#cbd5e1",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
-              boxShadow: "0 18px 44px rgba(0,0,0,0.32)",
+              boxShadow:
+                "0 14px 34px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)",
             }}
           >
-            <Settings size={24} />
+            <Settings size={21} strokeWidth={1.8} />
           </button>
         </div>
       </div>
@@ -1094,37 +1189,37 @@ export function ProfileScreen({
       <div
         className="animate-fade-in-up"
         style={{
-          padding: "0 20px 16px",
+          padding: "0 12px 16px",
           position: "relative",
           zIndex: 1,
-          maxWidth: "1100px",
+          maxWidth: "430px",
           margin: "0 auto",
         }}
       >
         <div
           className="profile-hero-card"
           style={{
-            marginBottom: "14px",
-            padding: "24px 26px 18px",
+            marginBottom: "28px",
+            padding: "26px 22px 26px",
             borderRadius: "34px",
-            border: "1px solid rgba(255,255,255,0.08)",
+            border: "1px solid rgba(74,222,128,0.14)",
             background:
-              "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, rgba(6,8,6,0.96) 0%, rgba(10,15,10,0.96) 48%, rgba(3,4,3,0.98) 100%)",
+              "radial-gradient(circle at 18% -18%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 96% 12%, rgba(14,165,233,0.1), transparent 34%), linear-gradient(180deg, rgba(13,24,15,0.98), rgba(6,11,7,0.99))",
             boxShadow:
-              "0 24px 64px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)",
+              "0 28px 70px rgba(0,0,0,0.48), 0 0 34px rgba(74,222,128,0.06), inset 0 1px 0 rgba(255,255,255,0.055)",
             overflow: "hidden",
             position: "relative",
           }}
         >
+          {/* Premium gradient accents */}
           <div
             style={{
               position: "absolute",
               inset: "0 0 auto 0",
               height: "1px",
               background:
-                "linear-gradient(90deg, rgba(74,222,128,0), rgba(74,222,128,0.82), rgba(74,222,128,0))",
+                "linear-gradient(90deg, rgba(74,222,128,0), rgba(74,222,128,0.78), rgba(14,165,233,0.42), rgba(74,222,128,0))",
               pointerEvents: "none",
-              opacity: 0.42,
             }}
           />
           <div
@@ -1135,7 +1230,7 @@ export function ProfileScreen({
               width: "180px",
               height: "180px",
               borderRadius: "999px",
-              background: "rgba(74,222,128,0.10)",
+              background: "rgba(74,222,128,0.08)",
               filter: "blur(38px)",
               pointerEvents: "none",
             }}
@@ -1143,27 +1238,30 @@ export function ProfileScreen({
           <div
             style={{
               position: "absolute",
-              left: "22%",
-              bottom: "-80px",
-              width: "210px",
-              height: "130px",
+              left: "-64px",
+              bottom: "-72px",
+              width: "190px",
+              height: "190px",
               borderRadius: "999px",
-              background: "rgba(96,165,250,0.055)",
+              background: "rgba(14,165,233,0.055)",
               filter: "blur(42px)",
               pointerEvents: "none",
             }}
           />
+
+          {/* Instagram-style horizontal layout */}
           <div
             style={{
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: "20px",
               width: "100%",
               position: "relative",
               zIndex: 1,
+              marginBottom: 0,
             }}
           >
-            {/* Avatar */}
+            {/* Avatar - Left side */}
             <div style={{ position: "relative", flexShrink: 0 }}>
               <div
                 onClick={handleAvatarTap}
@@ -1171,10 +1269,13 @@ export function ProfileScreen({
                 style={{
                   padding: 0,
                   borderRadius: "50%",
-                  background: "transparent",
-                  boxShadow: "0 16px 38px rgba(0,0,0,0.42)",
-                  width: "94px",
-                  height: "94px",
+                  background:
+                    "linear-gradient(135deg, #4ade80 0%, #38bdf8 100%)",
+                  border: "none",
+                  boxShadow:
+                    "0 16px 34px rgba(0,0,0,0.36), 0 0 26px rgba(74,222,128,0.12)",
+                  width: "70px",
+                  height: "70px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -1186,12 +1287,22 @@ export function ProfileScreen({
                   userSelect: "none",
                 }}
               >
-                <Avatar
-                  src={user?.avatar || ""}
-                  alt={displayName || "User"}
-                  size="xl"
-                  userId={user?.id}
-                />
+                <div
+                  style={{
+                    width: "70px",
+                    height: "70px",
+                    borderRadius: "50%",
+                    overflow: "hidden",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <Avatar
+                    src={user?.avatar || ""}
+                    alt={displayName || "User"}
+                    size={74}
+                    userId={user?.id}
+                  />
+                </div>
               </div>
               <button
                 type="button"
@@ -1200,19 +1311,19 @@ export function ProfileScreen({
                 aria-label="Change avatar"
                 style={{
                   position: "absolute",
-                  bottom: "2px",
-                  right: "2px",
-                  width: "27px",
-                  height: "27px",
+                  bottom: "-2px",
+                  right: "-2px",
+                  width: "26px",
+                  height: "26px",
                   borderRadius: "50%",
-                  background: "#111611",
-                  border: "2px solid #050805",
+                  background: "linear-gradient(135deg, #4ade80, #22c55e)",
+                  border: "3px solid #07100b",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: isUploadingAvatar ? "default" : "pointer",
-                  color: "#fff",
-                  boxShadow: "0 8px 18px rgba(0,0,0,0.28)",
+                  color: "#000",
+                  boxShadow: "0 4px 12px rgba(74,222,128,0.4)",
                   opacity: isUploadingAvatar ? 0.72 : 1,
                 }}
               >
@@ -1222,60 +1333,37 @@ export function ProfileScreen({
                       width: "12px",
                       height: "12px",
                       borderRadius: "999px",
-                      border: "2px solid rgba(255,255,255,0.45)",
-                      borderTopColor: "#fff",
+                      border: "2px solid rgba(0,0,0,0.3)",
+                      borderTopColor: "#000",
                       animation: "spin 0.8s linear infinite",
                     }}
                   />
                 ) : (
-                  <Camera size={13} />
+                  <Camera size={13} strokeWidth={2.6} />
                 )}
               </button>
-              {onNavigateToActivity && (
-                <button
-                  onClick={onNavigateToActivity}
-                  style={{
-                    position: "absolute",
-                    bottom: "2px",
-                    left: "-5px",
-                    width: "27px",
-                    height: "27px",
-                    borderRadius: "50%",
-                    background: "#4ade80",
-                    border: "2px solid #050805",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    color: "#000",
-                    boxShadow: "0 10px 22px rgba(74,222,128,0.26)",
-                  }}
-                >
-                  <Activity size={13} />
-                </button>
-              )}
             </div>
 
-            <div style={{ minWidth: 0, flex: 1, paddingTop: "2px" }}>
+            <div style={{ minWidth: 0, flex: 1, paddingTop: "6px" }}>
               <h2
                 style={{
                   color: "#fff",
-                  fontSize: "27px",
+                  fontSize: "26px",
                   fontWeight: 950,
                   lineHeight: 1.05,
-                  margin: "0 0 8px",
-                  letterSpacing: "-0.02em",
-                  textShadow: "0 12px 30px rgba(0,0,0,0.36)",
+                  margin: "0 0 7px",
+                  letterSpacing: "-0.035em",
+                  textShadow: "0 8px 26px rgba(0,0,0,0.28)",
                 }}
               >
                 {displayName}
               </h2>
               <p
                 style={{
-                  color: "rgba(203,213,225,0.82)",
-                  fontSize: "15px",
-                  fontWeight: 800,
-                  letterSpacing: 0,
+                  color: "#94a3b8",
+                  fontSize: "13px",
+                  fontWeight: 850,
+                  lineHeight: 1,
                   margin: 0,
                 }}
               >
@@ -1284,103 +1372,144 @@ export function ProfileScreen({
             </div>
           </div>
 
-          {/* Reference-style stats */}
+          {/* Compact bio */}
           <div
             style={{
-              width: "100%",
               position: "relative",
               zIndex: 1,
-              borderTop: "1px solid rgba(255,255,255,0.07)",
-              paddingTop: "13px",
             }}
           >
-            <div
+            <p
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                alignItems: "center",
-                gap: "12px",
+                color: "#d7ffe6",
+                fontSize: "14px",
+                lineHeight: 1.45,
+                margin: "0",
+                maxWidth: "100%",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                fontWeight: 850,
+                letterSpacing: "-0.01em",
               }}
             >
-              {[
-                { label: "Completed", value: profileStats.daresCompleted },
-                { label: "Surrendered", value: profileStats.daresSurrendered },
-                { label: "Friends", value: profileStats.friends },
-              ].map((stat) => (
-                <button
-                  key={stat.label}
-                  type="button"
-                  onClick={
-                    stat.label === "Friends" ? handleFriendsClick : undefined
-                  }
-                  className="profile-ig-stat"
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    padding: "0 1px",
-                    cursor: stat.label === "Friends" ? "pointer" : "default",
-                    WebkitTapHighlightColor: "transparent",
-                  }}
-                >
-                  <p className="profile-ig-stat-value">{stat.value}</p>
-                  <p className="profile-ig-stat-label">{stat.label}</p>
-                </button>
-              ))}
-            </div>
+              {user?.bio?.trim() ||
+                "Proof-first posts, real dares, close-friend stories."}
+            </p>
+          </div>
+
+          <div
+            className="profile-proof-stat-row"
+            style={{ position: "relative", zIndex: 1 }}
+          >
+            {[
+              {
+                label: "Dares",
+                value: profileStats.daresCompleted,
+                primary: true,
+                onClick: undefined,
+              },
+              {
+                label: "Truths",
+                value: profileTruthsCount,
+                primary: false,
+                onClick: undefined,
+              },
+              {
+                label: "Friends",
+                value: profileStats.friends,
+                primary: false,
+                onClick: handleFriendsClick,
+              },
+            ].map((stat) => (
+              <button
+                key={stat.label}
+                type="button"
+                onClick={stat.onClick}
+                className={`profile-proof-stat ${stat.primary ? "is-primary" : ""}`}
+                style={{
+                  cursor: stat.onClick ? "pointer" : "default",
+                  WebkitTapHighlightColor: "transparent",
+                }}
+              >
+                <span className="profile-proof-stat-text">
+                  {stat.value} {stat.label}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Profile info and actions */}
+        {/* Subtle profile actions */}
         <div
           style={{
-            marginBottom: "0",
-            padding: user?.bio ? "6px 0 0" : "10px 0 0",
+            margin: "-12px 16px 18px",
+            padding: 0,
           }}
         >
-          {user?.bio && (
-            <p
-              style={{
-                color: "rgba(255,255,255,0.7)",
-                fontSize: "14px",
-                lineHeight: 1.45,
-                margin: "0 0 14px",
-                maxWidth: "560px",
-              }}
-            >
-              {user.bio}
-            </p>
-          )}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr auto",
+              gridTemplateColumns: "1fr 1fr auto",
               gap: "8px",
             }}
           >
             <button
               type="button"
+              onClick={() => setShowEditProfile(true)}
+              style={{
+                minHeight: "40px",
+                borderRadius: "999px",
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.045)",
+                color: "#d7ffe6",
+                fontSize: "13px",
+                fontWeight: 850,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s ease",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(74,222,128,0.08)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.045)";
+              }}
+            >
+              Edit profile
+            </button>
+            <button
+              type="button"
               onClick={onNavigateToActivity}
               disabled={!onNavigateToActivity}
               style={{
-                minHeight: "42px",
-                borderRadius: "16px",
-                border: "1px solid rgba(74,222,128,0.24)",
-                background:
-                  "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(56,189,248,0.08)), linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.028))",
+                minHeight: "40px",
+                borderRadius: "999px",
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.045)",
                 color: "#d7ffe6",
                 fontSize: "13px",
-                fontWeight: 900,
+                fontWeight: 850,
                 cursor: onNavigateToActivity ? "pointer" : "default",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "8px",
-                boxShadow:
-                  "0 14px 32px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.07)",
-                opacity: onNavigateToActivity ? 1 : 0.58,
+                opacity: onNavigateToActivity ? 1 : 0.5,
+                transition: "all 0.2s ease",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+              }}
+              onMouseEnter={(e) => {
+                if (onNavigateToActivity) {
+                  e.currentTarget.style.background = "rgba(74,222,128,0.08)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.045)";
               }}
             >
-              <Activity size={16} strokeWidth={2.4} />
               View activity
             </button>
             <button
@@ -1388,20 +1517,38 @@ export function ProfileScreen({
               onClick={() => setIsGhostMode(!isGhostMode)}
               aria-label="Toggle ghost mode"
               style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "16px",
+                width: "40px",
+                height: "40px",
+                borderRadius: "999px",
                 border: isGhostMode
-                  ? "1px solid rgba(74,222,128,0.42)"
+                  ? "1px solid rgba(74,222,128,0.44)"
                   : "1px solid rgba(255,255,255,0.08)",
                 background: isGhostMode
-                  ? "linear-gradient(180deg, rgba(74,222,128,0.18), rgba(74,222,128,0.07))"
+                  ? "rgba(74,222,128,0.16)"
                   : "rgba(255,255,255,0.045)",
-                color: isGhostMode ? "#4ade80" : "#94a3b8",
+                color: isGhostMode ? "#4ade80" : "#cbd5e1",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: "pointer",
+                transition: "all 0.2s ease",
+                boxShadow: isGhostMode
+                  ? "0 0 22px rgba(74,222,128,0.16), inset 0 1px 0 rgba(255,255,255,0.05)"
+                  : "inset 0 1px 0 rgba(255,255,255,0.04)",
+              }}
+              onMouseEnter={(e) => {
+                if (isGhostMode) {
+                  e.currentTarget.style.background = "rgba(74,222,128,0.25)";
+                } else {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (isGhostMode) {
+                  e.currentTarget.style.background = "rgba(74,222,128,0.16)";
+                } else {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.045)";
+                }
               }}
             >
               <Shield size={17} strokeWidth={2.2} />
@@ -1415,14 +1562,14 @@ export function ProfileScreen({
             display: "grid",
             gridTemplateColumns: "1fr 1fr 1fr",
             background:
-              "linear-gradient(180deg, rgba(21,27,21,0.92), rgba(10,14,10,0.96))",
+              "linear-gradient(180deg, rgba(5,19,18,0.72), rgba(4,10,9,0.9))",
             borderRadius: "999px",
             padding: "5px",
-            marginTop: "20px",
-            marginBottom: "14px",
-            border: "1px solid rgba(255,255,255,0.08)",
+            margin: "0 16px 28px",
+            border: "1px solid rgba(74,222,128,0.14)",
             boxShadow:
-              "0 18px 48px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)",
+              "0 18px 48px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)",
+            overflow: "hidden",
           }}
         >
           {(["posts", "truths", "dares"] as const).map((tab) => (
@@ -1459,7 +1606,7 @@ export function ProfileScreen({
         {activeTab === "posts" && (
           <div
             style={{
-              padding: "8px 0 0",
+              padding: "0 16px",
               borderRadius: 0,
               border: "none",
               background: "transparent",
@@ -1469,38 +1616,42 @@ export function ProfileScreen({
             {sortedPosts.length === 0 ? (
               <div
                 style={{
-                  minHeight: "220px",
-                  borderRadius: "22px",
-                  border: "1px dashed rgba(255,255,255,0.12)",
-                  background:
-                    "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
+                  minHeight: "300px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   textAlign: "center",
-                  padding: "28px",
+                  padding: "40px 20px",
                 }}
               >
                 <div>
+                  <Camera
+                    size={48}
+                    strokeWidth={1.5}
+                    style={{
+                      color: "rgba(255,255,255,0.2)",
+                      margin: "0 auto 16px",
+                    }}
+                  />
                   <p
                     style={{
                       color: "#fff",
-                      fontSize: "15px",
+                      fontSize: "22px",
                       fontWeight: 700,
-                      margin: "0 0 6px",
+                      margin: "0 0 8px",
                     }}
                   >
-                    No posts yet
+                    No Posts Yet
                   </p>
                   <p
                     style={{
-                      color: "rgba(255,255,255,0.42)",
-                      fontSize: "13px",
+                      color: "rgba(255,255,255,0.5)",
+                      fontSize: "14px",
                       margin: 0,
+                      lineHeight: 1.5,
                     }}
                   >
-                    Your photo and video moments will appear here in a clean
-                    grid.
+                    Share your first photo or video
                   </p>
                 </div>
               </div>
@@ -1512,22 +1663,21 @@ export function ProfileScreen({
                     style={{
                       width: "100%",
                       aspectRatio: "1/1",
-                      borderRadius: "20px",
+                      borderRadius: "28px",
                       overflow: "hidden",
-                      border: "1px solid rgba(255,255,255,0.09)",
+                      border: "1px solid rgba(255,255,255,0.06)",
                       cursor: "pointer",
                       position: "relative",
                       transition: "all 0.2s cubic-bezier(0.32, 0.72, 0, 1)",
-                      backdropFilter: "blur(10px)",
                       background:
-                        "linear-gradient(180deg, rgba(18,25,20,0.96), rgba(7,10,8,0.98))",
+                        "linear-gradient(180deg, rgba(18,28,21,0.96), rgba(7,12,10,0.98))",
+                      boxShadow:
+                        "0 18px 44px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.045)",
                       WebkitUserSelect: "none",
                       userSelect: "none",
                       WebkitTapHighlightColor: "transparent",
                       touchAction: "manipulation",
                       zIndex: 1,
-                      boxShadow:
-                        "0 16px 34px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.045)",
                     }}
                   >
                     <button
@@ -1537,22 +1687,19 @@ export function ProfileScreen({
                       onMouseDown={(e) => {
                         const parent = e.currentTarget.parentElement;
                         if (parent) {
-                          parent.style.borderColor = "rgba(74,222,128,0.7)";
-                          parent.style.transform = "scale(0.98)";
+                          parent.style.opacity = "0.7";
                         }
                       }}
                       onMouseUp={(e) => {
                         const parent = e.currentTarget.parentElement;
                         if (parent) {
-                          parent.style.borderColor = "rgba(255,255,255,0.08)";
-                          parent.style.transform = "scale(1)";
+                          parent.style.opacity = "1";
                         }
                       }}
                       onMouseLeave={(e) => {
                         const parent = e.currentTarget.parentElement;
                         if (parent) {
-                          parent.style.borderColor = "rgba(255,255,255,0.08)";
-                          parent.style.transform = "scale(1)";
+                          parent.style.opacity = "1";
                         }
                       }}
                       style={{
@@ -1577,7 +1724,7 @@ export function ProfileScreen({
                           width: "100%",
                           height: "100%",
                           objectFit: "cover",
-                          borderRadius: "20px",
+                          borderRadius: "28px",
                         }}
                       />
                     ) : (
@@ -1592,7 +1739,7 @@ export function ProfileScreen({
                           justifyContent: "center",
                           padding: "12px",
                           textAlign: "center",
-                          borderRadius: "20px",
+                          borderRadius: "28px",
                         }}
                       >
                         <p
@@ -1621,7 +1768,7 @@ export function ProfileScreen({
                         padding: "10px",
                         opacity: 0,
                         transition: "opacity 0.2s ease",
-                        borderRadius: "20px",
+                        borderRadius: "28px",
                         pointerEvents: "none",
                       }}
                     >
@@ -1660,54 +1807,39 @@ export function ProfileScreen({
                         inset: 0,
                         display: "flex",
                         alignItems: "flex-end",
-                        padding: "10px",
-                        borderRadius: "20px",
+                        padding: "0 24px 14px",
+                        borderRadius: "28px",
                         background:
                           "linear-gradient(to top, rgba(0,0,0,0.74) 0%, rgba(0,0,0,0.14) 44%, transparent 76%)",
                         pointerEvents: "none",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          maxWidth: "100%",
-                          borderRadius: "999px",
-                          border: "1px solid rgba(255,255,255,0.14)",
-                          background: "rgba(2,4,3,0.42)",
-                          padding: "5px 8px",
-                          backdropFilter: "blur(10px)",
-                          WebkitBackdropFilter: "blur(10px)",
-                        }}
-                      >
+                      <div style={{ width: "100%" }}>
+                        <div
+                          style={{
+                            height: "1px",
+                            width: "100%",
+                            background:
+                              "linear-gradient(90deg, rgba(255,255,255,0.18), rgba(255,255,255,0.04))",
+                            marginBottom: "10px",
+                          }}
+                        />
                         <span
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
-                            gap: "4px",
-                            color: "#fff",
+                            gap: "6px",
+                            color: "#8da3b6",
                             fontSize: "11px",
-                            fontWeight: 850,
-                            textShadow: "0 2px 8px rgba(0,0,0,0.55)",
+                            fontWeight: 950,
+                            letterSpacing: "0.14em",
+                            textTransform: "uppercase",
+                            textShadow: "0 2px 8px rgba(0,0,0,0.45)",
                           }}
                         >
-                          <Heart size={12} strokeWidth={2.3} />
-                          {Object.keys(post.likesByUser || {}).length}
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "4px",
-                            color: "#fff",
-                            fontSize: "11px",
-                            fontWeight: 850,
-                            textShadow: "0 2px 8px rgba(0,0,0,0.55)",
-                          }}
-                        >
-                          <MessageCircle size={12} strokeWidth={2.3} />
-                          {post.comments_count || 0}
+                          {post.media?.type === "video"
+                            ? `Views ${post.stats?.views ?? 0}`
+                            : `Likes ${Object.keys(post.likesByUser || {}).length}`}
                         </span>
                       </div>
                     </div>
@@ -1724,7 +1856,7 @@ export function ProfileScreen({
                           padding: "10px",
                           display: "flex",
                           alignItems: "center",
-                          borderRadius: "0 0 20px 20px",
+                          borderRadius: "0 0 28px 28px",
                         }}
                       >
                         <div
@@ -2572,4 +2704,3 @@ export function ProfileScreen({
     </div>
   );
 }
-

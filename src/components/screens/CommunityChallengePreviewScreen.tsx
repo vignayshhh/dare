@@ -19,9 +19,35 @@ import {
 } from "./communityChallengeData";
 import { CommunityJoinSuccessScreen } from "./CommunityJoinSuccessScreen";
 
-function getCountdownParts(countdown: string) {
-  const [hours = "00", minutes = "00", seconds = "00"] = countdown.split(":");
-  return { hours, minutes, seconds };
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const SIGNUP_WINDOW_MS = 48 * HOUR_MS;
+
+function parseDurationDays(durationLabel: string) {
+  const match = durationLabel.match(/(\d+)/);
+  return Math.max(1, Number(match?.[1] || 1));
+}
+
+function parseCountdownMs(countdown: string) {
+  const [hours = "0", minutes = "0", seconds = "0"] = countdown.split(":");
+  return (
+    Math.max(0, Number(hours) || 0) * HOUR_MS +
+    Math.max(0, Number(minutes) || 0) * 60 * 1000 +
+    Math.max(0, Number(seconds) || 0) * 1000
+  );
+}
+
+function getCountdownParts(totalMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return {
+    hours: String(hours).padStart(2, "0"),
+    minutes: String(minutes).padStart(2, "0"),
+    seconds: String(seconds).padStart(2, "0"),
+  };
 }
 
 function CommunityChallengePreviewStyles() {
@@ -65,9 +91,78 @@ export function CommunityChallengePreviewScreen({
   onOpenHub?: () => void;
 }) {
   const [showSuccess, setShowSuccess] = useState(false);
-  const countdownParts = getCountdownParts(challenge.countdown);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [fallbackDeadlineMs, setFallbackDeadlineMs] = useState(
+    () =>
+      Date.now() +
+      (challenge.batchStatus === "started"
+        ? parseCountdownMs(challenge.countdown)
+        : SIGNUP_WINDOW_MS),
+  );
   const challengeTitle = getCommunityChallengeTitle(challenge);
-  const displayedJoinedCount = challenge.joinedCount + (isJoined ? 1 : 0);
+  const displayedJoinedCount = Math.max(
+    challenge.joinedCount,
+    isJoined ? 1 : 0,
+  );
+  const minRequiredMembers = challenge.minRequiredMembers ?? 3;
+  const membersNeeded = Math.max(0, minRequiredMembers - displayedJoinedCount);
+  const hasBatchStarted = challenge.batchStatus === "started";
+  const canJoinBatch = !isJoined && !hasBatchStarted;
+  const primaryButtonLabel = hasBatchStarted
+    ? isJoined
+      ? "Joined Community Dare"
+      : "Dare Started - Wait for Next Batch"
+    : isJoined
+      ? membersNeeded > 0
+        ? `Waiting for ${membersNeeded} more`
+        : "Starting soon"
+      : "Join Current Batch";
+  const registrationDeadlineMs =
+    !hasBatchStarted && displayedJoinedCount > 0
+      ? challenge.registrationEndsAtMs || null
+      : null;
+  const challengeDeadlineMs =
+    hasBatchStarted && challenge.batchStartedAtMs
+      ? challenge.batchStartedAtMs + parseDurationDays(challenge.durationLabel) * DAY_MS
+      : null;
+  const countdownTargetMs =
+    registrationDeadlineMs || challengeDeadlineMs || fallbackDeadlineMs;
+  const countdownMs =
+    displayedJoinedCount === 0 && !hasBatchStarted
+      ? SIGNUP_WINDOW_MS
+      : countdownTargetMs - nowMs;
+  const countdownParts = getCountdownParts(countdownMs);
+  const timerTitle =
+    displayedJoinedCount === 0 && !hasBatchStarted
+      ? "Signup opens with first join"
+      : hasBatchStarted
+        ? "Challenge ends in"
+        : "Batch closes in";
+  const timerCaption =
+    displayedJoinedCount === 0 && !hasBatchStarted
+      ? "The 48-hour signup timer starts when one person joins."
+      : !hasBatchStarted && countdownMs <= 0
+        ? "This waiting batch expired and will reset if it did not reach 3 members."
+        : hasBatchStarted
+          ? "This active batch is already running."
+          : `${membersNeeded} more ${membersNeeded === 1 ? "member" : "members"} needed before the timer ends.`;
+
+  useEffect(() => {
+    setFallbackDeadlineMs(
+      Date.now() +
+        (challenge.batchStatus === "started"
+          ? parseCountdownMs(challenge.countdown)
+          : SIGNUP_WINDOW_MS),
+    );
+  }, [challenge.batchStatus, challenge.countdown, challenge.id]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const navElements = Array.from(
@@ -89,6 +184,17 @@ export function CommunityChallengePreviewScreen({
   const handleJoin = () => {
     onJoin();
     setShowSuccess(true);
+  };
+
+  const handlePrimaryAction = () => {
+    if (hasBatchStarted && isJoined) {
+      onOpenHub?.();
+      return;
+    }
+
+    if (!canJoinBatch) return;
+
+    handleJoin();
   };
 
   const handleShare = async () => {
@@ -114,7 +220,6 @@ export function CommunityChallengePreviewScreen({
       <CommunityJoinSuccessScreen
         challenge={challenge}
         onClose={onClose}
-        onOpenHub={onOpenHub}
       />
     );
   }
@@ -191,7 +296,7 @@ export function CommunityChallengePreviewScreen({
                   <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/35 px-3 py-2 text-sm font-black text-white/90 shadow-[0_12px_28px_rgba(0,0,0,0.32)] backdrop-blur-md">
                     <Users size={16} className="text-[#86efac]" />
                     {displayedJoinedCount > 0
-                      ? `${displayedJoinedCount} joined`
+                      ? `${displayedJoinedCount}/${minRequiredMembers} joined`
                       : "No one joined yet"}
                   </div>
                 </div>
@@ -232,6 +337,49 @@ export function CommunityChallengePreviewScreen({
                   {challenge.description}
                 </p>
 
+                <div className="mt-4 rounded-[24px] border border-white/8 bg-white/[0.04] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.055)]">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] border border-[#4ade80]/18 bg-[#4ade80]/10 text-[#86efac]">
+                      <Users size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-black uppercase tracking-[0.14em] text-[#bbf7d0]">
+                        Batch rules
+                      </p>
+                      <p className="mt-1 text-[13px] font-semibold leading-snug text-[#d1fae5]">
+                        Needs {minRequiredMembers} members to start. The 48-hour
+                        signup timer begins when the first person joins.
+                      </p>
+                      <p className="mt-2 text-[12px] font-black text-white/88">
+                        {hasBatchStarted
+                          ? "This batch has already started. New entry opens in the next batch."
+                          : displayedJoinedCount > 0
+                            ? `${membersNeeded} more ${membersNeeded === 1 ? "member" : "members"} needed.`
+                            : "Timer is waiting for the first member."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="overflow-hidden rounded-[22px] border border-[#4ade80]/18 bg-[linear-gradient(135deg,rgba(74,222,128,0.14),rgba(255,255,255,0.045)_56%,rgba(7,10,8,0.58))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#86efac]">
+                      Still surviving
+                    </p>
+                    <p className="mt-2 text-[32px] font-black leading-none text-[#4ade80] drop-shadow-[0_0_20px_rgba(74,222,128,0.18)]">
+                      {challenge.survivors}
+                    </p>
+                  </div>
+                  <div className="overflow-hidden rounded-[22px] border border-red-400/16 bg-[linear-gradient(135deg,rgba(248,113,113,0.13),rgba(255,255,255,0.04)_56%,rgba(7,10,8,0.58))] p-3 text-right shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-red-300">
+                      Eliminated
+                    </p>
+                    <p className="mt-2 text-[32px] font-black leading-none text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.14)]">
+                      {challenge.eliminated}
+                    </p>
+                  </div>
+                </div>
+
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   {[
                     [CalendarDays, "Started", challenge.startedAt],
@@ -240,7 +388,13 @@ export function CommunityChallengePreviewScreen({
                     [
                       ShieldCheck,
                       "Status",
-                      isJoined ? "You joined" : "Open to join",
+                      hasBatchStarted
+                        ? isJoined
+                          ? "Started"
+                          : "Next batch"
+                        : isJoined
+                          ? "Waiting room"
+                          : "Open to join",
                     ],
                   ].map(([Icon, label, value]) => {
                     const DetailIcon = Icon as typeof CalendarDays;
@@ -285,7 +439,7 @@ export function CommunityChallengePreviewScreen({
               <section className="community-preview-panel community-preview-shine relative mt-5 overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,23,19,0.9),rgba(7,10,8,0.98))] p-5 text-center shadow-[0_20px_58px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)]">
                 <div className="relative z-10 mb-3 flex items-center justify-center gap-2 text-sm font-black uppercase tracking-[0.12em] text-[#cbd5e1]">
                   <Clock3 size={18} className="text-[#94a3b8]" />
-                  Ends in
+                  {timerTitle}
                 </div>
                 <div className="relative z-10 grid grid-cols-3 gap-3">
                   {[
@@ -303,14 +457,23 @@ export function CommunityChallengePreviewScreen({
                     </div>
                   ))}
                 </div>
+                <p className="relative z-10 mx-auto mt-4 max-w-[300px] text-[12px] font-semibold leading-snug text-[#94a3b8]">
+                  {timerCaption}
+                </p>
               </section>
               <button
                 type="button"
-                onClick={isJoined ? undefined : handleJoin}
-                disabled={isJoined}
-                className="community-preview-panel mt-5 mb-[calc(var(--safe-area-bottom)+24px)] flex min-h-[62px] w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#4ade80,#22c55e)] px-5 text-[16px] font-black uppercase tracking-[0.06em] text-[#061006] shadow-[0_20px_48px_rgba(74,222,128,0.32)] transition-transform active:scale-[0.98] disabled:border disabled:border-[#4ade80]/25 disabled:bg-none disabled:bg-[#4ade80]/12 disabled:text-[#d7ffe6] disabled:shadow-none"
+                onClick={handlePrimaryAction}
+                className={`community-preview-panel mt-5 mb-[calc(var(--safe-area-bottom)+24px)] flex min-h-[62px] w-full items-center justify-center rounded-full px-5 text-[16px] font-black uppercase tracking-[0.06em] transition-transform active:scale-[0.98] ${
+                  hasBatchStarted && !isJoined
+                    ? "cursor-default border border-amber-300/22 bg-amber-300/10 text-amber-100 shadow-none"
+                    : isJoined
+                    ? "border border-[#4ade80]/25 bg-[#4ade80]/12 text-[#d7ffe6] shadow-none"
+                    : "bg-[linear-gradient(135deg,#4ade80,#22c55e)] text-[#061006] shadow-[0_20px_48px_rgba(74,222,128,0.32)]"
+                }`}
+                disabled={hasBatchStarted && !isJoined}
               >
-                {isJoined ? "Joined Community Dare" : "Join Community Dare"}
+                {primaryButtonLabel}
               </button>
               </div>
             </div>

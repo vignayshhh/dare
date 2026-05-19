@@ -9,7 +9,7 @@ const DISMISS_DELAY = 250;
 const PARTICLE_COUNT = 100;
 const STORAGE_KEY = "dare_intro_played";
 const LAUNCH_BACKGROUND =
-  "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.24), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.18), transparent 30%), radial-gradient(circle at 82% 72%, rgba(20,184,166,0.16), transparent 34%), linear-gradient(180deg, #06140f 0%, #0a1f18 48%, #03110d 100%)";
+  "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.12), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.07), transparent 28%), radial-gradient(circle at 82% 72%, rgba(20,184,166,0.06), transparent 34%), linear-gradient(180deg, #030403 0%, #050705 48%, #020302 100%)";
 
 interface Particle {
   x: number;

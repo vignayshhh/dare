@@ -146,7 +146,15 @@ export function AlertsScreen({
   const handleAlertClick = async (alert: AlertEntity) => {
     // Mark as read first. Temporary mock entries are display-only.
     if (!alert.id.startsWith("mock-")) {
-      await markAsRead(alert.id);
+      const alertIds = Array.isArray(alert.metadata?.aggregatedAlertIds)
+        ? alert.metadata.aggregatedAlertIds
+        : [alert.id];
+
+      await Promise.all(
+        alertIds
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+          .map((id) => markAsRead(id)),
+      );
     }
 
     if (
@@ -373,6 +381,17 @@ export function AlertsScreen({
   }, [currentUser?.id]);
 
   const getAlertActivityTime = (alert: AlertEntity) => {
+    const latestAggregatedAt =
+      alert.metadata?.lastActivityAt ||
+      alert.metadata?.lastReactionAt ||
+      alert.metadata?.lastInteractionAt;
+
+    if (latestAggregatedAt) {
+      return typeof latestAggregatedAt === "number"
+        ? new Date(latestAggregatedAt).toISOString()
+        : latestAggregatedAt;
+    }
+
     if (alert.type !== "SUS_PROFILE_VIEWING") {
       return alert.createdAt;
     }
@@ -511,6 +530,7 @@ export function AlertsScreen({
   const socialAlerts = alerts.filter(
     (alert) =>
       alert.isSocialAlert() &&
+      alert.type !== "STORY_REPLY" &&
       !isPersonalDareAlert(alert) &&
       !isFriendChallengeAlert(alert),
   );
@@ -668,9 +688,245 @@ export function AlertsScreen({
     return [...aggregatedReactions, ...nonStoryReactionAlerts];
   };
 
-  const aggregatedSocialAlerts = aggregateStoryReactionAlerts(
-    aggregateLikeAlerts(socialAlerts),
-  );
+  const legacyAlertAggregators = [
+    aggregateLikeAlerts,
+    aggregateStoryReactionAlerts,
+  ];
+  void legacyAlertAggregators;
+
+  const aggregationTargetForAlert = (alert: AlertEntity) => {
+    switch (alert.type) {
+      case "POST_LIKED":
+        return `post-like:${alert.metadata?.postId || alert.entityId}`;
+      case "STORY_REACTION":
+        return `story-reaction:${alert.entityId}`;
+      case "COMMENT_RECEIVED":
+        return `post-comment:${alert.metadata?.postId || alert.entityId}`;
+      case "COMMENT_REPLY":
+        return `comment-reply:${
+          alert.metadata?.parentCommentId ||
+          alert.metadata?.commentId ||
+          alert.metadata?.postId ||
+          alert.entityId
+        }`;
+      case "STORY_REPLY":
+        return `story-reply:${alert.entityId}`;
+      default:
+        return null;
+    }
+  };
+
+  const getAggregatedActor = (alert: AlertEntity) => ({
+    id: alert.actorId || alert.metadata?.actorId || alert.id,
+    name: alert.metadata?.actorName || "Someone",
+    username: String(alert.metadata?.actorUsername || "someone").replace(
+      /^@/,
+      "",
+    ),
+    avatar: alert.metadata?.actorAvatar || "",
+    reactionType: alert.metadata?.reactionType || undefined,
+    reactionTypes: alert.metadata?.reactionType
+      ? [alert.metadata.reactionType === "hate" ? "hate" : "like"]
+      : [],
+    lastActivityAt: getAlertActivityTime(alert),
+  });
+
+  const getUniqueAggregatedActors = (sortedAlerts: AlertEntity[]) => {
+    const uniqueActors = new Map<string, ReturnType<typeof getAggregatedActor>>();
+
+    for (const alert of sortedAlerts) {
+      const metadataActors = Array.isArray(alert.metadata?.actors)
+        ? [...alert.metadata.actors].reverse()
+        : [];
+
+      for (const metadataActor of metadataActors) {
+        const actor = {
+          id: metadataActor.id || metadataActor.userId || alert.actorId,
+          name: metadataActor.name || metadataActor.displayName || "Someone",
+          username: String(metadataActor.username || "someone").replace(
+            /^@/,
+            "",
+          ),
+          avatar: metadataActor.avatar || metadataActor.actorAvatar || "",
+          reactionType: metadataActor.reactionType || alert.metadata?.reactionType,
+          reactionTypes: [
+            ...new Set([
+              ...(Array.isArray(metadataActor.reactionTypes)
+                ? metadataActor.reactionTypes
+                : []),
+              ...(metadataActor.reactionType
+                ? [metadataActor.reactionType]
+                : []),
+              ...(alert.metadata?.reactionType
+                ? [alert.metadata.reactionType]
+                : []),
+            ]),
+          ].map((type) => (type === "hate" ? "hate" : "like")),
+          lastActivityAt: getAlertActivityTime(alert),
+        };
+
+        const existingActor = uniqueActors.get(actor.id);
+        if (existingActor) {
+          uniqueActors.set(actor.id, {
+            ...existingActor,
+            reactionTypes: [
+              ...new Set([
+                ...(existingActor.reactionTypes || []),
+                ...actor.reactionTypes,
+              ]),
+            ],
+          });
+        } else {
+          uniqueActors.set(actor.id, actor);
+        }
+      }
+
+      if (metadataActors.length === 0) {
+        const actor = getAggregatedActor(alert);
+        const existingActor = uniqueActors.get(actor.id);
+        if (existingActor) {
+          uniqueActors.set(actor.id, {
+            ...existingActor,
+            reactionTypes: [
+              ...new Set([
+                ...(existingActor.reactionTypes || []),
+                ...actor.reactionTypes,
+              ]),
+            ],
+          });
+        } else {
+          uniqueActors.set(actor.id, actor);
+        }
+      }
+    }
+
+    return [...uniqueActors.values()];
+  };
+
+  const formatActorName = (actor: ReturnType<typeof getAggregatedActor>) => {
+    const username = actor.username || actor.name || "someone";
+    return username.startsWith("@") ? username : `@${username}`;
+  };
+
+  const formatAggregatedActorLine = (
+    actors: ReturnType<typeof getAggregatedActor>[],
+  ) => {
+    const names = actors.slice(0, 3).map(formatActorName);
+
+    if (actors.length <= 1) return names[0] || "@someone";
+    if (actors.length === 2) return `${names[0]} and ${names[1]}`;
+    if (actors.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+
+    return `${names[0]}, ${names[1]} and ${actors.length - 2} others`;
+  };
+
+  const getAggregatedActionPhrase = (
+    alert: AlertEntity,
+    actors: ReturnType<typeof getAggregatedActor>[] = [],
+  ) => {
+    switch (alert.type) {
+      case "POST_LIKED":
+        return "liked your post";
+      case "STORY_REACTION": {
+        const allReactionTypes = new Set(
+          actors.flatMap((actor) => actor.reactionTypes || []),
+        );
+
+        if (allReactionTypes.has("like") && allReactionTypes.has("hate")) {
+          return actors.length === 1
+            ? "liked and hated your story"
+            : "reacted to your story";
+        }
+
+        return allReactionTypes.has("hate")
+          ? "hated your story"
+          : "liked your story";
+      }
+      case "COMMENT_RECEIVED":
+        return "commented on your post";
+      case "COMMENT_REPLY":
+        return "replied to your comment";
+      case "STORY_REPLY":
+        return "replied to your story";
+      default:
+        return alert.message || "sent you an alert";
+    }
+  };
+
+  const aggregateAllSocialAlerts = (alertsList: AlertEntity[]) => {
+    const groupedAlerts = new Map<string, AlertEntity[]>();
+    const passthroughAlerts: AlertEntity[] = [];
+
+    for (const alert of alertsList) {
+      const aggregationTarget = aggregationTargetForAlert(alert);
+
+      if (!aggregationTarget) {
+        passthroughAlerts.push(alert);
+        continue;
+      }
+
+      const groupKey = `${alert.type}:${aggregationTarget}`;
+      groupedAlerts.set(groupKey, [
+        ...(groupedAlerts.get(groupKey) || []),
+        alert,
+      ]);
+    }
+
+    const aggregatedAlerts = [...groupedAlerts.values()].map((group) => {
+      const sorted = [...group].sort(
+        (a, b) =>
+          new Date(getAlertActivityTime(b)).getTime() -
+          new Date(getAlertActivityTime(a)).getTime(),
+      );
+      const latestAlert = sorted[0];
+      const actors = getUniqueAggregatedActors(sorted);
+      const latestActor = actors[0] || getAggregatedActor(latestAlert);
+      const lastActivityAt = getAlertActivityTime(latestAlert);
+
+      return AlertEntity.create({
+        id: latestAlert.id,
+        userId: latestAlert.userId,
+        type: latestAlert.type,
+        entityId: latestAlert.entityId,
+        actorId: latestActor.id || latestAlert.actorId,
+        message:
+          actors.length > 1
+            ? `${formatAggregatedActorLine(actors)} ${getAggregatedActionPhrase(latestAlert, actors)}`
+            : `${formatActorName(latestActor)} ${getAggregatedActionPhrase(latestAlert, actors)}`,
+        metadata: {
+          ...latestAlert.metadata,
+          actorName: latestActor.name,
+          actorUsername: latestActor.username,
+          actorAvatar: latestActor.avatar,
+          actors,
+          aggregatedCount: actors.length,
+          aggregatedAlertIds: sorted.map((alert) => alert.id),
+          lastActivityAt,
+          commentText: latestAlert.metadata?.commentText,
+          reactionType:
+            latestAlert.type === "STORY_REACTION"
+              ? actors.some((actor) => actor.reactionTypes?.includes("like")) &&
+                actors.some((actor) => actor.reactionTypes?.includes("hate"))
+                ? "mixed"
+                : latestAlert.metadata?.reactionType === "hate"
+                  ? "hate"
+                  : "like"
+              : latestAlert.metadata?.reactionType,
+        },
+        isRead: sorted.every((alert) => alert.isRead),
+        createdAt: lastActivityAt,
+        updatedAt: lastActivityAt,
+      });
+    });
+
+    return [...aggregatedAlerts, ...passthroughAlerts].sort(
+      (a, b) =>
+        new Date(getAlertActivityTime(b)).getTime() -
+        new Date(getAlertActivityTime(a)).getTime(),
+    );
+  };
+
+  const aggregatedSocialAlerts = aggregateAllSocialAlerts(socialAlerts);
 
   // Deduplicate alerts by ID to prevent key conflicts
   const deduplicateAlerts = (alerts: any[]) => {
@@ -722,10 +978,9 @@ export function AlertsScreen({
       return alert;
     }
 
-    const metadataSaysLive = !!alert.metadata?.isLive;
     const hasLiveViewer = liveViewerMap.has(alert.actorId);
 
-    if (!hasLiveViewer && !metadataSaysLive) {
+    if (!hasLiveViewer) {
       const inactiveUsername =
         alert.metadata?.viewerUsername ||
         alert.metadata?.actorUsername ||
@@ -756,6 +1011,9 @@ export function AlertsScreen({
       .updateMetadata({
         ...alert.metadata,
         isLive: true,
+        lastActivityAt: new Date(clockTick).toISOString(),
+        viewingStartTime:
+          alert.metadata?.viewingStartTime || new Date(clockTick).toISOString(),
         viewerUsername: liveUsername.replace(/^@/, ""),
         actorUsername: liveUsername.replace(/^@/, ""),
       })
@@ -1077,6 +1335,57 @@ export function AlertsScreen({
     };
   };
 
+  const getActorHandle = (actorInfo: ReturnType<typeof getActorInfo>) => {
+    return actorInfo.username && actorInfo.username !== "unknown"
+      ? `@${actorInfo.username.replace(/^@/, "")}`
+      : actorInfo.name;
+  };
+
+  const escapeRegex = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const getAlertActionMessage = (
+    alert: AlertEntity,
+    actorInfo: ReturnType<typeof getActorInfo>,
+  ) => {
+    let message = String(alert.message || "").trim();
+    const actorVariants = [
+      actorInfo.name,
+      actorInfo.username,
+      actorInfo.username ? `@${actorInfo.username.replace(/^@/, "")}` : "",
+      alert.metadata?.actorName,
+      alert.metadata?.actorUsername,
+      alert.metadata?.actorUsername
+        ? `@${String(alert.metadata.actorUsername).replace(/^@/, "")}`
+        : "",
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.trim())
+      .filter(
+        (value, index, values) =>
+          value.length > 0 &&
+          value.toLowerCase() !== "unknown" &&
+          value.toLowerCase() !== "unknown user" &&
+          values.findIndex(
+            (candidate) => candidate.toLowerCase() === value.toLowerCase(),
+          ) === index,
+      )
+      .sort((a, b) => b.length - a.length);
+
+    for (const variant of actorVariants) {
+      const pattern = new RegExp(
+        `^\\s*${escapeRegex(variant)}\\s*(?:[-:•]|\\s+)\\s*`,
+        "i",
+      );
+      if (pattern.test(message)) {
+        message = message.replace(pattern, "").trim();
+        break;
+      }
+    }
+
+    return message || alert.message;
+  };
+
   const handleAcceptFriendRequest = async (
     alertId: string,
     friendshipId: string,
@@ -1300,24 +1609,45 @@ export function AlertsScreen({
           icon: <MessageSquare size={12} />,
         };
       case "STORY_REACTION": {
+        const isMixedReaction = alert.metadata?.reactionType === "mixed";
         const isHateReaction =
           alert.metadata?.reactionType === "hate" ||
           String(alert.message || "").toLowerCase().includes("hated your story");
 
         return {
-          label: isHateReaction ? "Story Hated" : "Story Liked",
-          accentBarClass: isHateReaction ? "bg-red-400" : "bg-[#4ade80]",
-          pillClass: isHateReaction
+          label: isMixedReaction
+            ? "Story Reacted"
+            : isHateReaction
+              ? "Story Hated"
+              : "Story Liked",
+          accentBarClass: isMixedReaction
+            ? "bg-fuchsia-400"
+            : isHateReaction
+              ? "bg-red-400"
+              : "bg-[#4ade80]",
+          pillClass: isMixedReaction
+            ? "border-fuchsia-500/25 bg-fuchsia-500/12 text-fuchsia-300"
+            : isHateReaction
             ? "border-red-500/25 bg-red-500/12 text-red-300"
             : "border-[#4ade80]/25 bg-[#4ade80]/10 text-[#86efac]",
-          iconWrapClass: isHateReaction
+          iconWrapClass: isMixedReaction
+            ? "border-fuchsia-500/24 bg-fuchsia-500/12 text-fuchsia-300"
+            : isHateReaction
             ? "border-red-500/24 bg-red-500/12 text-red-300"
             : "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#86efac]",
-          glowClass: isHateReaction ? "bg-red-500/14" : "bg-[#4ade80]/14",
-          railClass: isHateReaction
+          glowClass: isMixedReaction
+            ? "bg-fuchsia-500/14"
+            : isHateReaction
+              ? "bg-red-500/14"
+              : "bg-[#4ade80]/14",
+          railClass: isMixedReaction
+            ? "from-fuchsia-500/0 via-fuchsia-500/80 to-fuchsia-500/0"
+            : isHateReaction
             ? "from-red-500/0 via-red-500/80 to-red-500/0"
             : "from-[#4ade80]/0 via-[#4ade80]/80 to-[#4ade80]/0",
-          icon: isHateReaction ? (
+          icon: isMixedReaction ? (
+            <Sparkles size={12} />
+          ) : isHateReaction ? (
             <XCircle size={12} />
           ) : (
             <Heart size={12} fill="currentColor" />
@@ -1407,51 +1737,17 @@ export function AlertsScreen({
     );
   };
 
-  const renderSocialAlertMessage = (alert: AlertEntity) => {
-    if (alert.type !== "STORY_REACTION") {
-      return alert.message;
-    }
-
-    const normalizedMessage = alert.message.toLowerCase();
-    const highlightPhrase = normalizedMessage.includes("hated your story")
-      ? "hated your story"
-      : normalizedMessage.includes("liked your story")
-        ? "liked your story"
-        : null;
-
-    if (!highlightPhrase) {
-      return alert.message;
-    }
-
-    const matchIndex = normalizedMessage.indexOf(highlightPhrase);
-    const before = alert.message.slice(0, matchIndex);
-    const highlightedText = alert.message.slice(
-      matchIndex,
-      matchIndex + highlightPhrase.length,
-    );
-    const after = alert.message.slice(matchIndex + highlightPhrase.length);
-    const isHateReaction = highlightPhrase === "hated your story";
-
-    return (
-      <>
-        {before}
-        <span
-          className={`mx-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black uppercase tracking-[0.08em] ${
-            isHateReaction
-              ? "border-red-500/24 bg-red-500/12 text-red-200 shadow-[0_0_16px_rgba(239,68,68,0.12)]"
-              : "border-[#4ade80]/24 bg-[#4ade80]/12 text-[#bbf7d0] shadow-[0_0_16px_rgba(74,222,128,0.12)]"
-          }`}
-        >
-          {highlightedText}
-        </span>
-        {after}
-      </>
-    );
-  };
+  const renderSocialAlertMessage = (
+    alert: AlertEntity,
+    message = alert.message,
+  ) => message;
 
   const renderAlertItem = (alert: AlertEntity) => {
     const actorInfo = getActorInfo(alert);
     const meta = getSocialAlertMeta(alert);
+    const actorHandle = getActorHandle(actorInfo);
+    const actionMessage = getAlertActionMessage(alert, actorInfo);
+    const isAggregatedAlert = Number(alert.metadata?.aggregatedCount || 0) > 1;
     const isDareOrTruth =
       alert.type === "DARE_RECEIVED" ||
       alert.type === "DARE_ACCEPTED" ||
@@ -1466,8 +1762,12 @@ export function AlertsScreen({
       isDareOrTruth ||
       alert.type === "COMMENT_RECEIVED" ||
       alert.type === "COMMENT_REPLY";
-    const isCompactChallengeCapsule =
-      alert.type === "DARE_RECEIVED" || alert.type === "DARE_COMPLETED";
+    const isCompactAlertCapsule =
+      alert.type === "DARE_RECEIVED" ||
+      alert.type === "DARE_COMPLETED" ||
+      alert.type === "STORY_REACTION" ||
+      alert.type === "POST_LIKED" ||
+      alert.type === "FRIEND_REQUEST";
 
     return (
       <div
@@ -1500,41 +1800,43 @@ export function AlertsScreen({
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="mb-2 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <span className="block truncate text-[13px] font-bold tracking-tight text-[#6ee7b7]">
-                  {actorInfo.username
-                    ? `@${actorInfo.username.replace(/^@/, "")}`
-                    : actorInfo.name}
-                </span>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex flex-wrap items-center gap-1.5">
+                <div
+                  className={`inline-flex items-center rounded-full border font-bold uppercase tracking-[0.16em] ${
+                    isCompactAlertCapsule
+                      ? "gap-1 px-2.5 py-0.5 text-[10px]"
+                      : "gap-1.5 px-3 py-1 text-[11px]"
+                  } ${meta.pillClass}`}
+                >
+                  {meta.icon}
+                  <span>{meta.label}</span>
+                </div>
+                {alert.metadata.isLive && alert.metadata.liveDuration && (
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1 text-[11px] font-semibold text-[#86efac]">
+                    <div className="h-1.5 w-1.5 rounded-full bg-[#4ade80] animate-pulse" />
+                    <span>{alert.metadata.liveDuration}</span>
+                  </div>
+                )}
               </div>
               <span className="shrink-0 pt-0.5 text-[10px] font-medium text-[#64748b]">
                 {getTimeAgo(getAlertActivityTime(alert))}
               </span>
             </div>
 
-            <p className="mb-2.5 text-[13px] leading-snug text-[#e2e8f0]">
-              {renderSocialAlertMessage(alert)}
-            </p>
-
-            <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
-              <div
-                className={`inline-flex items-center rounded-full border font-bold uppercase tracking-[0.16em] ${
-                  isCompactChallengeCapsule || alert.type === "STORY_REACTION"
-                    ? "gap-1 px-2.5 py-0.5 text-[10px]"
-                    : "gap-1.5 px-3 py-1 text-[11px]"
-                } ${meta.pillClass}`}
-              >
-                {meta.icon}
-                <span>{meta.label}</span>
-              </div>
-              {alert.metadata.isLive && alert.metadata.liveDuration && (
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-3 py-1 text-[11px] font-semibold text-[#86efac]">
-                  <div className="h-1.5 w-1.5 rounded-full bg-[#4ade80] animate-pulse" />
-                  <span>{alert.metadata.liveDuration}</span>
-                </div>
+            <p className="mb-2.5 min-w-0 text-[13px] leading-snug text-[#e2e8f0]">
+              {isAggregatedAlert ? (
+                <span>{renderSocialAlertMessage(alert, alert.message)}</span>
+              ) : (
+                <>
+                  <span className="font-bold tracking-tight text-[#6ee7b7]">
+                    {actorHandle}
+                  </span>
+                  <span className="mx-1.5 font-semibold text-[#64748b]">-</span>
+                  <span>{renderSocialAlertMessage(alert, actionMessage)}</span>
+                </>
               )}
-            </div>
+            </p>
 
             {false && isClickable && (
               <div className="hidden items-center text-[#4ade80] text-xs font-medium mb-2">
@@ -1647,9 +1949,6 @@ export function AlertsScreen({
                     </div>
                   )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#94a3b8]">
-                    Engagement
-                  </p>
                   <p className="truncate text-[13px] text-white">
                     {alert.metadata.allLikers?.length || 1} people reacted to
                     your post
@@ -1714,6 +2013,8 @@ export function AlertsScreen({
   const renderSusAlertItem = (alert: AlertEntity) => {
     const actorInfo = getActorInfo(alert);
     const meta = alert.metadata || {};
+    const actorHandle = getActorHandle(actorInfo);
+    const actionMessage = getAlertActionMessage(alert, actorInfo);
     const isLiveProfileView =
       alert.type === "SUS_PROFILE_VIEWING" && !!meta.isLive;
 
@@ -1743,6 +2044,29 @@ export function AlertsScreen({
       accentColor = "text-yellow-300";
       bgAccent = "border-yellow-400/10";
     }
+
+    const susLabel =
+      alert.type === "SUS_REPEATED_LIKES"
+        ? "Repeated Likes"
+        : alert.type === "SUS_PHOTO_VIEWS"
+          ? "Photo Views"
+          : alert.type === "SUS_MENTION_TALKING"
+            ? "Mention Talk"
+            : alert.type === "SUS_CLOSE_FRIEND_ACTIVITY"
+              ? "Close Friend"
+              : isLiveProfileView
+                ? "Live View"
+                : "Profile View";
+    const susPillClass =
+      alert.type === "SUS_REPEATED_LIKES"
+        ? "border-pink-500/20 bg-pink-500/10 text-pink-300"
+        : alert.type === "SUS_PHOTO_VIEWS"
+          ? "border-amber-500/20 bg-amber-500/10 text-amber-300"
+          : alert.type === "SUS_MENTION_TALKING"
+            ? "border-purple-500/20 bg-purple-500/10 text-purple-300"
+            : alert.type === "SUS_CLOSE_FRIEND_ACTIVITY"
+              ? "border-yellow-400/20 bg-yellow-400/10 text-yellow-200"
+              : "border-red-500/25 bg-red-500/10 text-red-200";
 
     return (
       <div
@@ -1775,32 +2099,100 @@ export function AlertsScreen({
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="mb-2 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <span
-                  className={`block truncate text-[13px] font-bold ${accentColor}`}
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex flex-wrap items-center gap-1.5">
+                <div
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] ${susPillClass} [&_svg]:h-3 [&_svg]:w-3`}
                 >
-                  @{actorInfo.username}
-                </span>
+                  {icon}
+                  <span>{susLabel}</span>
+                </div>
+                {isLiveProfileView && (
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1">
+                    <Eye size={12} className="text-red-300" />
+                    <span className="text-[11px] font-semibold text-red-200">
+                      Watching right now
+                    </span>
+                  </div>
+                )}
+                {alert.type === "SUS_REPEATED_LIKES" && meta.tapCount && (
+                  <div className="inline-flex items-center space-x-1.5 rounded-full border border-pink-500/20 bg-pink-500/10 px-2.5 py-1">
+                    <Heart size={12} className="text-pink-400" fill="#f472b6" />
+                    <span className="text-[11px] font-bold text-pink-400">
+                      {meta.tapCount}x
+                    </span>
+                  </div>
+                )}
+                {alert.type === "SUS_PHOTO_VIEWS" && meta.viewCount && (
+                  <div className="inline-flex items-center space-x-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1">
+                    <Eye size={12} className="text-amber-400" />
+                    <span className="text-[11px] font-bold text-amber-400">
+                      {meta.viewCount} views
+                    </span>
+                  </div>
+                )}
+                {alert.type === "SUS_MENTION_TALKING" && meta.actorUsername && (
+                  <div className="inline-flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1">
+                    <span className="text-[11px] font-bold text-purple-300">
+                      @{meta.actorUsername}
+                    </span>
+                  </div>
+                )}
+                {alert.type === "SUS_MENTION_TALKING" && meta.otherUsername && (
+                  <div className="inline-flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1">
+                    <span className="text-[11px] font-bold text-purple-300">
+                      @{meta.otherUsername}
+                    </span>
+                  </div>
+                )}
+                {alert.type === "SUS_MENTION_TALKING" && meta.time && (
+                  <div className="inline-flex items-center space-x-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+                    <MessageSquare size={12} className="text-purple-400" />
+                    <span className="text-[11px] text-[#94a3b8]">
+                      {meta.time}
+                    </span>
+                  </div>
+                )}
+                {alert.type === "SUS_CLOSE_FRIEND_ACTIVITY" &&
+                  meta.interactionType && (
+                    <div className="inline-flex rounded-full border border-yellow-400/20 bg-yellow-400/10 px-2.5 py-1">
+                      <span className="text-[11px] font-bold text-yellow-200">
+                        {meta.interactionType === "commented"
+                          ? "Comment"
+                          : meta.interactionType === "repeated_like"
+                            ? `${meta.tapCount || 0}x likes`
+                            : meta.interactionType === "dedicated_story"
+                              ? "Story dedication"
+                              : `${meta.distinctLikedPosts || 0} posts liked`}
+                      </span>
+                    </div>
+                  )}
+                {alert.type === "SUS_CLOSE_FRIEND_ACTIVITY" &&
+                  meta.interactionType === "dedicated_story" && (
+                    <div className="inline-flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2.5 py-1">
+                      {meta.targetAvatar && (
+                        <img
+                          src={meta.targetAvatar}
+                          alt={meta.targetName || meta.targetUsername || "Target"}
+                          className="h-5 w-5 rounded-full object-cover"
+                        />
+                      )}
+                      <span className="text-[11px] font-bold text-[#bbf7d0]">
+                        To @{meta.targetUsername || "someone"}
+                      </span>
+                    </div>
+                  )}
               </div>
               <span className="shrink-0 pt-0.5 text-[10px] font-medium text-[#64748b]">
                 {getTimeAgo(getAlertActivityTime(alert))}
               </span>
             </div>
 
-            {/* Message */}
-            <p className="mb-2.5 text-[13px] leading-snug text-[#e2e8f0]">
-              {alert.message}
+            <p className="mb-2.5 min-w-0 text-[13px] leading-snug text-[#e2e8f0]">
+              <span className={`font-bold ${accentColor}`}>{actorHandle}</span>
+              <span className="mx-1.5 font-semibold text-[#64748b]">-</span>
+              <span>{actionMessage}</span>
             </p>
-
-            {isLiveProfileView && (
-              <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1">
-                <Eye size={12} className="text-red-300" />
-                <span className="text-[11px] font-semibold text-red-200">
-                  Watching right now
-                </span>
-              </div>
-            )}
 
             {/* Post thumbnail for repeated likes & photo views */}
             {(alert.type === "SUS_REPEATED_LIKES" ||
@@ -1827,85 +2219,8 @@ export function AlertsScreen({
                 </div>
               )}
 
-            {/* Tap count badge for repeated likes */}
-            {alert.type === "SUS_REPEATED_LIKES" && meta.tapCount && (
-              <div className="mt-1.5 flex items-center space-x-2">
-                <div className="flex items-center space-x-1.5 rounded-full border border-pink-500/20 bg-pink-500/10 px-2.5 py-1">
-                  <Heart size={12} className="text-pink-400" fill="#f472b6" />
-                  <span className="text-[11px] font-bold text-pink-400">
-                    {meta.tapCount}x
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* View count for photo views */}
-            {alert.type === "SUS_PHOTO_VIEWS" && meta.viewCount && (
-              <div className="mt-1.5 flex items-center space-x-2">
-                <div className="flex items-center space-x-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1">
-                  <Eye size={12} className="text-amber-400" />
-                  <span className="text-[11px] font-bold text-amber-400">
-                    {meta.viewCount} views
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* @mention talking — show both usernames who were chatting */}
-            {alert.type === "SUS_MENTION_TALKING" && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {meta.actorUsername && (
-                  <div className="flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1">
-                    <span className="text-[11px] font-bold text-purple-300">
-                      @{meta.actorUsername}
-                    </span>
-                  </div>
-                )}
-                {meta.otherUsername && (
-                  <div className="flex items-center space-x-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1">
-                    <span className="text-[11px] font-bold text-purple-300">
-                      @{meta.otherUsername}
-                    </span>
-                  </div>
-                )}
-                {meta.time && (
-                  <div className="flex items-center space-x-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
-                    <MessageSquare size={12} className="text-purple-400" />
-                    <span className="text-[11px] text-[#94a3b8]">{meta.time}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
             {alert.type === "SUS_CLOSE_FRIEND_ACTIVITY" && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {meta.interactionType && (
-                  <div className="rounded-full border border-yellow-400/20 bg-yellow-400/10 px-2.5 py-1">
-                    <span className="text-[11px] font-bold text-yellow-200">
-                      {meta.interactionType === "commented"
-                        ? "Comment"
-                        : meta.interactionType === "repeated_like"
-                          ? `${meta.tapCount || 0}x likes`
-                          : meta.interactionType === "dedicated_story"
-                            ? "Story dedication"
-                            : `${meta.distinctLikedPosts || 0} posts liked`}
-                    </span>
-                  </div>
-                )}
-                {meta.interactionType === "dedicated_story" && (
-                  <div className="flex items-center gap-2 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2.5 py-1">
-                    {meta.targetAvatar && (
-                      <img
-                        src={meta.targetAvatar}
-                        alt={meta.targetName || meta.targetUsername || "Target"}
-                        className="h-5 w-5 rounded-full object-cover"
-                      />
-                    )}
-                    <span className="text-[11px] font-bold text-[#bbf7d0]">
-                      To @{meta.targetUsername || "someone"}
-                    </span>
-                  </div>
-                )}
                 {meta.commentText && (
                   <div className="w-full rounded-[18px] border border-white/6 bg-[linear-gradient(180deg,rgba(27,24,18,0.94),rgba(19,16,12,0.98))] p-3">
                     <p className="text-[13px] leading-snug text-[#e2e8f0]">
@@ -1986,18 +2301,18 @@ export function AlertsScreen({
       {/* Header */}
       <div className="safe-area-top sticky top-0 z-10 overflow-hidden border-b border-white/8 bg-[radial-gradient(circle_at_50%_-40%,rgba(74,222,128,0.18),transparent_58%),linear-gradient(180deg,rgba(10,15,11,0.98)_0%,rgba(4,7,5,0.94)_100%)] shadow-[0_20px_54px_rgba(0,0,0,0.38)] backdrop-blur-xl">
         <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(74,222,128,0))]" />
-        <div className="px-4 pb-4 pt-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="px-4 pb-2 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
             <button
               onClick={onBack}
-              className="z-10 flex h-12 w-12 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_18px_44px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
+              className="z-10 flex h-11 w-11 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.04] text-[#94a3b8] shadow-[0_16px_38px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-[#4ade80]/35 hover:bg-[#4ade80]/10 hover:text-white"
               aria-label="Back"
             >
-              <ArrowLeft size={21} />
+              <ArrowLeft size={19} />
             </button>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <h1 className="text-[32px] font-black leading-none tracking-tight text-white">
+                <h1 className="text-[30px] font-black leading-none tracking-tight text-white">
                   Alerts
                 </h1>
               </div>
@@ -2009,7 +2324,7 @@ export function AlertsScreen({
                   setAlertMode("dare");
                   setDareAlertTab("personal");
                 }}
-                className={`relative flex h-14 w-14 items-center justify-center rounded-[22px] border text-xl font-black shadow-[0_18px_44px_rgba(0,0,0,0.32)] transition-colors ${
+                className={`relative flex h-[52px] w-[52px] items-center justify-center rounded-[20px] border text-lg font-black shadow-[0_16px_38px_rgba(0,0,0,0.3)] transition-colors ${
                   alertMode === "dare"
                     ? "border-[#4ade80]/28 bg-[#4ade80]/12 text-[#86efac]"
                     : "border-white/8 bg-white/[0.04] text-[#94a3b8] hover:border-[#4ade80]/24 hover:text-white"
@@ -2018,7 +2333,7 @@ export function AlertsScreen({
               >
                 D
                 {dareUnreadCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full border border-black bg-[#4ade80] px-1 text-[10px] font-black leading-none text-black shadow-[0_0_16px_rgba(74,222,128,0.42)]">
+                  <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full border border-black bg-[#4ade80] px-1 text-[9px] font-black leading-none text-black shadow-[0_0_16px_rgba(74,222,128,0.42)]">
                     {dareUnreadCount > 9 ? "9+" : dareUnreadCount}
                   </span>
                 )}
@@ -2026,16 +2341,16 @@ export function AlertsScreen({
               <button
                 type="button"
                 onClick={() => setAlertMode("main")}
-                className={`relative flex h-14 w-14 items-center justify-center rounded-[22px] border shadow-[0_18px_44px_rgba(0,0,0,0.32)] transition-colors ${
+                className={`relative flex h-[52px] w-[52px] items-center justify-center rounded-[20px] border shadow-[0_16px_38px_rgba(0,0,0,0.3)] transition-colors ${
                   alertMode === "main"
                     ? "border-[#4ade80]/24 bg-white/[0.04] text-[#4ade80]"
                     : "border-white/8 bg-white/[0.04] text-[#94a3b8] hover:border-[#4ade80]/24 hover:text-white"
                 }`}
                 aria-label="Open main alerts"
               >
-                <BellRing size={24} />
+                <BellRing size={22} />
                 {mainUnreadCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full border border-black bg-[#4ade80] px-1 text-[10px] font-black leading-none text-black shadow-[0_0_16px_rgba(74,222,128,0.42)]">
+                  <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full border border-black bg-[#4ade80] px-1 text-[9px] font-black leading-none text-black shadow-[0_0_16px_rgba(74,222,128,0.42)]">
                     {mainUnreadCount > 9 ? "9+" : mainUnreadCount}
                   </span>
                 )}
@@ -2045,7 +2360,7 @@ export function AlertsScreen({
         </div>
 
         {/* Tab Toggle */}
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-3.5">
           <div className="flex rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.94),rgba(10,14,10,0.98))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.05)]">
             {alertMode === "main" ? (
               <>

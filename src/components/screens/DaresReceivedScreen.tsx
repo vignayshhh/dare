@@ -76,11 +76,11 @@ const stripAtSymbol = (username?: string) =>
 const getCompletedCapsuleClasses =
   "border border-[#4ade80]/24 bg-[#4ade80]/10 text-[#bbf7d0] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 const sharedChallengeCardClass =
-  "card relative isolate animate-slide-up overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(16,22,17,0.98)_0%,rgba(8,13,9,0.99)_52%,rgba(5,8,6,0.99)_100%)] p-4 shadow-[0_22px_58px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.055)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#4ade80]/24 hover:shadow-[0_26px_66px_rgba(0,0,0,0.5),0_0_24px_rgba(74,222,128,0.08)]";
+  "card relative isolate animate-slide-up overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.97)_0%,rgba(8,13,9,0.99)_52%,rgba(5,8,6,0.99)_100%)] p-3.5 shadow-[0_20px_52px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.055)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-[#4ade80]/22 hover:shadow-[0_24px_60px_rgba(0,0,0,0.48),0_0_22px_rgba(74,222,128,0.07)]";
 const highlightedChallengeRingClass =
   "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-[#071008]";
 const curvedPromptPanelClass =
-  "rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.052),rgba(255,255,255,0.022))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.045)]";
+  "rounded-[22px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,22,18,0.94),rgba(6,9,8,0.98))] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.045)]";
 const curvedStatusCapsuleClass =
   "flex min-h-[42px] flex-1 items-center justify-center rounded-full px-3 py-2.5 text-center";
 const curvedActionButtonClass =
@@ -144,7 +144,7 @@ const ChallengeCard = memo(
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.075),transparent_72%)] opacity-80" />
         <div className="pointer-events-none absolute -right-14 -top-14 h-32 w-32 rounded-full bg-[#22d3ee]/7 blur-3xl" />
 
-        <div className="relative z-10 mb-3.5 flex items-center justify-between gap-3">
+        <div className="relative z-10 mb-3 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center space-x-3">
             <div className="relative">
               <Avatar
@@ -167,7 +167,7 @@ const ChallengeCard = memo(
                 Challenger
               </div>
               <div className="flex items-center space-x-2">
-                <h3 className="truncate text-[15px] font-black leading-tight tracking-tight text-white">
+                <h3 className="truncate text-[14.5px] font-black leading-tight tracking-tight text-white">
                   @{challenge.challenger.username || "unknown"}
                 </h3>
                 {challenge.challenger.verified && (
@@ -188,7 +188,7 @@ const ChallengeCard = memo(
           </div>
         </div>
 
-        <div className="relative z-10 mb-3.5">
+        <div className="relative z-10 mb-3">
           {challenge.type === "truth" ? (
             <>
               <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
@@ -196,7 +196,7 @@ const ChallengeCard = memo(
               </p>
               <div className={curvedPromptPanelClass}>
                 <div className="mb-3 h-1 w-14 rounded-full bg-[#4ade80]/90 shadow-[0_0_18px_rgba(74,222,128,0.22)]" />
-                <p className="text-[15px] font-bold leading-relaxed text-white">
+                <p className="text-[14.5px] font-bold leading-relaxed text-white">
                   {challenge.question}
                 </p>
               </div>
@@ -208,7 +208,7 @@ const ChallengeCard = memo(
               </p>
               <div className={curvedPromptPanelClass}>
                 <div className="mb-3 h-1 w-14 rounded-full bg-[linear-gradient(90deg,#22d3ee,#4ade80)] shadow-[0_0_18px_rgba(34,211,238,0.18)]" />
-                <p className="text-[15px] font-bold leading-relaxed text-white">
+                <p className="text-[14.5px] font-bold leading-relaxed text-white">
                   {challenge.action}
                 </p>
               </div>
@@ -400,7 +400,7 @@ const SentChallengeCard = memo(
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(74,222,128,0.075),transparent_72%)] opacity-80" />
         <div className="pointer-events-none absolute -right-14 -top-14 h-32 w-32 rounded-full bg-[#22d3ee]/7 blur-3xl" />
 
-        <div className="relative z-10 mb-3.5 flex items-center justify-between gap-3">
+        <div className="relative z-10 mb-3 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center space-x-3">
             <div className="relative">
               <Avatar
@@ -423,7 +423,7 @@ const SentChallengeCard = memo(
                 Sent to
               </div>
               <div className="flex items-center space-x-2">
-                <h3 className="truncate text-[15px] font-black leading-tight tracking-tight text-white">
+                <h3 className="truncate text-[14.5px] font-black leading-tight tracking-tight text-white">
                   @{challenge.receiver?.username || "unknown"}
                 </h3>
               </div>
@@ -455,7 +455,7 @@ const SentChallengeCard = memo(
           </div>
         </div>
 
-        <div className="relative z-10 mb-3.5">
+        <div className="relative z-10 mb-3">
           {challenge.type === "truth" ? (
             <>
               <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
@@ -463,7 +463,7 @@ const SentChallengeCard = memo(
               </p>
               <div className={curvedPromptPanelClass}>
                 <div className="mb-3 h-1 w-14 rounded-full bg-[#4ade80]/90 shadow-[0_0_18px_rgba(74,222,128,0.22)]" />
-                <p className="text-[15px] font-bold leading-relaxed text-white">
+                <p className="text-[14.5px] font-bold leading-relaxed text-white">
                   {challenge.question}
                 </p>
               </div>
@@ -475,7 +475,7 @@ const SentChallengeCard = memo(
               </p>
               <div className={curvedPromptPanelClass}>
                 <div className="mb-3 h-1 w-14 rounded-full bg-[linear-gradient(90deg,#22d3ee,#4ade80)] shadow-[0_0_18px_rgba(34,211,238,0.18)]" />
-                <p className="text-[15px] font-bold leading-relaxed text-white">
+                <p className="text-[14.5px] font-bold leading-relaxed text-white">
                   {challenge.action}
                 </p>
               </div>
@@ -2104,25 +2104,25 @@ export function DaresReceivedScreen({
         style={{ paddingTop: "calc(var(--safe-area-top) + 14px)" }}
       >
         <div className="mx-auto max-w-2xl pb-4">
-          <div className="dares-received-panel relative mb-3 overflow-hidden rounded-[34px] border border-white/8 bg-[radial-gradient(ellipse_at_24%_-45%,rgba(74,222,128,0.16),transparent_64%),radial-gradient(ellipse_at_82%_-40%,rgba(14,165,233,0.12),transparent_62%),linear-gradient(180deg,rgba(13,19,14,0.94),rgba(8,13,9,0.97))] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+          <div className="dares-received-panel relative mb-3 overflow-hidden rounded-[30px] border border-white/8 bg-[radial-gradient(ellipse_at_24%_-45%,rgba(74,222,128,0.13),transparent_64%),radial-gradient(ellipse_at_82%_-40%,rgba(14,165,233,0.09),transparent_62%),linear-gradient(180deg,rgba(13,19,14,0.94),rgba(8,13,9,0.97))] p-3.5 shadow-[0_22px_62px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
             <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,rgba(74,222,128,0),rgba(74,222,128,0.78),rgba(14,165,233,0.45),rgba(74,222,128,0))]" />
             <div className="relative z-10 mb-4 flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <div className="mb-2 inline-flex rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#86efac]">
+                <div className="mb-2 inline-flex rounded-full border border-[#4ade80]/16 bg-[#4ade80]/9 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.16em] text-[#86efac]">
                   Dare inbox
                 </div>
-                <h1 className="text-[32px] font-black leading-none tracking-tight text-white">
+                <h1 className="text-[29px] font-black leading-none tracking-tight text-white">
                   Dares & Truths
                 </h1>
               </div>
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] border border-white/8 bg-white/[0.045] text-[#4ade80] shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <Inbox size={24} strokeWidth={2.5} />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-white/8 bg-white/[0.04] text-[#4ade80] shadow-[0_12px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <Inbox size={22} strokeWidth={2.5} />
               </div>
             </div>
             <div className="relative z-10 grid grid-cols-2 rounded-full border border-white/8 bg-black/25 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-md">
               <button
                 onClick={() => setActiveTab("received")}
-                className={`min-h-[40px] rounded-full px-4 text-sm font-black transition-all duration-300 ${
+                className={`min-h-[38px] rounded-full px-4 text-[13px] font-black transition-all duration-300 ${
                   activeTab === "received"
                     ? "dares-received-active-tab text-[#041006]"
                     : "text-[#94a3b8] hover:text-white"
@@ -2132,7 +2132,7 @@ export function DaresReceivedScreen({
               </button>
               <button
                 onClick={() => setActiveTab("sent")}
-                className={`min-h-[40px] rounded-full px-4 text-sm font-black transition-all duration-300 ${
+                className={`min-h-[38px] rounded-full px-4 text-[13px] font-black transition-all duration-300 ${
                   activeTab === "sent"
                     ? "dares-received-active-tab text-[#041006]"
                     : "text-[#94a3b8] hover:text-white"
@@ -2142,10 +2142,10 @@ export function DaresReceivedScreen({
               </button>
             </div>
           </div>
-          <div className="dares-received-panel dares-received-shine relative overflow-hidden rounded-[28px] border border-[#4ade80]/22 bg-[radial-gradient(circle_at_18%_-18%,rgba(74,222,128,0.16),transparent_34%),radial-gradient(circle_at_92%_16%,rgba(14,165,233,0.12),transparent_32%),linear-gradient(180deg,rgba(22,28,23,0.98),rgba(8,12,9,0.98))] px-4 py-3.5 shadow-[0_18px_44px_rgba(0,0,0,0.34),0_0_28px_rgba(74,222,128,0.08),inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <div className="dares-received-panel dares-received-shine relative overflow-hidden rounded-[26px] border border-[#4ade80]/18 bg-[radial-gradient(circle_at_18%_-18%,rgba(74,222,128,0.12),transparent_34%),radial-gradient(circle_at_92%_16%,rgba(14,165,233,0.09),transparent_32%),linear-gradient(180deg,rgba(15,22,18,0.98),rgba(7,11,8,0.98))] px-3.5 py-3 shadow-[0_16px_40px_rgba(0,0,0,0.34),0_0_22px_rgba(74,222,128,0.06),inset_0_1px_0_rgba(255,255,255,0.05)]">
             <div className="relative z-10 flex items-center gap-3">
-              <div className="flex h-[54px] w-[54px] shrink-0 items-center justify-center rounded-[22px] border border-[#4ade80]/20 bg-[#4ade80]/10 text-[#86efac] shadow-[0_14px_34px_rgba(74,222,128,0.1)]">
-                <Sparkles size={22} strokeWidth={2.5} />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] border border-[#4ade80]/18 bg-[#4ade80]/9 text-[#86efac] shadow-[0_12px_30px_rgba(74,222,128,0.08)]">
+                <Sparkles size={20} strokeWidth={2.5} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center gap-2">
@@ -2154,7 +2154,7 @@ export function DaresReceivedScreen({
                     {activeTab === "received" ? "Active queue" : "Sent queue"}
                   </p>
                 </div>
-                <p className="truncate text-[16px] font-black text-white">
+                <p className="truncate text-[15px] font-black text-white">
                   {activeTab === "received"
                     ? `${receivedChallengesForDisplay.length} received challenge${receivedChallengesForDisplay.length === 1 ? "" : "s"}`
                     : `${sentChallengesForDisplay.length} sent challenge${sentChallengesForDisplay.length === 1 ? "" : "s"}`}

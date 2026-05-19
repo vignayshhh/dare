@@ -230,9 +230,9 @@ function ActivityCard({
       style={{
         position: "relative",
         background:
-          "linear-gradient(180deg, rgba(17,17,17,0.98), rgba(8,8,8,0.98))",
+          "linear-gradient(180deg, rgba(15,22,18,0.97), rgba(6,9,8,0.99))",
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: "28px",
+        borderRadius: "26px",
         overflow: "hidden",
         marginBottom: "14px",
         boxShadow: `0 18px 40px ${meta.glow}10, inset 0 1px 0 rgba(255,255,255,0.05)`,
@@ -311,17 +311,17 @@ function ActivityCard({
       <div
         style={{
           position: "relative",
-          padding: "18px",
+          padding: "16px",
           display: "flex",
-          gap: "14px",
+          gap: "12px",
           alignItems: "stretch",
         }}
       >
         <div
           style={{
-            width: "58px",
-            height: "58px",
-            borderRadius: "18px",
+            width: "54px",
+            height: "54px",
+            borderRadius: "17px",
             background: meta.bg,
             border: `1px solid ${meta.color}2c`,
             display: "flex",
@@ -332,7 +332,7 @@ function ActivityCard({
             animation: "iconFloat 4.6s ease-in-out infinite",
           }}
         >
-          <Icon size={24} color={meta.color} strokeWidth={2.25} />
+          <Icon size={22} color={meta.color} strokeWidth={2.25} />
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -349,7 +349,7 @@ function ActivityCard({
               style={{
                 color: "#fff",
                 fontWeight: 800,
-                fontSize: "16px",
+                fontSize: "15px",
                 letterSpacing: "-0.02em",
               }}
             >
@@ -362,7 +362,7 @@ function ActivityCard({
                 border: `1px solid ${meta.color}2b`,
                 borderRadius: "999px",
                 padding: "3px 9px",
-                fontSize: "11px",
+                fontSize: "10.5px",
                 fontWeight: 800,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
@@ -375,7 +375,7 @@ function ActivityCard({
           <p
             style={{
               color: "rgba(255,255,255,0.74)",
-              fontSize: "14px",
+              fontSize: "13.5px",
               lineHeight: 1.55,
               marginBottom: "10px",
             }}
@@ -395,11 +395,11 @@ function ActivityCard({
               <span
                 style={{
                   color: "#fecdd3",
-                  background: "rgba(251,113,133,0.12)",
+                  background: "rgba(251,113,133,0.10)",
                   border: "1px solid rgba(251,113,133,0.18)",
                   borderRadius: "999px",
-                  padding: "5px 10px",
-                  fontSize: "12px",
+                  padding: "4px 9px",
+                  fontSize: "11.5px",
                   fontWeight: 700,
                 }}
               >
@@ -412,11 +412,11 @@ function ActivityCard({
               <span
                 style={{
                   color: "rgba(255,255,255,0.56)",
-                  background: "rgba(255,255,255,0.06)",
+                  background: "rgba(15,22,18,0.92)",
                   border: "1px solid rgba(255,255,255,0.08)",
                   borderRadius: "999px",
-                  padding: "5px 10px",
-                  fontSize: "12px",
+                  padding: "4px 9px",
+                  fontSize: "11.5px",
                   fontWeight: 700,
                   display: "inline-flex",
                   alignItems: "center",
@@ -439,13 +439,13 @@ function ActivityCard({
             }}
             disabled={!canOpenTargets}
             style={{
-              width: "78px",
-              height: "104px",
+              width: "74px",
+              height: "100px",
               flexShrink: 0,
-              borderRadius: "20px",
+              borderRadius: "18px",
               overflow: "hidden",
               border: "1px solid rgba(255,255,255,0.1)",
-              background: "#0b0b0b",
+              background: "#060906",
               padding: 0,
               cursor: canOpenTargets ? "pointer" : "default",
               position: "relative",
@@ -494,13 +494,13 @@ function ActivityCard({
         ) : (
           <div
             style={{
-              width: "42px",
-              height: "42px",
+              width: "40px",
+              height: "40px",
               flexShrink: 0,
               borderRadius: "16px",
               border: "1px solid rgba(255,255,255,0.08)",
               background:
-                "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+                "linear-gradient(180deg, rgba(15,22,18,0.94), rgba(6,9,8,0.98))",
               color: "#a3a3a3",
               display: "flex",
               alignItems: "center",
@@ -651,7 +651,7 @@ export function ActivityScreen({
       style={{
         minHeight: "100vh",
         background:
-          "radial-gradient(circle at top, rgba(74,222,128,0.14), transparent 24%), #030303",
+          "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)",
         display: "flex",
         flexDirection: "column",
         fontFamily:
@@ -665,7 +665,7 @@ export function ActivityScreen({
           zIndex: 40,
           padding: "calc(18px + var(--safe-area-top)) 16px 16px",
           background:
-            "linear-gradient(180deg, rgba(3,3,3,0.98) 0%, rgba(3,3,3,0.92) 78%, rgba(3,3,3,0.82) 100%)",
+            "linear-gradient(180deg, rgba(6,8,6,0.98) 0%, rgba(8,13,9,0.94) 78%, rgba(8,13,9,0.78) 100%)",
           backdropFilter: "blur(18px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
           pointerEvents: "auto",
@@ -694,7 +694,8 @@ export function ActivityScreen({
                 height: "42px",
                 borderRadius: "14px",
                 border: "1px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.04)",
+                background:
+                  "linear-gradient(180deg, rgba(15,22,18,0.94), rgba(6,9,8,0.98))",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -715,7 +716,7 @@ export function ActivityScreen({
                 <h1
                   style={{
                     color: "#fff",
-                    fontSize: "28px",
+                    fontSize: "26px",
                     fontWeight: 900,
                     letterSpacing: "-0.04em",
                     lineHeight: 1,
@@ -748,7 +749,8 @@ export function ActivityScreen({
               height: "42px",
               borderRadius: "14px",
               border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.04)",
+              background:
+                "linear-gradient(180deg, rgba(15,22,18,0.94), rgba(6,9,8,0.98))",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -771,9 +773,9 @@ export function ActivityScreen({
             position: "relative",
             overflow: "hidden",
             borderRadius: "30px",
-            padding: "20px",
+            padding: "18px",
             background:
-              "linear-gradient(135deg, rgba(18,18,18,0.98), rgba(7,7,7,0.98))",
+              "radial-gradient(circle at 20% -20%, rgba(74,222,128,0.12), transparent 34%), linear-gradient(180deg, rgba(15,22,18,0.97), rgba(6,9,8,0.99))",
             border: "1px solid rgba(255,255,255,0.09)",
             boxShadow:
               "0 22px 50px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -797,7 +799,7 @@ export function ActivityScreen({
               width: "120px",
               height: "120px",
               borderRadius: "999px",
-              background: "rgba(74,222,128,0.12)",
+              background: "rgba(74,222,128,0.10)",
               filter: "blur(28px)",
               animation: "heroGlow 4.8s ease-in-out infinite",
               pointerEvents: "none",
@@ -811,7 +813,7 @@ export function ActivityScreen({
               width: "46%",
               height: "58%",
               borderRadius: "999px",
-              background: "rgba(96,165,250,0.08)",
+              background: "rgba(14,165,233,0.07)",
               filter: "blur(38px)",
               animation: "ambientWave 10s ease-in-out infinite reverse",
               pointerEvents: "none",
@@ -821,21 +823,21 @@ export function ActivityScreen({
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: "12px",
+              gap: "10px",
             }}
           >
             <div
               style={{
-                borderRadius: "20px",
-                padding: "14px",
+                borderRadius: "18px",
+                padding: "12px",
                 background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+                  "linear-gradient(180deg, rgba(15,22,18,0.96), rgba(7,10,8,0.98))",
                 border: "1px solid rgba(255,255,255,0.07)",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
                 animation: "statFloat 5.6s ease-in-out infinite",
               }}
             >
-              <div style={{ color: "#fff", fontSize: "22px", fontWeight: 900 }}>
+              <div style={{ color: "#fff", fontSize: "21px", fontWeight: 900 }}>
                 {items.length}
               </div>
               <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "12px", marginTop: "4px" }}>
@@ -844,17 +846,17 @@ export function ActivityScreen({
             </div>
             <div
               style={{
-                borderRadius: "20px",
-                padding: "14px",
+                borderRadius: "18px",
+                padding: "12px",
                 background:
-                  "linear-gradient(180deg, rgba(74,222,128,0.12), rgba(74,222,128,0.05))",
+                  "linear-gradient(180deg, rgba(74,222,128,0.10), rgba(15,22,18,0.92))",
                 border: "1px solid rgba(74,222,128,0.16)",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
                 animation: "statFloat 5.6s ease-in-out infinite",
                 animationDelay: "0.45s",
               }}
             >
-              <div style={{ color: "#4ade80", fontSize: "22px", fontWeight: 900 }}>
+              <div style={{ color: "#4ade80", fontSize: "21px", fontWeight: 900 }}>
                 {totals.photoActions}
               </div>
               <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "12px", marginTop: "4px" }}>
@@ -863,17 +865,17 @@ export function ActivityScreen({
             </div>
             <div
               style={{
-                borderRadius: "20px",
-                padding: "14px",
+                borderRadius: "18px",
+                padding: "12px",
                 background:
-                  "linear-gradient(180deg, rgba(96,165,250,0.12), rgba(96,165,250,0.05))",
-                border: "1px solid rgba(96,165,250,0.16)",
+                  "linear-gradient(180deg, rgba(14,165,233,0.10), rgba(15,22,18,0.92))",
+                border: "1px solid rgba(14,165,233,0.14)",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
                 animation: "statFloat 5.6s ease-in-out infinite",
                 animationDelay: "0.9s",
               }}
             >
-              <div style={{ color: "#93c5fd", fontSize: "22px", fontWeight: 900 }}>
+              <div style={{ color: "#7dd3fc", fontSize: "21px", fontWeight: 900 }}>
                 {totals.highlights}
               </div>
               <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "12px", marginTop: "4px" }}>
@@ -925,7 +927,7 @@ export function ActivityScreen({
                     borderRadius: "999px",
                     padding: "7px 11px",
                     background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+                      "linear-gradient(180deg, rgba(15,22,18,0.96), rgba(7,10,8,0.98))",
                     border: "1px solid rgba(255,255,255,0.07)",
                   }}
                 >
@@ -953,7 +955,8 @@ export function ActivityScreen({
                 style={{
                   height: "144px",
                   borderRadius: "24px",
-                  background: "rgba(255,255,255,0.04)",
+                  background:
+                    "linear-gradient(180deg, rgba(15,22,18,0.92), rgba(6,9,8,0.96))",
                   border: "1px solid rgba(255,255,255,0.05)",
                   animation: "pulse 1.4s ease-in-out infinite",
                   animationDelay: `${index * 0.12}s`,
@@ -999,7 +1002,7 @@ export function ActivityScreen({
                 />
                 <span
                   style={{
-                    color: "rgba(255,255,255,0.34)",
+                    color: "rgba(187,247,208,0.58)",
                     fontSize: "11px",
                     fontWeight: 800,
                     letterSpacing: "0.16em",
@@ -1012,7 +1015,7 @@ export function ActivityScreen({
                   style={{
                     flex: 1,
                     height: "1px",
-                    background: "linear-gradient(90deg, rgba(255,255,255,0.08), transparent)",
+                    background: "linear-gradient(90deg, rgba(74,222,128,0.12), transparent)",
                   }}
                 />
               </div>

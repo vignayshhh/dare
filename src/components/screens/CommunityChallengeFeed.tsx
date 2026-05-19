@@ -2,19 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CommunityChallengeCard } from "./CommunityChallengeCard";
-import {
-  COMMUNITY_CHALLENGES,
-  type CommunityChallenge,
-} from "./communityChallengeData";
+import { type CommunityChallenge } from "./communityChallengeData";
 
 export function CommunityChallengeFeed({
-  joinedChallengeIds,
+  challenges,
   onPreview,
-  onJoin,
 }: {
-  joinedChallengeIds: Set<string>;
+  challenges: CommunityChallenge[];
   onPreview: (challenge: CommunityChallenge) => void;
-  onJoin: (challengeId: string) => void;
 }) {
   const reelRef = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
@@ -27,7 +22,7 @@ export function CommunityChallengeFeed({
     const container = reelRef.current;
     if (!container) return;
 
-    const maxIndex = Math.max(0, COMMUNITY_CHALLENGES.length - 1);
+    const maxIndex = Math.max(0, challenges.length - 1);
     const targetIndex = Math.min(maxIndex, Math.max(0, index));
     activeIndexRef.current = targetIndex;
     setActiveIndex(targetIndex);
@@ -35,7 +30,7 @@ export function CommunityChallengeFeed({
       top: container.clientHeight * targetIndex,
       behavior: "smooth",
     });
-  }, []);
+  }, [challenges.length]);
 
   const handleWheel = useCallback(
     (event: WheelEvent) => {
@@ -69,7 +64,7 @@ export function CommunityChallengeFeed({
         scrollFrame.current = null;
         const slideHeight = container.clientHeight;
         if (!slideHeight) return;
-        const maxIndex = Math.max(0, COMMUNITY_CHALLENGES.length - 1);
+        const maxIndex = Math.max(0, challenges.length - 1);
         const nextIndex = Math.min(
           maxIndex,
           Math.max(0, Math.round(container.scrollTop / slideHeight)),
@@ -95,7 +90,7 @@ export function CommunityChallengeFeed({
         wheelUnlockTimer.current = null;
       }
     };
-  }, [handleWheel]);
+  }, [challenges.length, handleWheel]);
 
   return (
     <div
@@ -116,7 +111,7 @@ export function CommunityChallengeFeed({
           display: none;
         }
       `}</style>
-      {COMMUNITY_CHALLENGES.map((challenge, index) => (
+      {challenges.map((challenge, index) => (
         <section
           key={challenge.id}
           data-community-card-active={activeIndex === index ? "true" : undefined}
@@ -128,12 +123,10 @@ export function CommunityChallengeFeed({
             backfaceVisibility: "hidden",
           }}
         >
-          <div className="w-full max-w-[430px]">
+          <div className="w-full max-w-[444px]">
             <CommunityChallengeCard
               challenge={challenge}
-              isJoined={joinedChallengeIds.has(challenge.id)}
               onPreview={() => onPreview(challenge)}
-              onJoin={() => onJoin(challenge.id)}
             />
           </div>
         </section>

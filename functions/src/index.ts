@@ -11,6 +11,12 @@ export {
   onCommentLikeCreated,
   onCommentLikeDeleted,
 } from "./triggers/counters";
+export {
+  onCommunityChallengeJoinCreated,
+  onCommunityChallengeJoinDeleted,
+  onChallengeRoomProofCreated,
+  processCommunityChallengeDeadlines,
+} from "./triggers/communityChallenges";
 
 export { migrateEmailPrivate } from "./triggers/onUserCreated";
 export { onReportCreated } from "./triggers/onReportCreated";

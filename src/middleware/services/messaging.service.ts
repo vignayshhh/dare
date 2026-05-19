@@ -156,12 +156,21 @@ function presenceTimeToMillis(value: unknown): number | null {
   return null;
 }
 
-function isRecentPresenceTime(value: unknown, windowMs = 90000): boolean {
+const PRESENCE_STALE_AFTER_MS = 45000;
+
+function isRecentPresenceTime(
+  value: unknown,
+  windowMs = PRESENCE_STALE_AFTER_MS,
+): boolean {
   const millis = presenceTimeToMillis(value);
   return millis !== null && Date.now() - millis >= 0 && Date.now() - millis <= windowMs;
 }
 
-const MESSAGING_DEBUG = true;
+function isLiveOnlinePresence(data: any): boolean {
+  return data?.is_online === true && isRecentPresenceTime(data?.last_seen);
+}
+
+const MESSAGING_DEBUG = false;
 
 function messagingDebug(label: string, details: Record<string, unknown> = {}) {
   if (!MESSAGING_DEBUG) return;
@@ -498,7 +507,7 @@ class MessagingService {
         },
         last_message: lastMessageVisible ? lastMessage : undefined,
         unread_count: lastMessageVisible ? unreadCount : 0,
-        is_online: typingStatus?.is_online || false,
+        is_online: false,
         is_typing: typingStatus?.is_typing || false,
         typing_speed: typingStatus?.typing_speed,
       };
@@ -1407,7 +1416,7 @@ class MessagingService {
         subscribedFriendIds.add(friendId);
         const statusRef = ref(realtimeDb, `online_status/${friendId}`);
         const unsub = onValue(statusRef, (snap) => {
-          if (snap.val()?.is_online) {
+          if (isLiveOnlinePresence(snap.val())) {
             online.add(friendId);
           } else {
             online.delete(friendId);
@@ -1432,7 +1441,7 @@ class MessagingService {
     userIds.forEach((uid) => {
       const statusRef = ref(realtimeDb, `online_status/${uid}`);
       const unsub = onValue(statusRef, (snap) => {
-        if (snap.val()?.is_online) {
+        if (isLiveOnlinePresence(snap.val())) {
           online.add(uid);
         } else {
           online.delete(uid);
@@ -1459,7 +1468,7 @@ class MessagingService {
         const data = snap.val() || {};
         statusByUserId.set(uid, {
           userId: uid,
-          isOnline: data?.is_online === true,
+          isOnline: isLiveOnlinePresence(data),
           lastSeen: data?.last_seen ?? null,
           timezone:
             typeof data?.timezone === "string" && data.timezone
@@ -1485,16 +1494,49 @@ class MessagingService {
     const firestoreStatusByUserId = new Map<string, UserPresenceStatus>();
     const unsubscribes: Array<() => void> = [];
     let cancelled = false;
+    let staleRecheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleStaleRecheck = () => {
+      if (staleRecheckTimer) {
+        clearTimeout(staleRecheckTimer);
+        staleRecheckTimer = null;
+      }
+
+      const now = Date.now();
+      const nextExpiry = uniqueUserIds.reduce<number | null>((earliest, userId) => {
+        const rtdbLastSeen = presenceTimeToMillis(
+          rtdbStatusByUserId.get(userId)?.lastSeen,
+        );
+        const firestoreLastSeen = presenceTimeToMillis(
+          firestoreStatusByUserId.get(userId)?.lastSeen,
+        );
+        const candidateLastSeen = Math.max(
+          rtdbLastSeen ?? Number.NEGATIVE_INFINITY,
+          firestoreLastSeen ?? Number.NEGATIVE_INFINITY,
+        );
+        if (!Number.isFinite(candidateLastSeen)) return earliest;
+        const expiresAt = candidateLastSeen + PRESENCE_STALE_AFTER_MS;
+        if (expiresAt <= now) return earliest;
+        return earliest === null ? expiresAt : Math.min(earliest, expiresAt);
+      }, null);
+
+      if (nextExpiry === null) return;
+      staleRecheckTimer = setTimeout(() => {
+        staleRecheckTimer = null;
+        if (!cancelled) emit();
+      }, Math.max(250, nextExpiry - now + 250));
+    };
 
     const emit = () => {
       const mergedStatuses = uniqueUserIds.map((userId) => {
           const firestoreStatus = firestoreStatusByUserId.get(userId);
           const rtdbStatus = rtdbStatusByUserId.get(userId);
+          const hasRtdbStatus = rtdbStatusByUserId.has(userId);
           return {
             userId,
-            isOnline:
-              firestoreStatus?.isOnline === true ||
-              rtdbStatus?.isOnline === true,
+            isOnline: hasRtdbStatus
+              ? rtdbStatus?.isOnline === true
+              : firestoreStatus?.isOnline === true,
             lastSeen: rtdbStatus?.lastSeen ?? firestoreStatus?.lastSeen ?? null,
             timezone: rtdbStatus?.timezone || firestoreStatus?.timezone || "",
             typingConversationId: firestoreStatus?.typingConversationId ?? null,
@@ -1508,6 +1550,7 @@ class MessagingService {
         mergedStatuses,
       });
       callback(mergedStatuses);
+      scheduleStaleRecheck();
     };
 
     const attachListeners = () => {
@@ -1528,10 +1571,7 @@ class MessagingService {
             const data = snap.val() || {};
             const interpretedStatus = {
               userId: uid,
-              isOnline:
-                data?.is_online === true ||
-                (data?.is_online !== false &&
-                  isRecentPresenceTime(data?.last_seen)),
+              isOnline: isLiveOnlinePresence(data),
               lastSeen: data?.last_seen ?? null,
               timezone:
                 typeof data?.timezone === "string" && data.timezone
@@ -1612,10 +1652,7 @@ class MessagingService {
               const data = presenceDoc.data();
               const interpretedStatus = {
                 userId: presenceDoc.id,
-                isOnline:
-                  data?.is_online === true ||
-                  (data?.is_online !== false &&
-                    isRecentPresenceTime(data?.last_seen)),
+                isOnline: isLiveOnlinePresence(data),
                 lastSeen: data?.last_seen ?? null,
                 timezone:
                   typeof data?.timezone === "string" && data.timezone
@@ -1689,6 +1726,10 @@ class MessagingService {
 
     return () => {
       cancelled = true;
+      if (staleRecheckTimer) {
+        clearTimeout(staleRecheckTimer);
+        staleRecheckTimer = null;
+      }
       messagingDebug("presence:cleanup", {
         uniqueUserIds,
         unsubscribeCount: unsubscribes.length,
@@ -1846,6 +1887,17 @@ class MessagingService {
           isOnline,
           timezone,
         });
+        if (isOnline) {
+          await onDisconnect(statusRef).set({
+            is_online: false,
+            last_seen: rtdbServerTimestamp(),
+            timezone,
+          });
+          messagingDebug("setOnlineStatus:onDisconnectRegistered", {
+            path: `online_status/${userId}`,
+            userId,
+          });
+        }
         await set(statusRef, {
           is_online: isOnline,
           last_seen: rtdbServerTimestamp(),
@@ -1880,17 +1932,6 @@ class MessagingService {
           isOnline,
           timezone,
         });
-        if (isOnline) {
-          await onDisconnect(statusRef).set({
-            is_online: false,
-            last_seen: rtdbServerTimestamp(),
-            timezone,
-          });
-          messagingDebug("setOnlineStatus:onDisconnectRegistered", {
-            path: `online_status/${userId}`,
-            userId,
-          });
-        }
       } catch (error) {
         messagingDebug("setOnlineStatus:error", {
           userId,

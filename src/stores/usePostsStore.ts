@@ -110,6 +110,7 @@ interface PostsStore {
   unsubscribeFromPostComments: (postId: string) => void;
   subscribeToPostLikes: (postId: string) => void;
   unsubscribeFromPostLikes: (postId: string) => void;
+  loadPostLikePreviews: (postIds: string[]) => Promise<void>;
   incrementViews: (postId: string) => void;
   clearPersistedData: () => void;
 }
@@ -203,17 +204,43 @@ const preserveCurrentUserLike = (
   existing: FeedPost | undefined,
   currentUserId: string,
 ): FeedPost => {
-  const localLike = existing?.likesByUser[currentUserId];
-  if (!localLike?.tapCount) return incoming;
+  if (!existing) return incoming;
 
-  const incomingLike = incoming.likesByUser[currentUserId];
+  const shouldPreservePreviewLikes = (incoming.likes_count || 0) > 0;
+  const preservedLikesByUser = shouldPreservePreviewLikes
+    ? {
+        ...existing.likesByUser,
+        ...incoming.likesByUser,
+      }
+    : incoming.likesByUser;
+
+  const localLike = existing.likesByUser[currentUserId];
+  if (!localLike?.tapCount) {
+    return {
+      ...incoming,
+      likesByUser: preservedLikesByUser,
+      likes_count: Math.max(
+        incoming.likes_count || 0,
+        Object.keys(preservedLikesByUser).length,
+      ),
+    };
+  }
+
+  const incomingLike = preservedLikesByUser[currentUserId];
   if (incomingLike && incomingLike.tapCount >= localLike.tapCount) {
-    return incoming;
+    return {
+      ...incoming,
+      likesByUser: preservedLikesByUser,
+      likes_count: Math.max(
+        incoming.likes_count || 0,
+        Object.keys(preservedLikesByUser).length,
+      ),
+    };
   }
 
   const likesByUser = {
-    ...incoming.likesByUser,
-    [currentUserId]: localLike,
+    ...preservedLikesByUser,
+    ...(localLike?.tapCount ? { [currentUserId]: localLike } : {}),
   };
 
   return {
@@ -288,6 +315,11 @@ export const usePostsStore = create<PostsStore>()(
         set({ loading: true, error: null });
 
         try {
+          const trimmedContent = postData.content.trim();
+          if (!trimmedContent) {
+            throw new Error("Caption is required to create a feed post.");
+          }
+
           const currentUser = authService.getCurrentUser();
           if (!currentUser?.id) {
             throw new Error("User not authenticated");
@@ -305,7 +337,7 @@ export const usePostsStore = create<PostsStore>()(
 
           const backendPost = await feedService.createPost({
             author_id: currentUser.id,
-            content: postData.content || "",
+            content: trimmedContent,
             media_url: postData.media?.url,
             media_type: mediaType,
           });
@@ -361,7 +393,7 @@ export const usePostsStore = create<PostsStore>()(
                   avatar: currentUser.avatar || "", // Use actual avatar or empty string
                   username: currentUser.username,
                 },
-                content: postData.content,
+                content: trimmedContent,
                 media: postData.media,
                 stats: { views: 0 },
                 likesByUser: {},
@@ -1159,15 +1191,18 @@ export const usePostsStore = create<PostsStore>()(
                   : undefined,
                 stats: { views: post.view_count || 0 },
                 likesByUser: post.is_liked_by_user
-                  ? {
-                      [userId]: {
-                        userId,
-                        name: "Anonymous",
-                        username: "anonymous",
-                        avatar: "",
-                        tapCount: 1,
-                      },
-                    }
+                  ? (() => {
+                      const currentDisplay = getCurrentUserDisplay();
+                      return {
+                        [userId]: {
+                          userId,
+                          name: currentDisplay.name,
+                          username: currentDisplay.username,
+                          avatar: currentDisplay.avatar || "",
+                          tapCount: 1,
+                        },
+                      };
+                    })()
                   : {},
                 likes_count: post.likes_count || 0,
                 comments: [],
@@ -1390,6 +1425,66 @@ export const usePostsStore = create<PostsStore>()(
           const newUnsubscribes = { ...commentUnsubscribes };
           delete newUnsubscribes[postId];
           set({ commentUnsubscribes: newUnsubscribes });
+        }
+      },
+
+      loadPostLikePreviews: async (postIds: string[]) => {
+        const uniquePostIds = [...new Set(postIds.filter(Boolean))].slice(
+          0,
+          12,
+        );
+        if (uniquePostIds.length === 0) return;
+
+        try {
+          const previews = await feedService.getPostLikePreviews(
+            uniquePostIds,
+            3,
+          );
+
+          set((state) => {
+            let nextState: PostCollectionsState = {
+              posts: state.posts,
+              userPosts: state.userPosts,
+            };
+
+            previews.forEach((entries, postId) => {
+              if (entries.length === 0) return;
+
+              nextState = updatePostInCollections(
+                nextState,
+                postId,
+                (post) => {
+                  const likesByUser = { ...post.likesByUser };
+
+                  entries.forEach((entry) => {
+                    const existing = likesByUser[entry.userId];
+                    likesByUser[entry.userId] = {
+                      ...existing,
+                      ...entry,
+                      tapCount: Math.max(
+                        entry.tapCount,
+                        existing?.tapCount || 0,
+                      ),
+                    };
+                  });
+
+                  return {
+                    ...post,
+                    likesByUser,
+                    likes_count: Math.max(
+                      post.likes_count || 0,
+                      Object.keys(likesByUser).length,
+                    ),
+                    likesLoading: false,
+                  };
+                },
+              );
+            });
+
+            return nextState;
+          });
+        } catch (error) {
+          console.error("Error loading post like previews:", error);
         }
       },
 

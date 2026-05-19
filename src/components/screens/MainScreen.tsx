@@ -1,8 +1,8 @@
-//MainScreen
+﻿//MainScreen
 
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { formatTimeAgo } from "../../utils/timeFormat";
 import {
   ArrowLeft,
@@ -31,7 +31,14 @@ import { votePersistence } from "../../utils/votePersistence";
 import { CommunityChallengeFeed } from "./CommunityChallengeFeed";
 import { CommunityChallengePreviewScreen } from "./CommunityChallengePreviewScreen";
 import { ChallengeHubScreen } from "./ChallengeHubScreen";
-import type { CommunityChallenge } from "./communityChallengeData";
+import {
+  COMMUNITY_CHALLENGES,
+  type CommunityChallenge,
+} from "./communityChallengeData";
+import {
+  communityChallengeService,
+  type CommunityChallengeSummary,
+} from "../../middleware/services/community-challenge.service";
 
 import "@/styles/design-system.css";
 
@@ -81,6 +88,9 @@ interface DarePost {
   };
 }
 
+const FEED_SCREEN_SURFACE_BACKGROUND =
+  "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 18%, rgba(14,165,233,0.10), transparent 28%), linear-gradient(180deg, #060806 0%, #0a0f0a 48%, #030403 100%)";
+
 function getPostCreatedAtMs(createdAt: unknown): number {
   if (!createdAt) return 0;
   if (typeof createdAt === "object" && createdAt !== null) {
@@ -115,7 +125,7 @@ function rankDeckByVoteState<T extends { id: string; createdAt: unknown }>(
   return [...unvotedPosts, ...votedPosts];
 }
 
-// ─── PostAvatar — now uses global Avatar component for consistent avatar handling ─────────────────────────
+// â”€â”€â”€ PostAvatar â€” now uses global Avatar component for consistent avatar handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function PostAvatar({
   src,
   name,
@@ -147,7 +157,7 @@ function PostAvatar({
   );
 }
 
-// ─── AnimatedModalWrapper ─────────────────────────────────────────────────────
+// â”€â”€â”€ AnimatedModalWrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function AnimatedModalWrapper({
   isOpen,
   onClose,
@@ -159,7 +169,7 @@ function AnimatedModalWrapper({
 }) {
   const [visible, setVisible] = useState(false);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isOpen) {
       setMounted(true);
       requestAnimationFrame(() => setVisible(true));
@@ -206,7 +216,7 @@ function AnimatedModalWrapper({
   );
 }
 
-// ─── TruthVoteModal ───────────────────────────────────────────────────────────
+// â”€â”€â”€ TruthVoteModal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function TruthVoteModal({
   isOpen,
   onClose,
@@ -238,7 +248,7 @@ function TruthVoteModal({
   const [closing, setClosing] = useState(false);
   useBodyScrollLock(isOpen || closing);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isOpen) {
       setClosing(false);
       requestAnimationFrame(() => setVisible(true));
@@ -366,7 +376,7 @@ function TruthVoteModal({
             }}
           />
         </div>
-        {/* Fixed header — non-scrollable */}
+        {/* Fixed header â€” non-scrollable */}
         <div style={{ padding: "12px 20px 0", flexShrink: 0 }}>
           <div
             style={{
@@ -518,10 +528,10 @@ function TruthVoteModal({
                 }}
               >
                 {tab === "truth"
-                  ? "✓ Truth"
+                  ? "Truth"
                   : tab === "lie"
-                    ? "✗ Lie"
-                    : "💬 Comments"}
+                    ? "Lie"
+                    : "Comments"}
               </button>
             ))}
           </div>
@@ -697,7 +707,7 @@ function TruthVoteModal({
   );
 }
 
-// ─── DareVoteModal ────────────────────────────────────────────────────────────
+// â”€â”€â”€ DareVoteModal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DareVoteModal({
   isOpen,
   onClose,
@@ -858,7 +868,7 @@ function DareVoteModal({
                   fontSize: 16,
                 }}
               >
-                · {dare.description}
+                - {dare.description}
               </span>
             </p>
             <button
@@ -878,7 +888,7 @@ function DareVoteModal({
                 flexShrink: 0,
               }}
             >
-              ✕
+              X
             </button>
           </div>
           <div style={{ marginBottom: "20px" }}>
@@ -960,8 +970,8 @@ function DareVoteModal({
                 }}
               >
                 {tab === "real"
-                  ? `✓ Real · ${realCount}`
-                  : `✗ Fake · ${fakeCount}`}
+                  ? `Real - ${realCount}`
+                  : `Fake - ${fakeCount}`}
               </button>
             ))}
           </div>
@@ -1087,7 +1097,7 @@ function DareVoteModal({
   );
 }
 
-// ─── DoubleTapLike ────────────────────────────────────────────────────────────
+// â”€â”€â”€ DoubleTapLike â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DoubleTapLike({ trigger }: { trigger: number }) {
   const [hearts, setHearts] = useState<{ id: number; x: number; y: number }[]>(
     [],
@@ -1129,7 +1139,7 @@ function DoubleTapLike({ trigger }: { trigger: number }) {
   );
 }
 
-// ─── AnimatedDareCapsule — CINEMATIC timing ───────────────────────────────────
+// â”€â”€â”€ AnimatedDareCapsule â€” CINEMATIC timing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Timings stretched for a slow, theatrical reveal:
 //   t=200ms  capsule + challenger name fade in together
 //   t=600ms  pill expands
@@ -1210,7 +1220,7 @@ const AnimatedDareCapsule = React.memo(
       setFading(false);
       setShowDescription(false);
 
-      // Cinematic sequence — all delays from t=0 (card becomes active)
+      // Cinematic sequence â€” all delays from t=0 (card becomes active)
       const t0 = setTimeout(() => setShowAll(true), 200); // capsule appears
       const t1 = setTimeout(() => setExpanded(true), 500); // pill expands
       const t2 = setTimeout(() => setShowChallengerName(true), 200); // name drifts in with capsule
@@ -1262,21 +1272,20 @@ const AnimatedDareCapsule = React.memo(
             alignItems: "center",
             justifyContent: "center",
             gap: "10px",
-            background:
-              "linear-gradient(135deg, rgba(8,14,11,0.88), rgba(17,26,21,0.78) 46%, rgba(5,9,8,0.84))",
+            background: FEED_SCREEN_SURFACE_BACKGROUND,
             borderRadius: "999px",
-            border: "1px solid rgba(255,255,255,0.22)",
+            border: "1px solid rgba(255,255,255,0.18)",
             height: "64px",
             padding: capsuleExpanded ? "0 18px 0 8px" : "0 8px",
-            backdropFilter: "blur(30px) saturate(1.36)",
-            WebkitBackdropFilter: "blur(30px) saturate(1.36)",
+            backdropFilter: "blur(30px) saturate(1.32)",
+            WebkitBackdropFilter: "blur(30px) saturate(1.32)",
             boxShadow:
-              "0 18px 42px rgba(0,0,0,0.42), 0 4px 14px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.34), inset 0 -1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(74,222,128,0.12)",
+              "0 22px 52px rgba(0,0,0,0.50), 0 8px 20px rgba(0,0,0,0.32), 0 0 28px rgba(74,222,128,0.08), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -1px 0 rgba(74,222,128,0.08)",
             overflow: "hidden",
             whiteSpace: "nowrap",
             maxWidth: capsuleExpanded ? "420px" : `${COLLAPSED_WIDTH}px`,
             width: capsuleExpanded ? "max-content" : `${COLLAPSED_WIDTH}px`,
-            // Smooth, slower expand — 2.0s with ease-in-out for smooth FPS
+            // Smooth, slower expand â€” 2.0s with ease-in-out for smooth FPS
             transition: animate
               ? "max-width 2.0s cubic-bezier(0.4, 0, 0.2, 1), width 2.0s cubic-bezier(0.4, 0, 0.2, 1), padding 2.0s cubic-bezier(0.4, 0, 0.2, 1)"
               : "none",
@@ -1293,7 +1302,7 @@ const AnimatedDareCapsule = React.memo(
               inset: "1px",
               borderRadius: 999,
               background:
-                "linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.045) 42%, rgba(74,222,128,0.09))",
+                "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02) 42%, rgba(0,0,0,0.12))",
               pointerEvents: "none",
               zIndex: 0,
             }}
@@ -1308,8 +1317,8 @@ const AnimatedDareCapsule = React.memo(
               height: 18,
               borderRadius: 999,
               background:
-                "linear-gradient(90deg, transparent, rgba(255,255,255,0.32), transparent)",
-              opacity: 0.42,
+                "linear-gradient(90deg, transparent, rgba(255,255,255,0.12), rgba(74,222,128,0.06), transparent)",
+              opacity: 0.32,
               filter: "blur(8px)",
               pointerEvents: "none",
               zIndex: 0,
@@ -1330,7 +1339,7 @@ const AnimatedDareCapsule = React.memo(
               transform: "translateZ(0)",
             }}
           />
-          {/* Challenger name — slow fade */}
+          {/* Challenger name â€” slow fade */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1417,7 +1426,7 @@ const AnimatedDareCapsule = React.memo(
             {receiver.nickname.split(" ")[0]}
           </button>
         </div>
-        {/* Description — cinematic slide up */}
+        {/* Description â€” cinematic slide up */}
         {revealDescription && (
           <p
             style={{
@@ -1460,7 +1469,7 @@ const AnimatedDareCapsule = React.memo(
   },
 );
 
-// ─── ReelCommentsModal ────────────────────────────────────────────────────────
+// â”€â”€â”€ ReelCommentsModal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ReelCommentsModal({
   isOpen,
   onClose,
@@ -1478,6 +1487,10 @@ function ReelCommentsModal({
     unsubscribeFromComments,
     addComment,
     likeComment,
+    commentLikeCounts,
+    commentLikedByUser,
+    subscribeToCommentLikeCount,
+    subscribeToUserCommentLike,
   } = useDareInteractionStore();
   const [visible, setVisible] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -1496,6 +1509,21 @@ function ReelCommentsModal({
       if (!isOpen) unsubscribeFromComments(dare.id);
     };
   }, [isOpen, dare.id, subscribeToComments, unsubscribeFromComments]);
+
+  useEffect(() => {
+    if (!user) return;
+    const dareComments = comments[dare.id] || [];
+    dareComments.forEach((comment) => {
+      subscribeToCommentLikeCount(comment.id);
+      subscribeToUserCommentLike(comment.id, user.id);
+    });
+  }, [
+    comments,
+    dare.id,
+    user,
+    subscribeToCommentLikeCount,
+    subscribeToUserCommentLike,
+  ]);
 
   const handleClose = () => {
     setClosing(true);
@@ -1615,7 +1643,7 @@ function ReelCommentsModal({
               }}
             >
               {dare.challenger.nickname.split(" ")[0]} dared{" "}
-              {dare.receiver.nickname.split(" ")[0]} · {dare.description}
+              {dare.receiver.nickname.split(" ")[0]} - {dare.description}
             </p>
           </div>
           <button
@@ -1635,7 +1663,7 @@ function ReelCommentsModal({
               flexShrink: 0,
             }}
           >
-            ✕
+            X
           </button>
         </div>
         <div
@@ -1645,7 +1673,7 @@ function ReelCommentsModal({
             flexShrink: 0,
           }}
         />
-        {/* Comment input — fixed */}
+        {/* Comment input â€” fixed */}
         <div
           style={{
             padding: "12px 16px",
@@ -1812,11 +1840,8 @@ function ReelCommentsModal({
                   </div>
                   <div
                     onClick={() => {
-                      if (
-                        user &&
-                        !commentLikePersistence.hasLiked("dare", user.id, c.id)
-                      ) {
-                        likeComment(c.id);
+                      if (user && !commentLikedByUser[c.id]) {
+                        likeComment(c.id, user.id);
                       }
                     }}
                     style={{
@@ -1827,8 +1852,7 @@ function ReelCommentsModal({
                       flexShrink: 0,
                       paddingTop: 2,
                       cursor:
-                        user &&
-                        commentLikePersistence.hasLiked("dare", user.id, c.id)
+                        user && commentLikedByUser[c.id]
                           ? "default"
                           : "pointer",
                     }}
@@ -1836,35 +1860,29 @@ function ReelCommentsModal({
                     <Heart
                       size={14}
                       color={
-                        user &&
-                        commentLikePersistence.hasLiked("dare", user.id, c.id)
+                        user && commentLikedByUser[c.id]
                           ? "#ef4444"
                           : "rgba(255,255,255,0.35)"
                       }
                       fill={
-                        user &&
-                        commentLikePersistence.hasLiked("dare", user.id, c.id)
-                          ? "#ef4444"
-                          : "none"
+                        user && commentLikedByUser[c.id] ? "#ef4444" : "none"
                       }
                     />
                     <span
                       style={{
                         color:
-                          user &&
-                          commentLikePersistence.hasLiked("dare", user.id, c.id)
+                          user && commentLikedByUser[c.id]
                             ? "#ef4444"
                             : "rgba(255,255,255,0.35)",
                         fontSize: 11,
                         fontWeight: 600,
                       }}
                     >
-                      {c.likes}
+                      {commentLikeCounts[c.id] || 0}
                     </span>
                   </div>
                 </div>
               ))}
-              <div ref={commentsEndRef} />
             </div>
           )}
         </div>
@@ -1873,7 +1891,7 @@ function ReelCommentsModal({
   );
 }
 
-// ─── ReelShareModal ───────────────────────────────────────────────────────────
+// â”€â”€â”€ ReelShareModal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ReelShareModal({
   isOpen,
   onClose,
@@ -2030,7 +2048,7 @@ function ReelShareModal({
               }}
             >
               {dare.challenger.nickname.split(" ")[0]} dared{" "}
-              {dare.receiver.nickname.split(" ")[0]} · {dare.description}
+              {dare.receiver.nickname.split(" ")[0]} - {dare.description}
             </p>
           </div>
           <button
@@ -2050,7 +2068,7 @@ function ReelShareModal({
               flexShrink: 0,
             }}
           >
-            ✕
+            X
           </button>
         </div>
         <div
@@ -2176,7 +2194,7 @@ function ReelShareModal({
                       <span
                         style={{ color: "#000", fontSize: 14, fontWeight: 900 }}
                       >
-                        ✓
+                        OK
                       </span>
                     )}
                   </div>
@@ -2225,9 +2243,9 @@ function ReelShareModal({
   );
 }
 
-// ─── DareCard ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ DareCard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Key changes:
-//   1. Reads sessionVotes on mount — if already voted, skip progress bar and show voted state immediately
+//   1. Reads sessionVotes on mount â€” if already voted, skip progress bar and show voted state immediately
 //   2. On vote confirm, writes to sessionVotes
 //   3. Progress bar only renders when card hasn't been voted on yet
 interface DareCardProps {
@@ -2284,7 +2302,7 @@ export function DareCard({
     setUserVote,
   } = useDareInteractionStore();
 
-  // Initialise from persistent storage — if previously voted, jump straight to voted state
+  // Initialise from persistent storage â€” if previously voted, jump straight to voted state
   const priorVote = getUserVote(dare.id);
   const [vote, setVote] = useState<"real" | "fake" | null>(priorVote);
   const [phase, setPhase] = useState<"idle" | "confirming" | "voted">(
@@ -2332,7 +2350,8 @@ export function DareCard({
   const realCommentCount = commentCounts[dare.id] ?? 0;
   const realLikeCount = mediaLikeCounts[dare.id] ?? 0;
   const hasLikedMedia = Boolean(mediaLikedByUser[dare.id]);
-  const voteControlsVisible = buttonsVisible || hasVoted || phase === "confirming";
+  const voteControlsVisible =
+    buttonsVisible || hasVoted || phase === "confirming";
   const shouldRunVoteTimer = Boolean(
     isActive && (!reelMode || carouselSlide === 1),
   );
@@ -2340,7 +2359,7 @@ export function DareCard({
   useEffect(() => {
     if (btnTimerRef.current) clearTimeout(btnTimerRef.current);
 
-    // If this card was already voted on, always show buttons immediately — no timer, no progress bar
+    // If this card was already voted on, always show buttons immediately â€” no timer, no progress bar
     if (getUserVote(dare.id)) {
       setButtonsVisible(true);
       setTimerRunning(false);
@@ -2370,7 +2389,14 @@ export function DareCard({
     return () => {
       if (btnTimerRef.current) clearTimeout(btnTimerRef.current);
     };
-  }, [buttonsVisible, dare.id, getUserVote, isActive, phase, shouldRunVoteTimer]);
+  }, [
+    buttonsVisible,
+    dare.id,
+    getUserVote,
+    isActive,
+    phase,
+    shouldRunVoteTimer,
+  ]);
 
   useEffect(() => {
     if (isActive) return;
@@ -2504,10 +2530,7 @@ export function DareCard({
         0,
         Math.min(1, carousel.scrollLeft / carousel.clientWidth),
       );
-      const nextSlide = Math.max(
-        0,
-        Math.min(1, Math.round(nextProgress)),
-      );
+      const nextSlide = Math.max(0, Math.min(1, Math.round(nextProgress)));
       setCarouselSeamProgress((current) =>
         Math.abs(current - nextProgress) < 0.01 ? current : nextProgress,
       );
@@ -2521,11 +2544,13 @@ export function DareCard({
     carouselSeamProgress > 0.015 && carouselSeamProgress < 0.985
       ? Math.min(0.72, Math.sin(carouselSeamProgress * Math.PI) * 0.78)
       : 0;
+  const showSettledCover =
+    !isActive || !playEntryAnimation || hasPlayedEntryAnimation;
   const coverSlideClassName = [
     "dare-cover-slide",
     picModeEnabled ? "dare-cover-slide-pic-mode" : "",
     isActive && playEntryAnimation ? "dare-cover-slide-active" : "",
-    isActive && !playEntryAnimation ? "dare-cover-slide-entered" : "",
+    showSettledCover ? "dare-cover-slide-entered" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2703,9 +2728,9 @@ export function DareCard({
                 justifyContent: picModeEnabled ? "flex-end" : "center",
                 gap: picModeEnabled ? "12px" : "24px",
                 padding: picModeEnabled
-                  ? "calc(var(--safe-area-top) + 82px) 20px calc(150px + var(--safe-area-bottom))"
+                  ? "calc(var(--safe-area-top) + 82px) 20px calc(124px + var(--safe-area-bottom))"
                   : "40px 22px calc(120px + var(--safe-area-bottom))",
-                transform: picModeEnabled ? "none" : "translateY(-38px)",
+                transform: picModeEnabled ? "none" : "translateY(-12px)",
               }}
             >
               {!picModeEnabled && (
@@ -2803,28 +2828,24 @@ export function DareCard({
                   maxWidth: picModeEnabled ? 400 : 430,
                   padding: picModeEnabled ? "18px 18px 17px" : "24px 20px 23px",
                   borderRadius: 24,
-                  background:
-                    picModeEnabled
-                      ? "linear-gradient(180deg, rgba(7,13,10,0.88), rgba(7,11,9,0.74))"
-                      : "linear-gradient(180deg, rgba(12,20,16,0.9), rgba(8,12,10,0.76))",
+                  background: FEED_SCREEN_SURFACE_BACKGROUND,
                   border: picModeEnabled
-                    ? "1px solid rgba(255,255,255,0.24)"
-                    : "1px solid rgba(255,255,255,0.2)",
-                  boxShadow:
-                    picModeEnabled
-                      ? "0 26px 70px rgba(0,0,0,0.62), 0 0 42px rgba(74,222,128,0.1), inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(74,222,128,0.1)"
-                      : "0 26px 70px rgba(0,0,0,0.54), 0 0 42px rgba(74,222,128,0.08), inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(74,222,128,0.08)",
-                  backdropFilter: "blur(28px) saturate(1.34)",
-                  WebkitBackdropFilter: "blur(28px) saturate(1.34)",
+                    ? "1px solid rgba(255,255,255,0.18)"
+                    : "1px solid rgba(255,255,255,0.16)",
+                  boxShadow: picModeEnabled
+                    ? "0 28px 70px rgba(0,0,0,0.60), 0 10px 26px rgba(0,0,0,0.34), 0 0 34px rgba(74,222,128,0.08), inset 0 1px 0 rgba(255,255,255,0.26), inset 0 -1px 0 rgba(74,222,128,0.08)"
+                    : "0 26px 66px rgba(0,0,0,0.54), 0 10px 24px rgba(0,0,0,0.30), 0 0 30px rgba(74,222,128,0.07), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(74,222,128,0.07)",
+                  backdropFilter: "blur(30px) saturate(1.34)",
+                  WebkitBackdropFilter: "blur(30px) saturate(1.34)",
                 }}
               >
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 rounded-[24px] bg-[linear-gradient(180deg,rgba(255,255,255,0.11),transparent_42%,rgba(255,255,255,0.045))]"
+                  className="pointer-events-none absolute inset-0 rounded-[24px] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_42%,rgba(0,0,0,0.14))]"
                 />
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 rounded-[24px] bg-[radial-gradient(circle_at_50%_0%,rgba(74,222,128,0.16),transparent_48%)]"
+                  className="pointer-events-none absolute inset-0 rounded-[24px] bg-[radial-gradient(circle_at_22%_0%,rgba(255,255,255,0.035),transparent_44%),radial-gradient(circle_at_86%_8%,rgba(74,222,128,0.045),transparent_42%)]"
                 />
                 <div
                   className="dare-cover-kicker"
@@ -2930,410 +2951,443 @@ export function DareCard({
               backfaceVisibility: "hidden",
             }}
           >
-        {dare.proof && (
-          <div
-            style={{ position: "absolute", inset: 0, zIndex: 0 }}
-            onClick={handleMediaTap}
-          >
-            <img
-              src={
-                dare.proof.type === "video"
-                  ? dare.proof.thumbnail || dare.proof.url
-                  : dare.proof.url
-              }
-              alt="Dare proof"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: "block",
-              }}
-            />
+            {dare.proof && (
+              <div
+                style={{ position: "absolute", inset: 0, zIndex: 0 }}
+                onClick={handleMediaTap}
+              >
+                <img
+                  src={
+                    dare.proof.type === "video"
+                      ? dare.proof.thumbnail || dare.proof.url
+                      : dare.proof.url
+                  }
+                  alt="Dare proof"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: "35%",
+                    background:
+                      "linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)",
+                    /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                    /* DISABLED: pointerEvents: "none", */
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: "45%",
+                    background:
+                      "linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 100%)",
+                    /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                    /* DISABLED: pointerEvents: "none", */
+                  }}
+                />
+                {dare.proof.type === "video" && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
+                      /* DISABLED: pointerEvents: "none", */
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "64px",
+                        height: "64px",
+                        background: "rgba(255,255,255,0.18)",
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backdropFilter: "blur(6px)",
+                        border: "1.5px solid rgba(255,255,255,0.25)",
+                      }}
+                    >
+                      <Play size={30} color="#fff" fill="#fff" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: "35%",
-                background:
-                  "linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)",
-                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
-                /* DISABLED: pointerEvents: "none", */
-              }}
+              className="dare-carousel-seam-fade dare-carousel-seam-fade-left"
+              aria-hidden="true"
+              style={{ opacity: carouselSeamOpacity }}
             />
+
+            {/* Sidebar icons appear with the Real/Fake controls after the progress line finishes. */}
+            {voteControlsVisible && (
+              <div
+                style={{
+                  position: "absolute",
+                  right: 14,
+                  bottom: "calc(200px + var(--safe-area-bottom))",
+                  zIndex: 10,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "16px",
+                  opacity: voteControlsVisible ? 1 : 0,
+                  transform: voteControlsVisible
+                    ? "translateY(0)"
+                    : "translateY(10px)",
+                  transition: "opacity 0.35s ease, transform 0.35s ease",
+                }}
+              >
+                <button
+                  type="button"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "5px",
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: hasLikedMedia ? "default" : "pointer",
+                    WebkitTapHighlightColor: "transparent",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleMediaLike();
+                  }}
+                >
+                  <Heart
+                    size={29}
+                    color={hasLikedMedia ? "#fb7185" : "rgba(255,255,255,0.68)"}
+                    fill={hasLikedMedia ? "#fb7185" : "transparent"}
+                    style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+                  />
+                  <span
+                    style={{
+                      color: hasLikedMedia
+                        ? "#fecdd3"
+                        : "rgba(255,255,255,0.6)",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                      textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                    }}
+                  >
+                    {realLikeCount}
+                  </span>
+                </button>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "5px",
+                  }}
+                >
+                  <Eye
+                    size={28}
+                    color="rgba(255,255,255,0.55)"
+                    style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+                  />
+                  <span
+                    style={{
+                      color: "rgba(255,255,255,0.55)",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                    }}
+                  >
+                    {realViewCount}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "5px",
+                    cursor: "pointer",
+                    WebkitTapHighlightColor: "transparent",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenComments?.(dare);
+                  }}
+                >
+                  <MessageCircle
+                    size={28}
+                    color="rgba(255,255,255,0.55)"
+                    style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+                  />
+                  <span
+                    style={{
+                      color: "rgba(255,255,255,0.55)",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                    }}
+                  >
+                    {realCommentCount}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "5px",
+                    cursor: "pointer",
+                    WebkitTapHighlightColor: "transparent",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenShare?.(dare);
+                  }}
+                >
+                  <Share2
+                    size={28}
+                    color="rgba(255,255,255,0.55)"
+                    style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
+                  />
+                  <span
+                    style={{
+                      color: "rgba(255,255,255,0.55)",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                    }}
+                  >
+                    Share
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Progress bar â€” only shown when not yet voted and buttons not yet visible */}
+            {!hasVoted && !buttonsVisible && phase === "idle" && (
+              <div
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  fastForwardVoteProgress(e.clientX, e.currentTarget);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% - 100px - var(--safe-area-bottom))", // decreased further to move down more
+                  left: "14px",
+                  right: "14px",
+                  zIndex: 100,
+                  height: "5px", // thinner than 8px, slightly thicker than original 2px
+                  borderRadius: "99px",
+                  background: "rgba(255,255,255,0.10)",
+                  overflow: "visible",
+                  cursor: "pointer",
+                  touchAction: "none",
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: "-20px",
+                    zIndex: 1,
+                  }}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const parent = e.currentTarget.parentElement;
+                    if (parent) {
+                      fastForwardVoteProgress(e.clientX, parent);
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                />
+                <div
+                  data-progress-bar // â† used by the querySelector above
+                  key={timerKey}
+                  style={{
+                    height: "100%",
+                    borderRadius: "99px",
+                    background:
+                      "linear-gradient(90deg, rgba(74,222,128,0.5), #4ade80)",
+                    width: timerRunning ? "100%" : "0%",
+                    transition: timerRunning ? `width 10s linear` : "none",
+                    pointerEvents: "none",
+                    position: "relative",
+                    zIndex: 2,
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Vote buttons / voted state */}
             <div
               style={{
                 position: "absolute",
                 bottom: 0,
                 left: 0,
                 right: 0,
-                height: "45%",
-                background:
-                  "linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 100%)",
-                /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
-                /* DISABLED: pointerEvents: "none", */
+                zIndex: 1,
+                padding: "0 14px calc(95px + var(--safe-area-bottom))",
               }}
-            />
-            {dare.proof.type === "video" && (
+            >
               <div
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  /* TEMPORARILY DISABLED FOR MOBILE DEBUGGING - pointerEvents blocking touch */
-                  /* DISABLED: pointerEvents: "none", */
+                  opacity:
+                    buttonsVisible || hasVoted || phase === "confirming"
+                      ? 1
+                      : 0,
+                  transform:
+                    buttonsVisible || hasVoted || phase === "confirming"
+                      ? "translateY(0)"
+                      : "translateY(16px)",
+                  transition: "opacity 0.5s ease, transform 0.5s ease",
+                  pointerEvents:
+                    buttonsVisible || hasVoted || phase === "confirming"
+                      ? "auto"
+                      : "none",
                 }}
               >
-                <div
-                  style={{
-                    width: "64px",
-                    height: "64px",
-                    background: "rgba(255,255,255,0.18)",
-                    borderRadius: "50%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backdropFilter: "blur(6px)",
-                    border: "1.5px solid rgba(255,255,255,0.25)",
-                  }}
-                >
-                  <Play size={30} color="#fff" fill="#fff" />
-                </div>
+                {hasVoted ? (
+                  // Voted state â€” show locked-in choice, clicking reopens the modal
+                  <div style={{ display: "flex", justifyContent: "center" }}>
+                    <button
+                      onClick={() => onVoteClick(dare)}
+                      style={{
+                        width: "80%",
+                        padding: "16px",
+                        borderRadius: "16px",
+                        border:
+                          vote === "fake"
+                            ? "1px solid rgba(255,255,255,0.2)"
+                            : "none",
+                        background:
+                          vote === "real" ? "#4ade80" : "rgba(255,255,255,0.1)",
+                        color:
+                          vote === "real" ? "#000" : "rgba(255,255,255,0.9)",
+                        fontWeight: 800,
+                        fontSize: "18px",
+                        cursor: "pointer",
+                        textAlign: "center",
+                        backdropFilter: "blur(8px)",
+                      }}
+                    >
+                      {vote === "real"
+                        ? "You think this is Real"
+                        : "You think this is Fake"}
+                    </button>
+                  </div>
+                ) : phase === "idle" ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "12px",
+                      opacity: exiting ? 0 : 1,
+                      transform: exiting
+                        ? "scale(0.93) translateY(5px)"
+                        : "scale(1) translateY(0)",
+                      transition: "opacity 0.22s ease, transform 0.22s ease",
+                    }}
+                  >
+                    <button
+                      className="dare-real-btn"
+                      onClick={() => handleVote("real")}
+                      style={{
+                        flex: 1,
+                        padding: "16px",
+                        borderRadius: "16px",
+                        border: "none",
+                        background: "#4ade80",
+                        color: "#000",
+                        fontWeight: 800,
+                        fontSize: "18px",
+                        cursor: "pointer",
+                        touchAction: "manipulation",
+                        WebkitTapHighlightColor: "transparent",
+                        animation: "btnPulseReal 6s ease-in-out infinite",
+                      }}
+                    >
+                      Real
+                    </button>
+                    <button
+                      className="dare-fake-btn"
+                      onClick={() => handleVote("fake")}
+                      style={{
+                        flex: 1,
+                        padding: "16px",
+                        borderRadius: "16px",
+                        border: "1px solid rgba(255,255,255,0.2)",
+                        background: "rgba(255,255,255,0.1)",
+                        color: "rgba(255,255,255,0.9)",
+                        fontWeight: 800,
+                        fontSize: "18px",
+                        cursor: "pointer",
+                        backdropFilter: "blur(8px)",
+                        touchAction: "manipulation",
+                        WebkitTapHighlightColor: "transparent",
+                        animation: "btnPulseFake 6s ease-in-out infinite",
+                      }}
+                    >
+                      Fake
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", justifyContent: "center" }}>
+                    <button
+                      onClick={handleConfirm}
+                      style={{
+                        width: "80%",
+                        padding: "16px",
+                        borderRadius: "16px",
+                        border:
+                          vote === "fake"
+                            ? "1px solid rgba(255,255,255,0.2)"
+                            : "none",
+                        background:
+                          vote === "real" ? "#4ade80" : "rgba(255,255,255,0.1)",
+                        color:
+                          vote === "real" ? "#000" : "rgba(255,255,255,0.9)",
+                        fontWeight: 800,
+                        fontSize: "18px",
+                        cursor: "pointer",
+                        textAlign: "center",
+                        backdropFilter: "blur(8px)",
+                        animation:
+                          "expandBtn 0.8s cubic-bezier(0.34,1.56,0.64,1) forwards",
+                      }}
+                    >
+                      {vote === "real"
+                        ? "You think this is Real"
+                        : "You think this is Fake"}
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
-        <div
-          className="dare-carousel-seam-fade dare-carousel-seam-fade-left"
-          aria-hidden="true"
-          style={{ opacity: carouselSeamOpacity }}
-        />
-
-        {/* Sidebar icons appear with the Real/Fake controls after the progress line finishes. */}
-        {voteControlsVisible && (
-          <div
-            style={{
-              position: "absolute",
-              right: 14,
-              bottom: "calc(200px + var(--safe-area-bottom))",
-              zIndex: 10,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "16px",
-              opacity: voteControlsVisible ? 1 : 0,
-              transform: voteControlsVisible ? "translateY(0)" : "translateY(10px)",
-              transition: "opacity 0.35s ease, transform 0.35s ease",
-            }}
-          >
-            <button
-              type="button"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "5px",
-                border: "none",
-                background: "transparent",
-                padding: 0,
-                cursor: hasLikedMedia ? "default" : "pointer",
-                WebkitTapHighlightColor: "transparent",
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleMediaLike();
-              }}
-            >
-              <Heart
-                size={29}
-                color={hasLikedMedia ? "#fb7185" : "rgba(255,255,255,0.68)"}
-                fill={hasLikedMedia ? "#fb7185" : "transparent"}
-                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-              />
-              <span
-                style={{
-                  color: hasLikedMedia ? "#fecdd3" : "rgba(255,255,255,0.6)",
-                  fontSize: "12px",
-                  fontWeight: 800,
-                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
-                }}
-              >
-                {realLikeCount}
-              </span>
-            </button>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "5px",
-              }}
-            >
-              <Eye
-                size={28}
-                color="rgba(255,255,255,0.55)"
-                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-              />
-              <span
-                style={{
-                  color: "rgba(255,255,255,0.55)",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
-                }}
-              >
-                {realViewCount}
-              </span>
             </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "5px",
-                cursor: "pointer",
-                WebkitTapHighlightColor: "transparent",
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenComments?.(dare);
-              }}
-            >
-              <MessageCircle
-                size={28}
-                color="rgba(255,255,255,0.55)"
-                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-              />
-              <span
-                style={{
-                  color: "rgba(255,255,255,0.55)",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
-                }}
-              >
-                {realCommentCount}
-              </span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "5px",
-                cursor: "pointer",
-                WebkitTapHighlightColor: "transparent",
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenShare?.(dare);
-              }}
-            >
-              <Share2
-                size={28}
-                color="rgba(255,255,255,0.55)"
-                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.6))" }}
-              />
-              <span
-                style={{
-                  color: "rgba(255,255,255,0.55)",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
-                }}
-              >
-                Share
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Progress bar — only shown when not yet voted and buttons not yet visible */}
-        {!hasVoted && !buttonsVisible && phase === "idle" && (
-          <div
-            onPointerDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              fastForwardVoteProgress(e.clientX, e.currentTarget);
-            }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            style={{
-              position: "absolute",
-              top: "calc(100% - 100px - var(--safe-area-bottom))", // decreased further to move down more
-              left: "14px",
-              right: "14px",
-              zIndex: 30,
-              height: "5px", // thinner than 8px, slightly thicker than original 2px
-              borderRadius: "99px",
-              background: "rgba(255,255,255,0.10)",
-              overflow: "hidden",
-              cursor: "pointer",
-              touchAction: "manipulation",
-            }}
-          >
-            <div
-              data-progress-bar // ← used by the querySelector above
-              key={timerKey}
-              style={{
-                height: "100%",
-                borderRadius: "99px",
-                background:
-                  "linear-gradient(90deg, rgba(74,222,128,0.5), #4ade80)",
-                width: timerRunning ? "100%" : "0%",
-                transition: timerRunning ? `width 10s linear` : "none",
-                pointerEvents: "none",
-              }}
-            />
-          </div>
-        )}
-
-        {/* Vote buttons / voted state */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 1,
-            padding: "0 14px calc(95px + var(--safe-area-bottom))",
-          }}
-        >
-          <div
-            style={{
-              opacity:
-                buttonsVisible || hasVoted || phase === "confirming" ? 1 : 0,
-              transform:
-                buttonsVisible || hasVoted || phase === "confirming"
-                  ? "translateY(0)"
-                  : "translateY(16px)",
-              transition: "opacity 0.5s ease, transform 0.5s ease",
-              pointerEvents:
-                buttonsVisible || hasVoted || phase === "confirming"
-                  ? "auto"
-                  : "none",
-            }}
-          >
-            {hasVoted ? (
-              // Voted state — show locked-in choice, clicking reopens the modal
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                <button
-                  onClick={() => onVoteClick(dare)}
-                  style={{
-                    width: "80%",
-                    padding: "16px",
-                    borderRadius: "16px",
-                    border:
-                      vote === "fake"
-                        ? "1px solid rgba(255,255,255,0.2)"
-                        : "none",
-                    background:
-                      vote === "real" ? "#4ade80" : "rgba(255,255,255,0.1)",
-                    color: vote === "real" ? "#000" : "rgba(255,255,255,0.9)",
-                    fontWeight: 800,
-                    fontSize: "18px",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    backdropFilter: "blur(8px)",
-                  }}
-                >
-                  {vote === "real"
-                    ? "You think this is Real ✓"
-                    : "You think this is Fake ✓"}
-                </button>
-              </div>
-            ) : phase === "idle" ? (
-              <div
-                style={{
-                  display: "flex",
-                  gap: "12px",
-                  opacity: exiting ? 0 : 1,
-                  transform: exiting
-                    ? "scale(0.93) translateY(5px)"
-                    : "scale(1) translateY(0)",
-                  transition: "opacity 0.22s ease, transform 0.22s ease",
-                }}
-              >
-                <button
-                  className="dare-real-btn"
-                  onClick={() => handleVote("real")}
-                  style={{
-                    flex: 1,
-                    padding: "16px",
-                    borderRadius: "16px",
-                    border: "none",
-                    background: "#4ade80",
-                    color: "#000",
-                    fontWeight: 800,
-                    fontSize: "18px",
-                    cursor: "pointer",
-                    touchAction: "manipulation",
-                    WebkitTapHighlightColor: "transparent",
-                    animation: "btnPulseReal 6s ease-in-out infinite",
-                  }}
-                >
-                  Real
-                </button>
-                <button
-                  className="dare-fake-btn"
-                  onClick={() => handleVote("fake")}
-                  style={{
-                    flex: 1,
-                    padding: "16px",
-                    borderRadius: "16px",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.1)",
-                    color: "rgba(255,255,255,0.9)",
-                    fontWeight: 800,
-                    fontSize: "18px",
-                    cursor: "pointer",
-                    backdropFilter: "blur(8px)",
-                    touchAction: "manipulation",
-                    WebkitTapHighlightColor: "transparent",
-                    animation: "btnPulseFake 6s ease-in-out infinite",
-                  }}
-                >
-                  Fake
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                <button
-                  onClick={handleConfirm}
-                  style={{
-                    width: "80%",
-                    padding: "16px",
-                    borderRadius: "16px",
-                    border:
-                      vote === "fake"
-                        ? "1px solid rgba(255,255,255,0.2)"
-                        : "none",
-                    background:
-                      vote === "real" ? "#4ade80" : "rgba(255,255,255,0.1)",
-                    color: vote === "real" ? "#000" : "rgba(255,255,255,0.9)",
-                    fontWeight: 800,
-                    fontSize: "18px",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    backdropFilter: "blur(8px)",
-                    animation:
-                      "expandBtn 0.8s cubic-bezier(0.34,1.56,0.64,1) forwards",
-                  }}
-                >
-                  {vote === "real"
-                    ? "You think this is Real ✓"
-                    : "You think this is Fake ✓"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
           </section>
         </div>
         <div
@@ -3684,7 +3738,7 @@ export function DareCard({
     );
   }
 
-  // ── Non-reel card (feed view) ──────────────────────────────────────────────
+  // â”€â”€ Non-reel card (feed view) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div
       className="overflow-hidden bg-[#1a1a1a] rounded-2xl border border-gray-800"
@@ -3898,8 +3952,8 @@ export function DareCard({
               }}
             >
               {vote === "real"
-                ? "You think this is Real ✓"
-                : "You think this is Fake ✓"}
+                ? "You think this is Real"
+                : "You think this is Fake"}
             </button>
           </div>
         ) : phase === "idle" ? (
@@ -3974,8 +4028,8 @@ export function DareCard({
               }}
             >
               {vote === "real"
-                ? "You think this is Real ✓"
-                : "You think this is Fake ✓"}
+                ? "You think this is Real"
+                : "You think this is Fake"}
             </button>
           </div>
         )}
@@ -3988,7 +4042,7 @@ export function DareCard({
   );
 }
 
-// ─── SwipeableTruthCard ───────────────────────────────────────────────────────
+// â”€â”€â”€ SwipeableTruthCard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type TruthCardBackgroundTheme = {
   activeShadow: string;
   answerBubble: string;
@@ -4008,8 +4062,7 @@ const TRUTH_CARD_BACKGROUND_THEMES: TruthCardBackgroundTheme[] = [
       "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.16), transparent 34%), radial-gradient(circle at 12% 74%, rgba(74,222,128,0.09), transparent 28%), radial-gradient(circle at 88% 70%, rgba(56,189,248,0.12), transparent 32%), linear-gradient(180deg, #08110c 0%, #050b08 48%, #020403 100%)",
     texture:
       "linear-gradient(115deg, rgba(74,222,128,0.11) 0 1px, transparent 1px 22px), linear-gradient(245deg, rgba(56,189,248,0.055) 0 1px, transparent 1px 28px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.08), transparent 42%)",
-    wash:
-      "conic-gradient(from 210deg at 50% 52%, rgba(74,222,128,0.11), rgba(255,255,255,0.04), rgba(56,189,248,0.095), rgba(20,83,45,0.09), rgba(74,222,128,0.11)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.76), transparent 50%)",
+    wash: "conic-gradient(from 210deg at 50% 52%, rgba(74,222,128,0.11), rgba(255,255,255,0.04), rgba(56,189,248,0.095), rgba(20,83,45,0.09), rgba(74,222,128,0.11)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.76), transparent 50%)",
     topGlow:
       "linear-gradient(90deg, transparent, rgba(74,222,128,0.88), rgba(56,189,248,0.55), transparent)",
     questionBubble:
@@ -4030,8 +4083,7 @@ const TRUTH_CARD_BACKGROUND_THEMES: TruthCardBackgroundTheme[] = [
       "radial-gradient(circle at 50% -12%, rgba(56,189,248,0.15), transparent 32%), radial-gradient(circle at 18% 76%, rgba(74,222,128,0.075), transparent 30%), radial-gradient(circle at 88% 66%, rgba(20,184,166,0.12), transparent 32%), linear-gradient(180deg, #071117 0%, #041014 50%, #020506 100%)",
     texture:
       "linear-gradient(115deg, rgba(56,189,248,0.09) 0 1px, transparent 1px 24px), linear-gradient(245deg, rgba(74,222,128,0.055) 0 1px, transparent 1px 30px), radial-gradient(ellipse at 50% 28%, rgba(255,255,255,0.075), transparent 42%)",
-    wash:
-      "conic-gradient(from 220deg at 52% 50%, rgba(56,189,248,0.105), rgba(255,255,255,0.035), rgba(74,222,128,0.08), rgba(14,116,144,0.095), rgba(56,189,248,0.105)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    wash: "conic-gradient(from 220deg at 52% 50%, rgba(56,189,248,0.105), rgba(255,255,255,0.035), rgba(74,222,128,0.08), rgba(14,116,144,0.095), rgba(56,189,248,0.105)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
     topGlow:
       "linear-gradient(90deg, transparent, rgba(56,189,248,0.76), rgba(74,222,128,0.5), transparent)",
     questionBubble:
@@ -4052,8 +4104,7 @@ const TRUTH_CARD_BACKGROUND_THEMES: TruthCardBackgroundTheme[] = [
       "radial-gradient(ellipse at 50% 16%, rgba(255,255,255,0.075), transparent 30%), radial-gradient(circle at 50% -8%, rgba(74,222,128,0.13), transparent 36%), radial-gradient(circle at 86% 74%, rgba(56,189,248,0.095), transparent 30%), linear-gradient(180deg, #09100c 0%, #050705 54%, #020302 100%)",
     texture:
       "linear-gradient(115deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 26px), linear-gradient(245deg, rgba(74,222,128,0.06) 0 1px, transparent 1px 32px), radial-gradient(ellipse at 50% 24%, rgba(74,222,128,0.08), transparent 38%)",
-    wash:
-      "conic-gradient(from 190deg at 50% 44%, rgba(255,255,255,0.055), rgba(74,222,128,0.105), rgba(56,189,248,0.06), rgba(255,255,255,0.04), rgba(74,222,128,0.105)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    wash: "conic-gradient(from 190deg at 50% 44%, rgba(255,255,255,0.055), rgba(74,222,128,0.105), rgba(56,189,248,0.06), rgba(255,255,255,0.04), rgba(74,222,128,0.105)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
     topGlow:
       "linear-gradient(90deg, transparent, rgba(255,255,255,0.58), rgba(74,222,128,0.72), transparent)",
     questionBubble:
@@ -4074,8 +4125,7 @@ const TRUTH_CARD_BACKGROUND_THEMES: TruthCardBackgroundTheme[] = [
       "radial-gradient(circle at 48% -12%, rgba(74,222,128,0.13), transparent 34%), radial-gradient(circle at 14% 70%, rgba(244,114,182,0.075), transparent 28%), radial-gradient(circle at 88% 68%, rgba(56,189,248,0.09), transparent 32%), linear-gradient(180deg, #11090f 0%, #08070b 50%, #030204 100%)",
     texture:
       "linear-gradient(115deg, rgba(244,114,182,0.055) 0 1px, transparent 1px 24px), linear-gradient(245deg, rgba(74,222,128,0.065) 0 1px, transparent 1px 30px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.07), transparent 42%)",
-    wash:
-      "conic-gradient(from 215deg at 50% 52%, rgba(244,114,182,0.07), rgba(255,255,255,0.035), rgba(74,222,128,0.095), rgba(56,189,248,0.07), rgba(244,114,182,0.07)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    wash: "conic-gradient(from 215deg at 50% 52%, rgba(244,114,182,0.07), rgba(255,255,255,0.035), rgba(74,222,128,0.095), rgba(56,189,248,0.07), rgba(244,114,182,0.07)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
     topGlow:
       "linear-gradient(90deg, transparent, rgba(244,114,182,0.44), rgba(74,222,128,0.78), transparent)",
     questionBubble:
@@ -4096,8 +4146,7 @@ const TRUTH_CARD_BACKGROUND_THEMES: TruthCardBackgroundTheme[] = [
       "radial-gradient(circle at 24% 16%, rgba(74,222,128,0.105), transparent 30%), radial-gradient(circle at 76% 20%, rgba(56,189,248,0.105), transparent 31%), radial-gradient(circle at 50% 84%, rgba(255,255,255,0.055), transparent 28%), linear-gradient(180deg, #07100d 0%, #050809 50%, #020303 100%)",
     texture:
       "linear-gradient(115deg, rgba(74,222,128,0.075) 0 1px, transparent 1px 26px), linear-gradient(245deg, rgba(56,189,248,0.065) 0 1px, transparent 1px 32px), radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.07), transparent 42%)",
-    wash:
-      "conic-gradient(from 230deg at 50% 52%, rgba(74,222,128,0.075), rgba(56,189,248,0.085), rgba(255,255,255,0.035), rgba(20,83,45,0.075), rgba(74,222,128,0.075)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
+    wash: "conic-gradient(from 230deg at 50% 52%, rgba(74,222,128,0.075), rgba(56,189,248,0.085), rgba(255,255,255,0.035), rgba(20,83,45,0.075), rgba(74,222,128,0.075)), radial-gradient(ellipse at 50% 108%, rgba(0,0,0,0.78), transparent 50%)",
     topGlow:
       "linear-gradient(90deg, transparent, rgba(74,222,128,0.66), rgba(56,189,248,0.6), transparent)",
     questionBubble:
@@ -4170,21 +4219,21 @@ function TruthConversationScreen({
             "radial-gradient(circle at 50% -12%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 12% 22%, rgba(56,189,248,0.12), transparent 28%), linear-gradient(180deg,#07100d,#030403 62%,#010201)",
         }}
       >
-        <div className="relative shrink-0 px-4 pb-4 pt-[calc(var(--safe-area-top)+12px)]">
-          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.75),transparent)]" />
-          <div className="relative flex min-h-[82px] items-center gap-3 overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(22,26,22,0.96),rgba(13,16,13,0.96))] px-4 py-3.5 shadow-[0_18px_48px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl">
-            <div className="pointer-events-none absolute inset-[1px] rounded-[27px] bg-[linear-gradient(180deg,rgba(255,255,255,0.09),transparent_46%,rgba(74,222,128,0.04))]" />
+        <div className="relative shrink-0 px-4 pb-3 pt-[calc(var(--safe-area-top)+10px)]">
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(74,222,128,0.68),rgba(56,189,248,0.34),transparent)]" />
+          <div className="relative flex min-h-[78px] items-center gap-3 overflow-hidden rounded-[26px] border border-white/8 bg-[radial-gradient(circle_at_18%_-28%,rgba(74,222,128,0.13),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(56,189,248,0.08),transparent_34%),linear-gradient(180deg,rgba(6,8,6,0.96)_0%,rgba(10,15,10,0.94)_52%,rgba(3,4,3,0.98)_100%)] px-3.5 py-3 shadow-[0_18px_48px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.055)] backdrop-blur-2xl">
+            <div className="pointer-events-none absolute inset-[1px] rounded-[25px] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),transparent_48%,rgba(0,0,0,0.16))]" />
             <button
               type="button"
               onClick={onClose}
               aria-label="Back"
-              className="app-pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 text-white shadow-[0_12px_30px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl"
+              className="app-pressable relative z-[1] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/8 bg-white/[0.045] text-[#cbd5e1] shadow-[0_12px_28px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.045)] backdrop-blur-xl"
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={19} />
             </button>
-            <div className="min-w-0 flex-1">
+            <div className="relative z-[1] min-w-0 flex-1">
               <div className="flex items-center gap-3">
-                <div className="flex -space-x-2">
+                <div className="flex -space-x-2.5">
                   <button
                     type="button"
                     onClick={() =>
@@ -4222,23 +4271,23 @@ function TruthConversationScreen({
                       style={{
                         border: "2px solid rgba(3,4,3,0.96)",
                         boxShadow:
-                          "0 0 0 1px rgba(74,222,128,0.28), 0 10px 24px rgba(0,0,0,0.34)",
+                          "0 0 0 1px rgba(56,189,248,0.24), 0 10px 24px rgba(0,0,0,0.34)",
                       }}
                     />
                   </button>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-[16px] font-black leading-tight text-white">
-                    Truth conversation
+                  <h2 className="truncate text-[15px] font-black leading-tight text-white">
+                    {post.receiver.nickname} answered
                   </h2>
-                  <p className="mt-0.5 truncate text-[12px] font-bold text-white/52">
-                    {post.challenger.nickname} asked {post.receiver.nickname}
+                  <p className="mt-0.5 truncate text-[12px] font-bold text-[#94a3b8]">
+                    Question from {post.challenger.nickname}
                   </p>
                 </div>
               </div>
             </div>
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 text-[#4ade80] shadow-[0_12px_30px_rgba(0,0,0,0.24)]">
-              <Sparkles size={17} />
+            <div className="relative z-[1] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#4ade80]/18 bg-[#4ade80]/10 text-[#86efac] shadow-[0_12px_30px_rgba(0,0,0,0.24)]">
+              <Sparkles size={16} />
             </div>
           </div>
         </div>
@@ -4256,7 +4305,8 @@ function TruthConversationScreen({
                 <button
                   type="button"
                   onClick={() =>
-                    post.challengerId && onNavigateToProfile?.(post.challengerId)
+                    post.challengerId &&
+                    onNavigateToProfile?.(post.challengerId)
                   }
                   className="shrink-0 rounded-full"
                 >
@@ -4347,15 +4397,11 @@ function TruthConversationScreen({
                   style={{
                     background:
                       "radial-gradient(circle at 78% 16%, rgba(74,222,128,0.18), transparent 34%), radial-gradient(circle at 14% 80%, rgba(56,189,248,0.12), transparent 34%)",
-                    animation: "truthConversationGlow 7.4s ease-in-out 0.3s infinite",
+                    animation:
+                      "truthConversationGlow 7.4s ease-in-out 0.3s infinite",
                   }}
                 />
                 <div className="relative z-[1]">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <span className="shrink-0 rounded-full border border-[#4ade80]/20 bg-[#4ade80]/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#bbf7d0]">
-                      Answer
-                    </span>
-                  </div>
                   <p
                     className={`m-0 font-bold text-white/92 ${
                       isLongAnswer ? "text-[16px]" : "text-[17px]"
@@ -4405,7 +4451,7 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
 }: SwipeableTruthCardProps) {
   const { getUserVote, setUserVote } = useTruthInteractionStore();
 
-  // Initialise from persistent storage — if previously voted, jump straight to voted state
+  // Initialise from persistent storage â€” if previously voted, jump straight to voted state
   const priorVote = getUserVote(post.id);
   const [vote, setVote] = useState<"truth" | "lie" | null>(priorVote);
   const [phase, setPhase] = useState<"idle" | "confirming" | "voted">(
@@ -4509,7 +4555,7 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
         contain: "layout paint style",
         isolation: "isolate",
         zIndex: isActive ? 2 : offset > 0 ? 1 : 0,
-        padding: "10px 16px 16px",
+        padding: "calc(var(--safe-area-top) + 18px) 8px 16px",
         display: "flex",
         flexDirection: "column",
       }}
@@ -4524,21 +4570,30 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
           50%  { background-position: 100% 50%; }
           100% { background-position: 0% 50%; }
         }
-        @keyframes expandBtn { from { width:50%;opacity:0.5;transform:scale(0.93);} to {width:80%;opacity:1;transform:scale(1);} }
-        .truth-vote-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
-        .truth-vote-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
-        .lie-vote-btn { transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
-        .lie-vote-btn:active { transform: scale(0.88); transition: transform 0.06s ease; }
+        @keyframes expandBtn { from { width:58%;opacity:0.72;transform:translate3d(0,5px,0) scale(0.97);} to {width:80%;opacity:1;transform:translate3d(0,0,0) scale(1);} }
+        .truth-vote-btn,
+        .lie-vote-btn {
+          transition:
+            transform 180ms cubic-bezier(0.22,1,0.36,1),
+            box-shadow 240ms ease,
+            opacity 180ms ease;
+          will-change: transform, box-shadow, opacity;
+        }
+        .truth-vote-btn:active,
+        .lie-vote-btn:active {
+          transform: translate3d(0,1px,0) scale(0.965);
+          transition-duration: 80ms;
+        }
         @keyframes btnPulseTruth {
-          0%{box-shadow:0 6px 24px rgba(74,222,128,0.3);opacity:0.88}
-          18%{box-shadow:0 6px 36px rgba(74,222,128,0.65);opacity:1}
-          40%{box-shadow:0 6px 24px rgba(74,222,128,0.3);opacity:0.88}
-          100%{box-shadow:0 6px 24px rgba(74,222,128,0.3);opacity:0.88}
+          0%,100%{box-shadow:0 8px 22px rgba(74,222,128,0.22);opacity:0.88}
+          16%{box-shadow:0 10px 30px rgba(74,222,128,0.38);opacity:1}
+          34%{box-shadow:0 8px 24px rgba(74,222,128,0.28);opacity:0.94}
+          52%{box-shadow:0 8px 22px rgba(74,222,128,0.22);opacity:0.88}
         }
         @keyframes btnPulseLie {
-          0%{opacity:0.72} 58%{opacity:0.72}
-          74%{box-shadow:0 0 28px 8px rgba(255,100,100,0.22);opacity:1}
-          90%{opacity:0.72} 100%{opacity:0.72}
+          0%,52%,100%{box-shadow:0 8px 22px rgba(255,80,80,0.06);opacity:0.82}
+          72%{box-shadow:0 10px 28px rgba(255,100,100,0.2);opacity:1}
+          88%{box-shadow:0 8px 24px rgba(255,80,80,0.1);opacity:0.9}
         }
         @keyframes questionReveal {
           from { opacity:0; transform: translate3d(0,10px,0) scale(0.985); }
@@ -4568,8 +4623,8 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
           boxShadow: reduceMotionDuringDrag
             ? "0 12px 34px rgba(0,0,0,0.72)"
             : isActive
-            ? truthBackground.activeShadow
-            : "0 8px 32px rgba(0,0,0,0.7)",
+              ? truthBackground.activeShadow
+              : "0 8px 32px rgba(0,0,0,0.7)",
           transition: reduceMotionDuringDrag ? "none" : "box-shadow 0.35s ease",
           transform: "translateZ(0)",
         }}
@@ -4849,9 +4904,10 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                 "0 16px 38px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -28px 60px rgba(74,222,128,0.035)",
               overflow: "hidden",
               isolation: "isolate",
-              animation: isActive && !isDragging
-                ? "questionReveal 0.6s ease 0.1s both"
-                : "none",
+              animation:
+                isActive && !isDragging
+                  ? "questionReveal 0.6s ease 0.1s both"
+                  : "none",
             }}
           >
             <span
@@ -5028,9 +5084,10 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                   "0 14px 34px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06)",
                 overflow: "hidden",
                 isolation: "isolate",
-                animation: isActive && !isDragging
-                  ? "answerReveal 0.62s ease 0.22s both"
-                  : "none",
+                animation:
+                  isActive && !isDragging
+                    ? "answerReveal 0.62s ease 0.22s both"
+                    : "none",
               }}
             >
               <span
@@ -5194,7 +5251,7 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                   gap: "7px",
                 }}
               >
-                <span style={{ fontSize: "18px" }}>✓</span> Truth
+                <span style={{ fontSize: "18px" }}>T</span> Truth
               </button>
               <button
                 className="lie-vote-btn"
@@ -5221,7 +5278,7 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                   gap: "7px",
                 }}
               >
-                <span style={{ fontSize: "18px" }}>✗</span> Lie
+                <span style={{ fontSize: "18px" }}>L</span> Lie
               </button>
             </div>
           ) : phase === "confirming" ? (
@@ -5242,17 +5299,21 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                   cursor: "pointer",
                   textAlign: "center",
                   animation:
-                    "expandBtn 0.8s cubic-bezier(0.34,1.56,0.64,1) forwards",
+                    "expandBtn 0.34s cubic-bezier(0.22,1,0.36,1) forwards",
                   boxShadow:
                     vote === "truth"
-                      ? "0 6px 24px rgba(74,222,128,0.45)"
+                      ? "0 10px 24px rgba(74,222,128,0.28)"
                       : "none",
                   letterSpacing: "0.02em",
+                  touchAction: "manipulation",
+                  WebkitTapHighlightColor: "transparent",
+                  transition:
+                    "transform 160ms cubic-bezier(0.22,1,0.36,1), box-shadow 220ms ease, opacity 160ms ease",
                 }}
               >
                 {vote === "truth"
-                  ? "✓ Confirm — It's the Truth"
-                  : "✗ Confirm — It's a Lie"}
+                  ? "You think this is truth"
+                  : "You think this is a lie"}
               </button>
             </div>
           ) : (
@@ -5274,9 +5335,6 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                     : "1px solid rgba(255,80,80,0.2)",
               }}
             >
-              <span style={{ fontSize: "20px" }}>
-                {vote === "truth" ? "✓" : "✗"}
-              </span>
               <button
                 onClick={handleOpenVotedStateModal}
                 style={{
@@ -5291,7 +5349,9 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                   cursor: "pointer",
                 }}
               >
-                {vote === "truth" ? "You voted Truth" : "You voted Lie"}
+                {vote === "truth"
+                  ? "You think this is truth"
+                  : "You think this is a lie"}
               </button>
               <span
                 style={{
@@ -5300,7 +5360,7 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
                   marginLeft: "auto",
                 }}
               >
-                tap to see results →
+                tap to see results
               </span>
             </div>
           )}
@@ -5310,7 +5370,7 @@ export const SwipeableTruthCard = React.memo(function SwipeableTruthCard({
   );
 });
 
-// ─── TruthCard (feed view) ────────────────────────────────────────────────────
+// â”€â”€â”€ TruthCard (feed view) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface TruthCardProps {
   post: TruthPost;
   onVoteClick: (post: TruthPost, choice: "truth" | "lie") => void;
@@ -5318,7 +5378,7 @@ interface TruthCardProps {
 export function TruthCard({ post, onVoteClick }: TruthCardProps) {
   const { getUserVote, setUserVote } = useTruthInteractionStore();
 
-  // Initialise from persistent storage — if previously voted, jump straight to voted state
+  // Initialise from persistent storage â€” if previously voted, jump straight to voted state
   const priorVote = getUserVote(post.id);
   const [vote, setVote] = useState<"truth" | "lie" | null>(priorVote);
   const [phase, setPhase] = useState<"idle" | "confirming" | "voted">(
@@ -5575,12 +5635,16 @@ export function TruthCard({ post, onVoteClick }: TruthCardProps) {
                 cursor: "pointer",
                 textAlign: "center",
                 animation:
-                  "expandBtn 0.8s cubic-bezier(0.34,1.56,0.64,1) forwards",
+                  "expandBtn 0.34s cubic-bezier(0.22,1,0.36,1) forwards",
+                touchAction: "manipulation",
+                WebkitTapHighlightColor: "transparent",
+                transition:
+                  "transform 160ms cubic-bezier(0.22,1,0.36,1), box-shadow 220ms ease, opacity 160ms ease",
               }}
             >
               {vote === "truth"
-                ? "You think this is the Truth ✓"
-                : "You think this is a Lie ✓"}
+                ? "You think this is truth"
+                : "You think this is a lie"}
             </button>
           </div>
         ) : (
@@ -5607,15 +5671,17 @@ export function TruthCard({ post, onVoteClick }: TruthCardProps) {
                 fontSize: "15px",
               }}
             >
-              You voted: {vote === "truth" ? "Truth ✓" : "Lie ✓"}
+              {vote === "truth"
+                ? "You think this is truth"
+                : "You think this is a lie"}
             </span>
           </div>
         )}
         <style>{`
-          @keyframes expandBtn { from { width: 50%; opacity: 0.5; transform: scale(0.93); } to { width: 80%; opacity: 1; transform: scale(1); } }
+          @keyframes expandBtn { from { width: 58%; opacity: 0.72; transform: translate3d(0,5px,0) scale(0.97); } to { width: 80%; opacity: 1; transform: translate3d(0,0,0) scale(1); } }
           @keyframes truthFade { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-          @keyframes btnPulseTruth { 0%{box-shadow:0 0 0px 0px rgba(74,222,128,0);opacity:0.72} 15%{box-shadow:0 0 22px 6px rgba(74,222,128,0.4);opacity:1} 35%{box-shadow:0 0 0px 0px rgba(74,222,128,0);opacity:0.72} 100%{box-shadow:0 0 0px 0px rgba(74,222,128,0);opacity:0.72} }
-          @keyframes btnPulseLie { 0%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} 55%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} 70%{box-shadow:0 0 22px 6px rgba(255,255,255,0.18);opacity:1} 88%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} 100%{box-shadow:0 0 0px 0px rgba(255,255,255,0);opacity:0.72} }
+          @keyframes btnPulseTruth { 0%,100%{box-shadow:0 8px 22px rgba(74,222,128,0.22);opacity:0.88} 16%{box-shadow:0 10px 30px rgba(74,222,128,0.38);opacity:1} 34%{box-shadow:0 8px 24px rgba(74,222,128,0.28);opacity:0.94} 52%{box-shadow:0 8px 22px rgba(74,222,128,0.22);opacity:0.88} }
+          @keyframes btnPulseLie { 0%,52%,100%{box-shadow:0 8px 22px rgba(255,80,80,0.06);opacity:0.82} 72%{box-shadow:0 10px 28px rgba(255,100,100,0.2);opacity:1} 88%{box-shadow:0 8px 24px rgba(255,80,80,0.1);opacity:0.9} }
           .card:focus, .card:active { outline: none !important; box-shadow: none !important; }
         `}</style>
       </div>
@@ -5635,7 +5701,7 @@ const formatTimestamp = (timestamp: any): string => {
   return "Recently";
 };
 
-// ─── MainScreen ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ MainScreen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type MainScreenView = "truth" | "dares";
 type DareAudience = "friends" | "community";
 
@@ -5714,6 +5780,8 @@ export function MainScreen({
     useState<CommunityChallenge | null>(null);
   const [showCommunityChallengeHub, setShowCommunityChallengeHub] =
     useState(false);
+  const [communityChallengeSummaries, setCommunityChallengeSummaries] =
+    useState<Record<string, CommunityChallengeSummary>>({});
   const [joinedCommunityChallengeIds, setJoinedCommunityChallengeIds] =
     useState<Set<string>>(() => new Set());
   const canSwitchViewsInternally = showViewToggle;
@@ -5780,14 +5848,30 @@ export function MainScreen({
   }, [focusRequest, darePosts]);
 
   const orderedTruthPosts = React.useMemo(
-    () =>
-      rankDeckByVoteState(displayTruthPosts, (postId) =>
+    () => {
+      const rankedTruths = rankDeckByVoteState(displayTruthPosts, (postId) =>
         Boolean(sessionVoteSnapshot.truthVotes[postId]),
-      ),
-    [displayTruthPosts, sessionVoteSnapshot],
+      );
+      const focusedTruthId =
+        focusRequest?.view === "truth" ? focusRequest.post.id : null;
+
+      if (!focusedTruthId) return rankedTruths;
+
+      const focusedTruth = rankedTruths.find(
+        (truth) => truth.id === focusedTruthId,
+      );
+      if (!focusedTruth) return rankedTruths;
+
+      return [
+        focusedTruth,
+        ...rankedTruths.filter((truth) => truth.id !== focusedTruthId),
+      ];
+    },
+    [displayTruthPosts, focusRequest, sessionVoteSnapshot],
   );
   const truthReelContainerRef = useRef<HTMLDivElement>(null);
   const truthScrollFrame = useRef<number | null>(null);
+  const currentTruthIndexRef = useRef(0);
 
   useEffect(() => {
     if (!userId) return;
@@ -5863,6 +5947,20 @@ export function MainScreen({
     });
   }, [loadDarePosts, userId]);
 
+  useEffect(() => {
+    return communityChallengeService.subscribeToSummaries(
+      COMMUNITY_CHALLENGES.map((challenge) => challenge.id),
+      setCommunityChallengeSummaries,
+    );
+  }, []);
+
+  useEffect(() => {
+    return communityChallengeService.subscribeToJoinedChallengeIds(
+      userId,
+      setJoinedCommunityChallengeIds,
+    );
+  }, [userId]);
+
   const handleVoteClick = React.useCallback((dare: DarePost) => {
     setSelectedDare(dare);
     setShowVoteModal(true);
@@ -5902,16 +6000,48 @@ export function MainScreen({
     setSelectedTruth(null);
   }, []);
 
+  const hydratedCommunityChallenges = React.useMemo(
+    () =>
+      communityChallengeService.hydrateChallenges(
+        COMMUNITY_CHALLENGES,
+        communityChallengeSummaries,
+      ),
+    [communityChallengeSummaries],
+  );
+
+  const selectedHydratedCommunityChallenge = selectedCommunityChallenge
+    ? hydratedCommunityChallenges.find(
+        (challenge) => challenge.id === selectedCommunityChallenge.id,
+      ) || selectedCommunityChallenge
+    : null;
+
   const handleJoinCommunityChallenge = React.useCallback(
-    (challengeId: string) => {
+    async (challenge: CommunityChallenge) => {
+      if (!user?.id) return;
+
       setJoinedCommunityChallengeIds((current) => {
-        if (current.has(challengeId)) return current;
+        if (current.has(challenge.id)) return current;
         const next = new Set(current);
-        next.add(challengeId);
+        next.add(challenge.id);
         return next;
       });
+
+      const result = await communityChallengeService.joinChallenge(challenge, {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName || user.username,
+        avatar: user.avatar || "",
+      });
+
+      if (!result.success) {
+        setJoinedCommunityChallengeIds((current) => {
+          const next = new Set(current);
+          next.delete(challenge.id);
+          return next;
+        });
+      }
     },
-    [],
+    [user?.avatar, user?.displayName, user?.id, user?.username],
   );
   const handleFullscreenMedia = React.useCallback(
     (media: { url: string; type: "image" | "video"; thumbnail?: string }) => {
@@ -5967,10 +6097,22 @@ export function MainScreen({
       return isPublishableDare(d);
     });
 
-    return rankDeckByVoteState(publishableDares, (postId) =>
+    const rankedDares = rankDeckByVoteState(publishableDares, (postId) =>
       Boolean(sessionVoteSnapshot.dareVotes[postId]),
     );
-  }, [displayDarePosts, sessionVoteSnapshot]);
+    const focusedDareId =
+      focusRequest?.view === "dares" ? focusRequest.post.id : null;
+
+    if (!focusedDareId) return rankedDares;
+
+    const focusedDare = rankedDares.find((dare) => dare.id === focusedDareId);
+    if (!focusedDare) return rankedDares;
+
+    return [
+      focusedDare,
+      ...rankedDares.filter((dare) => dare.id !== focusedDareId),
+    ];
+  }, [displayDarePosts, focusRequest, sessionVoteSnapshot]);
 
   const registerDareCardVisit = React.useCallback((dareId: string) => {
     if (visitedDareEntryIds.current.has(dareId)) {
@@ -6023,6 +6165,10 @@ export function MainScreen({
   }, [activeReelIndex]);
 
   useEffect(() => {
+    currentTruthIndexRef.current = currentTruthIndex;
+  }, [currentTruthIndex]);
+
+  useEffect(() => {
     return () => {
       if (reelWheelUnlockTimer.current) {
         clearTimeout(reelWheelUnlockTimer.current);
@@ -6036,22 +6182,25 @@ export function MainScreen({
     };
   }, []);
 
-  const scrollDareReelToIndex = React.useCallback((index: number) => {
-    const container = reelContainerRef.current;
-    if (!container) return;
+  const scrollDareReelToIndex = React.useCallback(
+    (index: number) => {
+      const container = reelContainerRef.current;
+      if (!container) return;
 
-    const maxIndex = Math.max(0, sortedDarePosts.length - 1);
-    const targetIndex = Math.min(maxIndex, Math.max(0, index));
-    const activeDare = sortedDarePosts[targetIndex];
-    if (activeDare?.id) registerDareCardVisit(activeDare.id);
+      const maxIndex = Math.max(0, sortedDarePosts.length - 1);
+      const targetIndex = Math.min(maxIndex, Math.max(0, index));
+      const activeDare = sortedDarePosts[targetIndex];
+      if (activeDare?.id) registerDareCardVisit(activeDare.id);
 
-    activeReelIndexRef.current = targetIndex;
-    setActiveReelIndex(targetIndex);
-    container.scrollTo({
-      top: container.clientHeight * targetIndex,
-      behavior: "smooth",
-    });
-  }, [registerDareCardVisit, sortedDarePosts]);
+      activeReelIndexRef.current = targetIndex;
+      setActiveReelIndex(targetIndex);
+      container.scrollTo({
+        top: container.clientHeight * targetIndex,
+        behavior: "auto",
+      });
+    },
+    [registerDareCardVisit, sortedDarePosts],
+  );
 
   const handleDareReelWheel = React.useCallback(
     (e: WheelEvent) => {
@@ -6192,6 +6341,7 @@ export function MainScreen({
           maxIndex,
           Math.max(0, Math.round(container.scrollTop / slideHeight)),
         );
+        currentTruthIndexRef.current = idx;
         setCurrentTruthIndex((prev) => (prev === idx ? prev : idx));
       });
     };
@@ -6238,18 +6388,10 @@ export function MainScreen({
 
     setCurrentTruthIndex(targetIndex);
 
-    const frame = window.requestAnimationFrame(() => {
-      const container = truthReelContainerRef.current;
-      if (!container) return;
-      container.scrollTo({
-        top: container.clientHeight * targetIndex,
-        behavior: "smooth",
-      });
-    });
-
-    return () => window.cancelAnimationFrame(frame);
+    const container = truthReelContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.clientHeight * targetIndex;
   }, [activeView, activeViewProp, focusRequest, orderedTruthPosts]);
-
 
   useEffect(() => {
     if (!focusRequest || focusRequest.view !== "dares") return;
@@ -6278,16 +6420,9 @@ export function MainScreen({
     setDareAudience("friends");
     setActiveReelIndex(targetIndex);
 
-    const frame = window.requestAnimationFrame(() => {
-      const container = reelContainerRef.current;
-      if (!container) return;
-      container.scrollTo({
-        top: container.clientHeight * targetIndex,
-        behavior: "smooth",
-      });
-    });
-
-    return () => window.cancelAnimationFrame(frame);
+    const container = reelContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.clientHeight * targetIndex;
   }, [activeView, activeViewProp, focusRequest, sortedDarePosts]);
 
   useEffect(() => {
@@ -6313,12 +6448,24 @@ export function MainScreen({
       setDareAudience(initialDareAudience);
       setActiveReelIndex(0);
       if (reelContainerRef.current) reelContainerRef.current.scrollTop = 0;
-      return;
     }
-
-    setCurrentTruthIndex(0);
-    if (truthReelContainerRef.current) truthReelContainerRef.current.scrollTop = 0;
   }, [activeView, initialDareAudience, isActive, resetKey]);
+
+  useLayoutEffect(() => {
+    if (activeView !== "truth") return;
+    if (focusRequest?.view === "truth") return;
+
+    const container = truthReelContainerRef.current;
+    if (!container) return;
+
+    const targetIndex = Math.min(
+      Math.max(0, orderedTruthPosts.length - 1),
+      Math.max(0, currentTruthIndexRef.current),
+    );
+
+    setCurrentTruthIndex((prev) => (prev === targetIndex ? prev : targetIndex));
+    container.scrollTop = container.clientHeight * targetIndex;
+  }, [activeView, focusRequest, orderedTruthPosts.length]);
 
   useEffect(() => {
     if (activeView !== "dares") return;
@@ -6415,7 +6562,10 @@ export function MainScreen({
             </button>
           </div>
         ) : activeView === "dares" ? (
-          <div className="mx-auto grid max-w-sm grid-cols-2 rounded-full border border-white/8 bg-[linear-gradient(180deg,rgba(21,27,21,0.9),rgba(10,14,10,0.96))] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.045)]">
+          <div
+            className="mx-auto grid max-w-sm grid-cols-2 rounded-full border border-white/8 p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.045)]"
+            style={{ background: FEED_SCREEN_SURFACE_BACKGROUND }}
+          >
             {(["friends", "community"] as const).map((section) => (
               <button
                 key={section}
@@ -6538,7 +6688,9 @@ export function MainScreen({
                       color: "rgba(255,255,255,0.6)",
                     }}
                   >
-                    {loadingDares ? "Loading dares..." : "No approved dares yet"}
+                    {loadingDares
+                      ? "Loading dares..."
+                      : "No approved dares yet"}
                   </div>
                 )}
               </div>
@@ -6563,7 +6715,9 @@ export function MainScreen({
                     <DareCard
                       dare={dare}
                       reelMode
-                      isActive={isDareScreenVisible && activeReelIndex === i + 1}
+                      isActive={
+                        isDareScreenVisible && activeReelIndex === i + 1
+                      }
                       hasPlayedEntryAnimation={hasPlayedDareEntryAnimation(
                         dare.id,
                       )}
@@ -6585,9 +6739,8 @@ export function MainScreen({
             </div>
           ) : (
             <CommunityChallengeFeed
-              joinedChallengeIds={joinedCommunityChallengeIds}
+              challenges={hydratedCommunityChallenges}
               onPreview={setSelectedCommunityChallenge}
-              onJoin={handleJoinCommunityChallenge}
             />
           )}
         </div>
@@ -6603,7 +6756,6 @@ export function MainScreen({
             paddingBottom: "calc(80px + var(--safe-area-bottom))",
           }}
         >
-          <NavHeader />
           <div
             ref={truthReelContainerRef}
             data-active-truth-index={currentTruthIndex}
@@ -6663,7 +6815,7 @@ export function MainScreen({
                   gap: "12px",
                 }}
               >
-                <div style={{ fontSize: "36px" }}>🔮</div>
+                <div style={{ fontSize: "36px" }}>?</div>
                 <p
                   style={{
                     color: "rgba(255,255,255,0.5)",
@@ -6728,7 +6880,7 @@ export function MainScreen({
               backdropFilter: "blur(8px)",
             }}
           >
-            ✕
+            X
           </button>
           {fullscreenMedia.type === "image" ? (
             <img
@@ -6791,13 +6943,15 @@ export function MainScreen({
 
       {selectedCommunityChallenge && (
         <CommunityChallengePreviewScreen
-          challenge={selectedCommunityChallenge}
+          challenge={selectedHydratedCommunityChallenge || selectedCommunityChallenge}
           isJoined={joinedCommunityChallengeIds.has(
             selectedCommunityChallenge.id,
           )}
           onClose={() => setSelectedCommunityChallenge(null)}
           onJoin={() =>
-            handleJoinCommunityChallenge(selectedCommunityChallenge.id)
+            handleJoinCommunityChallenge(
+              selectedHydratedCommunityChallenge || selectedCommunityChallenge,
+            )
           }
           onOpenHub={() => {
             setSelectedCommunityChallenge(null);

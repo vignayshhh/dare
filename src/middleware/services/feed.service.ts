@@ -168,6 +168,9 @@ class FeedService {
         SECURITY_LIMITS.postContent,
       );
       console.log("🔍 Media URL before validation:", request.media_url);
+      if (!sanitizedContent?.trim()) {
+        throw new Error("Caption is required to create a feed post.");
+      }
       const sanitizedMediaUrl = validateOptionalMediaUrl(request.media_url);
       console.log("✅ Media URL after validation:", sanitizedMediaUrl);
       try {
@@ -177,7 +180,7 @@ class FeedService {
           {
             method: "POST",
             body: JSON.stringify({
-              content: sanitizedContent || "",
+              content: sanitizedContent,
               media_url: sanitizedMediaUrl || null,
               media_type: request.media_type || "TEXT",
             }),
@@ -218,7 +221,7 @@ class FeedService {
         author_username: authorUsername,
         author_display_name: authorDisplayName,
         author_avatar_url: authorAvatarUrl,
-        content: sanitizedContent || null,
+        content: sanitizedContent,
         media_url: sanitizedMediaUrl || null,
         media_type: request.media_type || "TEXT",
         view_count: 0,
@@ -420,14 +423,14 @@ class FeedService {
 
       // ALWAYS try to get from stored avatars as backup/enhancement
       try {
-        const { useAvatarStore } = require("../../stores/avatarStore");
+        const { useAvatarStore } = await import("../../stores/avatarStore");
         const { getStoredAvatar } = useAvatarStore.getState();
         const storedAvatar = getStoredAvatar(authorId);
 
         if (storedAvatar && storedAvatar !== avatarUrl) {
           avatarUrl = storedAvatar;
         }
-      } catch (error) {}
+      } catch {}
 
       // If we have an avatar, return the author data
       if (avatarUrl || userDoc.exists()) {
@@ -1059,6 +1062,89 @@ class FeedService {
   // ─── Batch enrichment methods ──────────────────────────────────────────────
   // These fetch data for multiple posts/authors in a single Firestore query,
   // replacing the sequential N+1 pattern that caused slow feed loading.
+
+  async getPostLikePreviews(
+    postIds: string[],
+    perPostLimit = 3,
+  ): Promise<
+    Map<
+      string,
+      Array<{
+        userId: string;
+        name: string;
+        username: string;
+        avatar: string;
+        tapCount: number;
+      }>
+    >
+  > {
+    const results = new Map<
+      string,
+      Array<{
+        userId: string;
+        name: string;
+        username: string;
+        avatar: string;
+        tapCount: number;
+      }>
+    >();
+    const uniquePostIds = [...new Set(postIds.filter(Boolean))].slice(0, 12);
+    if (uniquePostIds.length === 0) return results;
+
+    try {
+      const rawByPost = new Map<string, PostLike[]>();
+
+      await Promise.all(
+        uniquePostIds.map(async (postId) => {
+          const likesRef = collection(db, "post_likes");
+          const q = query(
+            likesRef,
+            where("post_id", "==", postId),
+            limit(Math.max(1, perPostLimit)),
+          );
+          const snapshot = await getDocs(q);
+          rawByPost.set(
+            postId,
+            snapshot.docs.map((docSnap) => docSnap.data() as PostLike),
+          );
+        }),
+      );
+
+      const authorIds = [
+        ...new Set(
+          Array.from(rawByPost.values()).flatMap((likes) =>
+            likes.map((like) => like.user_id),
+          ),
+        ),
+      ];
+      const authors = await this.batchGetAuthors(authorIds);
+
+      rawByPost.forEach((likes, postId) => {
+        results.set(
+          postId,
+          likes
+            .map((like) => {
+              const author = authors.get(like.user_id);
+              const fallbackUsername = `user_${like.user_id.slice(0, 8)}`;
+
+              return {
+                userId: like.user_id,
+                name:
+                  author?.display_name || author?.username || fallbackUsername,
+                username: author?.username || fallbackUsername,
+                avatar: author?.avatar_url || "",
+                tapCount: like.tap_count || 1,
+              };
+            })
+            .sort((a, b) => b.tapCount - a.tapCount),
+        );
+      });
+    } catch (error) {
+      console.error("Error getting post like previews:", error);
+    }
+
+    return results;
+  }
 
   async batchGetAuthors(
     authorIds: string[],

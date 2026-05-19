@@ -1,11 +1,23 @@
+export type CommunityJoinPreviewUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+};
+
 export type CommunityChallenge = {
   id: string;
   typeLabel: string;
   countdown: string;
+  batchStatus?: "open" | "waiting" | "started";
+  minRequiredMembers?: number;
+  registrationEndsAtMs?: number | null;
+  batchStartedAtMs?: number | null;
   titleTop: string;
   titleAccent: string;
   joinedCount: number;
   friendNames: string[];
+  joinPreview?: CommunityJoinPreviewUser[];
   extraFriends: number;
   survivors: number;
   eliminated: number;

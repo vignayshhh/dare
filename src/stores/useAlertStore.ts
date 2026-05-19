@@ -81,24 +81,26 @@ export const useAlertStore = create<AlertState>((set, get) => ({
 
       if (response.success && response.alerts) {
         // Convert service alerts to AlertEntity instances
-        const alertEntities = response.alerts.map((alertData: any) => {
-          if (alertData instanceof AlertEntity) {
-            return alertData; // Already an AlertEntity
-          }
-          // Convert plain object to AlertEntity
-          return AlertEntity.create({
-            id: alertData.id || "",
-            userId: alertData.userId || "",
-            type: alertData.type || "SYSTEM_NOTIFICATION",
-            entityId: alertData.entityId || "",
-            actorId: alertData.actorId || "",
-            message: alertData.message || "",
-            metadata: alertData.metadata || {},
-            isRead: alertData.isRead || false,
-            createdAt: alertData.createdAt || new Date().toISOString(),
-            updatedAt: alertData.updatedAt || new Date().toISOString(),
+        const alertEntities = response.alerts
+          .filter((alertData: any) => alertData.type !== "STORY_REPLY")
+          .map((alertData: any) => {
+            if (alertData instanceof AlertEntity) {
+              return alertData; // Already an AlertEntity
+            }
+            // Convert plain object to AlertEntity
+            return AlertEntity.create({
+              id: alertData.id || "",
+              userId: alertData.userId || "",
+              type: alertData.type || "SYSTEM_NOTIFICATION",
+              entityId: alertData.entityId || "",
+              actorId: alertData.actorId || "",
+              message: alertData.message || "",
+              metadata: alertData.metadata || {},
+              isRead: alertData.isRead || false,
+              createdAt: alertData.createdAt || new Date().toISOString(),
+              updatedAt: alertData.updatedAt || new Date().toISOString(),
+            });
           });
-        });
 
         const mergedAlerts = refresh
           ? alertEntities
@@ -193,6 +195,7 @@ export const useAlertStore = create<AlertState>((set, get) => ({
 
                   return alertEntity;
                 })
+                .filter((alert) => alert.type !== "STORY_REPLY")
                 .sort(
                   (a, b) =>
                     new Date(b.createdAt).getTime() -

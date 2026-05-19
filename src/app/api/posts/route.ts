@@ -79,6 +79,12 @@ export const POST = withSecurity(
     }
 
     const content = sanitizeText(body.content);
+    if (!content) {
+      return NextResponse.json(
+        { error: "caption required" },
+        { status: 400 },
+      );
+    }
     if (content.length > MAX_CONTENT_LENGTH) {
       return NextResponse.json({ error: "content too long" }, { status: 400 });
     }
@@ -114,7 +120,7 @@ export const POST = withSecurity(
           : typeof user.avatar === "string"
             ? user.avatar
             : "",
-      content: content || null,
+      content,
       media_url: mediaUrl,
       media_type: mediaType,
       view_count: 0,

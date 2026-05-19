@@ -141,7 +141,10 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
   };
 
   const handleCreatePost = async () => {
-    if (!caption.trim() && !selectedMedia) {
+    const trimmedCaption = caption.trim();
+
+    if (!trimmedCaption) {
+      alert("Please add a caption before posting to your feed.");
       return;
     }
 
@@ -159,7 +162,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
           : null;
 
       await createPost({
-        content: caption.trim(),
+        content: trimmedCaption,
         media:
           selectedMedia && uploadedMedia
             ? {
@@ -354,6 +357,12 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
               rows={caption.length > 100 ? 3 : caption.length > 50 ? 2 : 1}
               style={{ minHeight: "40px" }}
             />
+            <div className="mt-2 flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em]">
+              <span className={caption.trim() ? "text-[#86efac]" : "text-red-300"}>
+                Caption required
+              </span>
+              <span className="text-white/30">{caption.trim().length} chars</span>
+            </div>
           </div>
         </div>
 
@@ -431,7 +440,7 @@ export function CreateFeedPostScreen({ onBack }: CreateFeedPostScreenProps) {
         <div className="mx-auto max-w-2xl">
           <button
             onClick={handleCreatePost}
-            disabled={(!caption.trim() && !selectedMedia) || isBusy}
+            disabled={!caption.trim() || isBusy}
             className="flex w-full items-center justify-center space-x-2 rounded-[20px] bg-gradient-to-r from-[#4ade80] to-[#22c55e] py-4 font-black text-black shadow-[0_16px_42px_rgba(74,222,128,0.24)] transition-all duration-200 enabled:hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
           >
             {isBusy ? (

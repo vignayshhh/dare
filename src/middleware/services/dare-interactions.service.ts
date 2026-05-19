@@ -362,17 +362,48 @@ class DareInteractionsService {
     });
   }
 
-  /** Like a comment (increment likes). */
-  async likeComment(commentId: string): Promise<void> {
+  /** Like a comment. Idempotent: one like doc per user per comment. */
+  async likeComment(commentId: string, userId: string): Promise<void> {
     try {
-      const commentRef = doc(db, "dare_comments", commentId);
-      const snap = await getDoc(commentRef);
-      if (!snap.exists()) return;
-      const current = snap.data().likes || 0;
-      await setDoc(commentRef, { likes: current + 1 }, { merge: true });
+      const likeRef = doc(db, "dare_comment_likes", `${commentId}_${userId}`);
+      const existing = await getDoc(likeRef);
+      if (existing.exists()) return;
+
+      await setDoc(likeRef, {
+        comment_id: commentId,
+        user_id: userId,
+        created_at: serverTimestamp(),
+      });
     } catch (error) {
       console.error("❌ likeComment:", error);
+      throw error;
     }
+  }
+
+  /** Subscribe to comment like count. */
+  subscribeToCommentLikeCount(
+    commentId: string,
+    callback: (count: number) => void,
+  ): Unsubscribe {
+    const q = query(
+      collection(db, "dare_comment_likes"),
+      where("comment_id", "==", commentId),
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.size);
+    });
+  }
+
+  /** Subscribe to whether the current user already liked this comment. */
+  subscribeToUserCommentLike(
+    commentId: string,
+    userId: string,
+    callback: (liked: boolean) => void,
+  ): Unsubscribe {
+    const likeRef = doc(db, "dare_comment_likes", `${commentId}_${userId}`);
+    return onSnapshot(likeRef, (snap) => {
+      callback(snap.exists());
+    });
   }
 
   // ── Share to DM ─────────────────────────────────────────────────────────
